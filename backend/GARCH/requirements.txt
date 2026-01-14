@@ -5,3 +5,9 @@ psycopg2-binary
 black
 pytest
 httpx
+arch>=5.3.0              # GARCH model
+numpy>=1.24.0
+pandas>=2.0.0
+scipy>=1.10.0
+yfinance>=0.2.0          # For fetching historical data
+python-multipart          # For file uploads
