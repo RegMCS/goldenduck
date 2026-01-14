@@ -14,6 +14,7 @@ DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@db:5432/{POSTG
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+
 def get_db():
     db = SessionLocal()
     try:
@@ -21,12 +22,14 @@ def get_db():
     finally:
         db.close()
 
+
 @app.get("/")
 def read_root():
     return {"message": "Hello from GARCH service!"}
 
+
 @app.get("/health")
-def health_check(db = Depends(get_db)):
+def health_check(db=Depends(get_db)):
     try:
         # Try to execute a simple query to check DB connection
         db.execute(text("SELECT 1"))

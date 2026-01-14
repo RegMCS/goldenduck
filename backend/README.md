@@ -6,6 +6,7 @@ This directory contains the backend services for the GoldenDuck project, featuri
 
 - **db**: PostgreSQL 15 database.
 - **garch**: FastAPI application serving the GARCH model.
+- **flyway**: Database migration tool.
 
 ## Getting Started
 

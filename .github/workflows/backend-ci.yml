@@ -1,0 +1,30 @@
+name: Backend CI
+
+on:
+  push:
+    paths:
+      - 'backend/**'
+  pull_request:
+    paths:
+      - 'backend/**'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./backend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Build Docker images
+        run: docker compose -f docker-compose.yml build
+
+      - name: Run Linting (Black)
+        run: docker compose run --rm garch black --check .
+
+      - name: Run Tests
+        run: docker compose run --rm garch python -m pytest
+
