@@ -7,7 +7,15 @@ client = TestClient(app)
 def test_read_root():
     response = client.get("/")
     assert response.status_code == 200
-    assert response.json() == {"message": "Hello from GARCH service!"}
+    assert response.json() == {
+        "message": "GARCH Synthetic Data Generator API",
+        "version": "1.0.0",
+        "endpoints": {
+            "generate": "/api/generate",
+            "status": "/api/status/{job_id}",
+            "download": "/api/download/{job_id}",
+        },
+    }
 
 
 def test_health_check_mock_db():
