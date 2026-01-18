@@ -3,8 +3,8 @@ import sys
 import logging
 
 logging.basicConfig(
-    level=logging.INFO,   # use DEBUG if you want everything
-    format="%(asctime)s | %(name)s | %(levelname)s | %(message)s"
+    level=logging.INFO,  # use DEBUG if you want everything
+    format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
 )
 
 PROJECT_ROOT = "/app"

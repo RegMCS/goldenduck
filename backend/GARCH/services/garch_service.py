@@ -89,7 +89,7 @@ class GARCHService:
         best_result = None
         best_model = None
 
-        for dist in ["t", "skewt"]:   # safe → expressive
+        for dist in ["t", "skewt"]:  # safe → expressive
             for attempt in range(2):  # bounded retries
                 result = self._fit_once(
                     historical_data=historical_data,

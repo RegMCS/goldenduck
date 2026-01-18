@@ -25,6 +25,9 @@ services:
     build: ./GARCH
     ports:
       - "8000:8000"
+    volumes:
+      - .:/app
+    working_dir: /app
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}

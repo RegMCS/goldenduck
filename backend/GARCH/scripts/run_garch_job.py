@@ -93,7 +93,6 @@ def main():
             print(f"Saved results to {filename}")
             break
 
-
         if status == "failed":
             print(f"Job failed: {data.get('error')}")
             break

@@ -143,9 +143,7 @@ def generate_garch_background(job_id: str, historical_data, request: GenerateReq
 
         # Fit model
         logger.info(f"Fitting GARCH({request.p},{request.q}) model")
-        params = garch.fit_with_retry(
-            historical_data, p=request.p, q=request.q
-        )
+        params = garch.fit_with_retry(historical_data, p=request.p, q=request.q)
         jobs[job_id]["parameters"] = params
 
         # Generate scenarios

@@ -2,7 +2,7 @@ fastapi
 uvicorn
 sqlalchemy
 psycopg2-binary
-black
+black==26.1.0
 pytest
 httpx
 arch>=5.3.0              # GARCH model

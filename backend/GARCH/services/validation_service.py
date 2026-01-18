@@ -34,7 +34,7 @@ class ValidationService:
         # Kurtosis (fat tails)
         hist_kurt = stats.kurtosis(hist_returns)
         synth_kurt = stats.kurtosis(synth_returns)
-       
+
         # Skewness (asymmetry)
         hist_skew = stats.skew(hist_returns)
         synth_skew = stats.skew(synth_returns)
