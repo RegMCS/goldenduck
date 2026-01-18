@@ -45,6 +45,51 @@ This directory contains the backend services for the GoldenDuck project, featuri
    docker-compose logs -f garch
    ```
 
+## CLI Runner (Recommended)
+
+For convenience, an end‑to‑end CLI runner script automates the GARCH workflow without manual `curl` calls.
+
+- Submits a GARCH job to the backend
+- Polls job status automatically
+- Prints model parameters and validation metrics
+- Downloads the generated CSV results
+
+**Location:** `scripts/run_garch_job.py`
+
+### Usage
+
+Run the script from the backend directory (ensure services are up):
+
+```bash
+cd backend
+python3 scripts/run_garch_job.py --ticker AAPL
+```
+
+### Defaults
+- `num_scenarios`: `100`
+- `horizon`: `252`
+- `p`: `1`, `q`: `1`
+
+### Custom Configuration
+
+Parameterize the job with flags:
+
+```bash
+python3 scripts/run_garch_job.py \
+  --ticker AAPL \
+  --scenarios 1000 \
+  --horizon 252 \
+  --p 1 \
+  --q 1
+```
+
+### Options
+
+- `--ticker` (required): Symbol like `AAPL`, `GLD`, `BTC-USD`
+- `--scenarios` (default: `100`): Number of paths to generate
+- `--horizon` (default: `252`): Forecast horizon in days
+- `--p`, `--q` (default: `1`): GARCH model orders
+
 ### Quick Test
 
 Test the GARCH model with a simple request:

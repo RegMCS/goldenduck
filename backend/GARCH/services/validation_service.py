@@ -34,6 +34,10 @@ class ValidationService:
         # Kurtosis (fat tails)
         hist_kurt = stats.kurtosis(hist_returns)
         synth_kurt = stats.kurtosis(synth_returns)
+       
+        # Skewness (asymmetry)
+        hist_skew = stats.skew(hist_returns)
+        synth_skew = stats.skew(synth_returns)
 
         # Autocorrelation (volatility clustering)
         hist_acf = acf(hist_returns**2, nlags=10, fft=False)[1]
@@ -44,6 +48,8 @@ class ValidationService:
             "ks_pvalue": float(ks_pval),
             "kurtosis_historical": float(hist_kurt),
             "kurtosis_synthetic": float(synth_kurt),
+            "skewness_historical": float(hist_skew),
+            "skewness_synthetic": float(synth_skew),
             "acf_lag1_historical": float(hist_acf),
             "acf_lag1_synthetic": float(synth_acf),
         }

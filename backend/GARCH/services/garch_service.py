@@ -18,59 +18,109 @@ class GARCHService:
         self.historical_data = None
         self.scale_factor = 100  # For numerical stability
 
-    def fit_model(
-        self, historical_data: pd.DataFrame, p: int = 1, q: int = 1, dist="normal"
+    def _fit_once(
+        self,
+        historical_data: pd.DataFrame,
+        p: int,
+        q: int,
+        dist: str,
     ) -> Dict:
         """
-        Fit GARCH model with optional Student-t distribution
-
-        Args:
-            dist: 'normal', 't' (Student-t), or 'skewt' (skewed Student-t)
+        Single attempt to fit a GARCH model.
         """
-        try:
-            self.historical_data = historical_data
+        self.historical_data = historical_data
 
-            # Calculate returns
-            close_prices = historical_data["Close"].values
-            returns = np.log(close_prices[1:] / close_prices[:-1])
+        # Calculate log returns
+        close_prices = historical_data["Close"].values
+        returns = np.log(close_prices[1:] / close_prices[:-1])
 
-            # Scale returns by 100 for numerical stability
-            scaled_returns = returns * self.scale_factor
+        # Scale for numerical stability
+        scaled_returns = returns * self.scale_factor
 
-            # Fit GARCH model
-            model = arch_model(
-                scaled_returns,
-                vol="GARCH",
-                p=p,
-                q=q,
-                mean="Zero",
-                dist=dist,  # ← 'normal', 't', or 'skewt'
-                rescale=False,
-            )
-            self.fitted_model = model.fit(disp="off", options={"maxiter": 5000})
+        model = arch_model(
+            scaled_returns,
+            vol="GARCH",
+            p=p,
+            q=q,
+            mean="Zero",
+            dist=dist,
+            rescale=False,
+        )
 
-            # Check convergence
-            if not self.fitted_model.convergence_flag:
-                logger.warning("GARCH model did not converge")
-            else:
-                logger.info("GARCH model converged successfully")
+        fitted = model.fit(disp="off", options={"maxiter": 5000})
 
-            # Extract parameters
-            params = {
-                "omega": float(self.fitted_model.params["omega"]),
-                "alpha": float(self.fitted_model.params.get("alpha[1]", 0)),
-                "beta": float(self.fitted_model.params.get("beta[1]", 0)),
-                "converged": bool(self.fitted_model.convergence_flag),
-                "aic": float(self.fitted_model.aic),
-                "bic": float(self.fitted_model.bic),
-            }
+        # Store fitted model (IMPORTANT)
+        self.fitted_model = fitted
 
-            logger.info(f"GARCH({p},{q}) fitted: {params}")
-            return params
+        params = {
+            "omega": float(fitted.params.get("omega", np.nan)),
+            "alpha": float(fitted.params.get("alpha[1]", np.nan)),
+            "beta": float(fitted.params.get("beta[1]", np.nan)),
+            "converged": bool(fitted.convergence_flag),
+            "aic": float(fitted.aic),
+            "bic": float(fitted.bic),
+            "distribution": dist,
+        }
 
-        except Exception as e:
-            logger.error(f"Error fitting GARCH model: {e}")
-            raise
+        # Optional skew-t params
+        if dist in ("t", "skewt") and "nu" in fitted.params:
+            params["nu"] = float(fitted.params["nu"])
+        if dist == "skewt" and "lambda" in fitted.params:
+            params["lambda"] = float(fitted.params["lambda"])
+
+        logger.info(
+            f"Fit attempt: dist={dist}, converged={params['converged']}, "
+            f"AIC={params['aic']:.2f}"
+        )
+
+        return params
+
+    def fit_with_retry(
+        self,
+        historical_data: pd.DataFrame,
+        p: int = 1,
+        q: int = 1,
+    ) -> Dict:
+        """
+        Fit GARCH model with bounded retries across distributions.
+        Convergence is preferred but not forced.
+        """
+
+        best_result = None
+        best_model = None
+
+        for dist in ["t", "skewt"]:   # safe → expressive
+            for attempt in range(2):  # bounded retries
+                result = self._fit_once(
+                    historical_data=historical_data,
+                    p=p,
+                    q=q,
+                    dist=dist,
+                )
+
+                # Keep first result as baseline
+                if best_result is None:
+                    best_result = result
+                    best_model = self.fitted_model
+
+                # Prefer converged models immediately
+                if result["converged"]:
+                    logger.info(
+                        f"GARCH converged using dist={dist} on attempt={attempt+1}"
+                    )
+                    return result
+
+                # Otherwise keep the statistically better one
+                if result["aic"] < best_result["aic"]:
+                    best_result = result
+                    best_model = self.fitted_model
+
+        # Restore best non-converged model ONCE
+        if best_model is not None:
+            self.fitted_model = best_model
+
+        logger.warning("No converged model found; returning best non-converged fit")
+        return best_result
 
     def generate_scenarios(
         self,
@@ -82,7 +132,7 @@ class GARCHService:
         Generate multiple synthetic OHLCV scenarios (one at a time for reliability)
         """
         if self.fitted_model is None:
-            raise ValueError("Must fit model first! Call fit_model()")
+            raise ValueError("Must fit model first! Call fit_with_retry()")
 
         try:
             logger.info(
