@@ -121,6 +121,43 @@ Check job status:
 curl http://localhost:8000/api/status/{job_id}
 ```
 
+
+## Evaluation Runner
+
+Run controlled evaluation experiments across multiple distributions and tickers.
+
+- Evaluates `normal`, `t`, and `skewt` distributions
+- Prints parameters and validation metrics per ticker
+- Useful for quick model comparison and sanity checks
+
+**Location (host):** `GARCH/scripts/run_evaluation.py`  
+**Location (container):** `scripts/run_evaluation.py`  
+**Tickers:** Configure in `GARCH/config/tickers.py` (`SUPPORTED_TICKERS`)
+
+### Run (inside container)
+
+```bash
+docker-compose exec garch python scripts/run_evaluation.py
+```
+
+### What It Does
+
+- Downloads historical data for each ticker in `SUPPORTED_TICKERS`
+- Runs `EvaluationRunner.compare_distributions(["normal","t","skewt"])`
+- Prints per‑distribution results for each ticker
+
+### Example Output
+
+```plaintext
+=== Evaluating AAPL ===
+{ 'AAPL': {
+    'normal': { 'parameters': {...}, 'metrics': {...}, 'num_scenarios': 500, 'horizon': 252 },
+    't':      { 'parameters': {...}, 'metrics': {...}, 'num_scenarios': 500, 'horizon': 252 },
+    'skewt':  { 'parameters': {...}, 'metrics': {...}, 'num_scenarios': 500, 'horizon': 252 }
+  }
+}
+```
+
 ### Stopping Services
 
 ```bash

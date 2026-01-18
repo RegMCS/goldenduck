@@ -139,7 +139,7 @@ class GARCHService:
                 f"Starting generation of {num_scenarios} scenarios, {horizon} days each"
             )
 
-            initial_price_value = float(self.historical_data["Close"].iloc[-1])
+            initial_price_value = float(self.historical_data["Close"].iloc[-1].item())
             scenarios = []
 
             for scenario_idx in range(num_scenarios):

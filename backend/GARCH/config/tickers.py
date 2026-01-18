@@ -1,0 +1,3 @@
+SUPPORTED_TICKERS = [
+    "AAPL"
+]
