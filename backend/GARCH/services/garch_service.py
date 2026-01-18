@@ -250,7 +250,7 @@ class GARCHService:
         Validate synthetic data quality
         """
         try:
-            from services.validation_service import ValidationService
+            from GARCH.services.validation_service import ValidationService
 
             validator = ValidationService(self.historical_data)
 

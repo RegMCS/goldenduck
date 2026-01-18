@@ -14,8 +14,9 @@ if PROJECT_ROOT not in sys.path:
 import pprint
 import yfinance as yf
 
-from services.evaluation_runner import EvaluationRunner
-from config.tickers import SUPPORTED_TICKERS
+from GARCH.services.evaluation_runner import EvaluationRunner
+from GARCH.config.tickers import SUPPORTED_TICKERS
+from GARCH.scripts.generate_report import generate_markdown_report
 
 pp = pprint.PrettyPrinter(indent=2)
 
@@ -36,3 +37,8 @@ for ticker in SUPPORTED_TICKERS:
     all_results[ticker] = results
 
 pp.pprint(all_results)
+
+report_path = "/app/reports/garch_evaluation_report.md"
+generate_markdown_report(all_results, report_path)
+
+print(f"\n📄 Report saved to {report_path}")

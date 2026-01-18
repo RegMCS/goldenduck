@@ -2,7 +2,7 @@ import logging
 from typing import Dict, List
 import numpy as np
 
-from services.garch_service import GARCHService
+from GARCH.services.garch_service import GARCHService
 
 logger = logging.getLogger(__name__)
 

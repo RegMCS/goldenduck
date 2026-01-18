@@ -9,13 +9,13 @@ import yfinance as yf
 import logging
 from datetime import datetime
 
-from models.schemas import (
+from GARCH.models.schemas import (
     GenerateRequest,
     GenerateResponse,
     GARCHParameters,
     ValidationMetrics,
 )
-from services.garch_service import GARCHService
+from GARCH.services.garch_service import GARCHService
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
