@@ -16,3 +16,6 @@ venv/
 # IDEs
 .vscode/
 .idea/
+
+# GARCH output files
+GARCH/output/
