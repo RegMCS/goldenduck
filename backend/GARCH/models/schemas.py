@@ -48,6 +48,7 @@ class ValidationMetrics(BaseModel):
     kurtosis_synthetic: float
     acf_lag1_historical: float
     acf_lag1_synthetic: float
+    error: Optional[str] = None
 
 
 class GenerateResponse(BaseModel):

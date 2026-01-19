@@ -273,7 +273,7 @@ class GARCHService:
 
         except Exception as e:
             logger.error(f"Error during validation: {e}", exc_info=True)
-            # Return empty metrics rather than failing
+            # Return metrics with error flag to indicate validation failure
             return {
                 "ks_statistic": 0.0,
                 "ks_pvalue": 0.0,
@@ -281,4 +281,5 @@ class GARCHService:
                 "kurtosis_synthetic": 0.0,
                 "acf_lag1_historical": 0.0,
                 "acf_lag1_synthetic": 0.0,
+                "error": str(e),
             }
