@@ -1,6 +1,5 @@
 import logging
 from typing import Dict, List
-import numpy as np
 
 from GARCH.services.garch_service import GARCHService
 
