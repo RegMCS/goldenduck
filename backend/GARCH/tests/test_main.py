@@ -4,9 +4,18 @@ import pandas as pd
 import numpy as np
 import os
 import tempfile
+import pytest
 from GARCH.main import app, jobs
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def cleanup_jobs():
+    """Fixture to clean up jobs dictionary before and after each test"""
+    jobs.clear()
+    yield
+    jobs.clear()
 
 
 def test_read_root():
@@ -36,7 +45,8 @@ def test_health_check_mock_db():
 
 def test_generate_api_success():
     """Test successful job submission for synthetic data generation"""
-    # Mock yfinance data
+    # Use fixed seed for reproducible test data
+    np.random.seed(42)
     mock_data = pd.DataFrame({
         'Close': np.random.uniform(100, 200, 500),
         'Open': np.random.uniform(100, 200, 500),
@@ -45,7 +55,8 @@ def test_generate_api_success():
         'Volume': np.random.uniform(1000000, 10000000, 500),
     })
     
-    with patch('yfinance.download', return_value=mock_data):
+    # Patch where yfinance is actually used in the main module
+    with patch('GARCH.main.yf.download', return_value=mock_data):
         response = client.post(
             "/api/generate",
             json={
@@ -63,10 +74,6 @@ def test_generate_api_success():
     assert "job_id" in data
     assert data["status"] == "queued"
     assert "Track progress" in data["message"]
-    
-    # Clean up job from in-memory storage
-    if data["job_id"] in jobs:
-        del jobs[data["job_id"]]
 
 
 def test_generate_api_invalid_ticker():
@@ -74,7 +81,7 @@ def test_generate_api_invalid_ticker():
     # Mock yfinance to return empty dataframe
     empty_data = pd.DataFrame()
     
-    with patch('yfinance.download', return_value=empty_data):
+    with patch('GARCH.main.yf.download', return_value=empty_data):
         response = client.post(
             "/api/generate",
             json={
@@ -156,9 +163,6 @@ def test_status_api_existing_job():
     assert "download_url" in data
     assert "parameters" in data
     assert "validation_metrics" in data
-    
-    # Clean up
-    del jobs[job_id]
 
 
 def test_status_api_nonexistent_job():
@@ -200,10 +204,6 @@ def test_status_api_different_statuses():
     assert data["status"] == "generating"
     assert data["progress"] == 5
     assert data["total"] == 10
-    
-    # Clean up
-    del jobs[job_id_failed]
-    del jobs[job_id_generating]
 
 
 def test_download_api_success():
@@ -226,9 +226,6 @@ def test_download_api_success():
         assert response.status_code == 200
         assert response.headers["content-type"] == "text/csv; charset=utf-8"
         assert "scenario_id" in response.text
-        
-        # Clean up
-        del jobs[job_id]
     finally:
         os.unlink(temp_file)
 
@@ -251,16 +248,10 @@ def test_download_api_incomplete_job():
     response = client.get(f"/api/download/{job_id}")
     assert response.status_code == 400
     assert "not completed" in response.json()["detail"]
-    
-    # Clean up
-    del jobs[job_id]
 
 
 def test_jobs_api_list_all():
     """Test listing all jobs"""
-    # Clear any existing jobs first
-    jobs.clear()
-    
     # Create multiple mock jobs
     jobs["job-1"] = {
         "status": "completed",
@@ -285,16 +276,10 @@ def test_jobs_api_list_all():
     assert "job-1" in job_ids
     assert "job-2" in job_ids
     assert "job-3" in job_ids
-    
-    # Clean up
-    jobs.clear()
 
 
 def test_jobs_api_empty_list():
     """Test listing jobs when no jobs exist"""
-    # Ensure jobs dict is empty for this test
-    jobs.clear()
-    
     response = client.get("/api/jobs")
     assert response.status_code == 200
     data = response.json()
