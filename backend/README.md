@@ -137,7 +137,7 @@ Run controlled evaluation experiments across multiple distributions and tickers.
 ### Run (inside container)
 
 ```bash
-docker-compose exec garch python scripts/run_evaluation.py
+docker-compose exec garch python GARCH/scripts/run_evaluation.py
 ```
 
 ### What It Does
