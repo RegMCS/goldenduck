@@ -21,17 +21,10 @@ This directory contains the backend services for the GoldenDuck project, featuri
 
    ```bash
    cd backend
+   source docker-compose.env
+   docker-compose up -d --build
    ```
-
-2. Start the services (specifying the env file):
-
-   ```bash
-   docker-compose --env-file docker-compose.env up -d --build
-   ```
-
-3. Verify:
-   - FASTAPI Docs: `http://localhost:8000/docs`
-   - Health Check: `http://localhost:8000/health`
+   
 
 ## GARCH Model Design
 
