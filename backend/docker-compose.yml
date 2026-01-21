@@ -42,7 +42,7 @@ services:
   worker:
     build: .
     container_name: garch-worker
-    command: python worker/worker.py
+    command: python worker/garch-worker.py
     volumes:
       - .:/app
       - ./output:/app/output
