@@ -31,6 +31,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 logger.info("GARCH worker started, waiting for jobs...")
 
 while True:
+    job_id = None
     try:
         # Block until a job arrives
         _, job_id = redis_client.brpop("queue:garch")
@@ -97,9 +98,11 @@ while True:
         logger.info(f"Job {job_id} completed successfully")
 
     except Exception as e:
-        logger.exception(f"Job {job_id} failed: {e}")
-
-        redis_client.set(f"job:{job_id}:status", "failed")
-        redis_client.set(f"job:{job_id}:error", str(e))
+        if job_id is not None:
+            logger.exception(f"Job {job_id} failed: {e}")
+            redis_client.set(f"job:{job_id}:status", "failed")
+            redis_client.set(f"job:{job_id}:error", str(e))
+        else:
+            logger.exception(f"Worker error (no job picked up): {e}")
 
         time.sleep(1)
