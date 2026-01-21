@@ -1,7 +1,9 @@
 import json
+import os
 import uuid
 from datetime import datetime
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 
 from backend_app.redis_client import redis_client
 from backend_app.schemas.jobs import GenerateRequest, GenerateResponse
@@ -46,9 +48,6 @@ async def get_job_status(job_id: str):
 
 @router.get("/download/{job_id}")
 async def download_results(job_id: str):
-    from fastapi.responses import FileResponse
-    import os
-
     output_file = job_store.get_output_file(job_id)
 
     if not output_file or not os.path.exists(output_file):
