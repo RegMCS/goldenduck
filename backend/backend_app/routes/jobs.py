@@ -51,11 +51,24 @@ async def download_results(job_id: str):
 
     output_file = job_store.get_output_file(job_id)
 
-    if not output_file or not os.path.exists(output_file):
+    if not output_file:
+        raise HTTPException(status_code=404, detail="File not ready")
+
+    # Validate that the output_file path is within the expected OUTPUT_DIR
+    # to prevent path traversal attacks
+    OUTPUT_DIR = os.path.abspath("output")
+    output_file_abs = os.path.abspath(output_file)
+    output_file_real = os.path.realpath(output_file_abs)
+    output_dir_real = os.path.realpath(OUTPUT_DIR)
+
+    if not output_file_real.startswith(output_dir_real + os.sep):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not os.path.exists(output_file_real):
         raise HTTPException(status_code=404, detail="File not ready")
 
     return FileResponse(
-        output_file,
+        output_file_real,
         media_type="text/csv",
         filename=f"synthetic_garch_{job_id}.csv",
     )
