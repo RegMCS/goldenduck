@@ -73,11 +73,8 @@ async def download_results(job_id: str):
     if not output_file_path.exists():
         raise HTTPException(status_code=404, detail="File not ready")
 
-    return Fi
-  
-  
-  (
-        str(output_file_path),
+    return FileResponse(
+        path=str(output_file_path),
         media_type="text/csv",
         filename=f"synthetic_garch_{job_id}.csv",
     )
