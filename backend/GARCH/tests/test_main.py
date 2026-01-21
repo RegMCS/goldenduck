@@ -128,7 +128,11 @@ def test_status_api_nonexistent_job(mock_job_store):
 
 
 def test_download_api_success(mock_job_store):
-    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv") as f:
+    # Create file in the output directory to pass path validation
+    os.makedirs("output", exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w", delete=False, suffix=".csv", dir="output"
+    ) as f:
         f.write("a,b,c\n1,2,3\n")
         temp_file = f.name
 
@@ -151,3 +155,47 @@ def test_download_api_file_not_ready(mock_job_store):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "File not ready"
+
+
+def test_download_api_path_traversal_attack(mock_job_store):
+    """Test that path traversal attacks are prevented"""
+    # Attempt to access a file outside the OUTPUT_DIR
+    mock_job_store.get_output_file.return_value = "/etc/passwd"
+
+    response = client.get("/api/download/test-job")
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Access denied"
+
+
+def test_download_api_path_traversal_with_relative_path(mock_job_store):
+    """Test that relative path traversal attempts are prevented"""
+    # Attempt to use relative path to escape OUTPUT_DIR
+    mock_job_store.get_output_file.return_value = "output/../../etc/passwd"
+
+    response = client.get("/api/download/test-job")
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Access denied"
+
+
+def test_download_api_valid_path_in_output_dir(mock_job_store):
+    """Test that valid paths within OUTPUT_DIR are allowed"""
+    # Create a file in the output directory
+    os.makedirs("output", exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w", delete=False, suffix=".csv", dir="output"
+    ) as f:
+        f.write("scenario,value\n1,100\n")
+        temp_file = f.name
+
+    try:
+        mock_job_store.get_output_file.return_value = temp_file
+
+        response = client.get("/api/download/test-job")
+
+        assert response.status_code == 200
+        assert "text/csv" in response.headers["content-type"]
+        assert "scenario,value" in response.text
+    finally:
+        os.unlink(temp_file)
