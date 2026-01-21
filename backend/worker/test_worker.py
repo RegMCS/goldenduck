@@ -37,7 +37,7 @@ class TestRedisClientCreation:
         def mock_connect():
             nonlocal attempts
             attempts += 1
-            if attempts < 3:
+            if attempts < max_attempts:
                 raise RedisConnectionError("Connection failed")
             return True
         
@@ -50,7 +50,7 @@ class TestRedisClientCreation:
             except RedisConnectionError:
                 pass
         
-        assert attempts == 3
+        assert attempts == max_attempts
 
 
 class TestJobProcessing:
