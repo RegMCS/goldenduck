@@ -22,6 +22,8 @@ This directory contains the backend services for the GoldenDuck project, featuri
 
    ```bash
    cd backend
+   source docker-compose.env
+   docker-compose up -d --build
    ```
 
 2. Start all services:
