@@ -21,23 +21,36 @@ services:
     volumes:
       - redis_data:/data
 
-  garch:
-    build: ./GARCH
+  api:
+    build: .
+    container_name: garch-api
+    command: uvicorn backend_app.main:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
     volumes:
       - .:/app
-    working_dir: /app
+      - ./output:/app/output
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379
+      PYTHONPATH: /app
+
     depends_on:
       - db
       - redis
-    command: uvicorn GARCH.main:app --host 0.0.0.0 --port 8000
+
+  worker:
+    build: .
+    container_name: garch-worker
+    command: python worker/worker.py
+    volumes:
+      - .:/app
+      - ./output:/app/output
+    environment:
+      PYTHONPATH: /app
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      - redis
 
   flyway:
     image: flyway/flyway

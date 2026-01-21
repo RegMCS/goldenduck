@@ -1,4 +1,3 @@
-# services/garch_service.py
 import numpy as np
 import pandas as pd
 from arch import arch_model
@@ -56,7 +55,7 @@ class GARCHService:
             "omega": float(fitted.params.get("omega", np.nan)),
             "alpha": float(fitted.params.get("alpha[1]", np.nan)),
             "beta": float(fitted.params.get("beta[1]", np.nan)),
-            "converged": bool(fitted.convergence_flag),
+            "converged": fitted.convergence_flag == 0,
             "aic": float(fitted.aic),
             "bic": float(fitted.bic),
             "distribution": dist,

@@ -81,7 +81,7 @@ def main():
 
     print(f"Job started: {job_id}")
 
-    # 2️⃣ Poll status
+    # Poll status
     while True:
         try:
             resp = requests.get(f"{BASE_URL}/api/status/{job_id}", timeout=10)
@@ -120,15 +120,13 @@ def main():
         if status == "completed":
             print("\nJob completed")
 
-            # ---- Print GARCH parameters ----
             params = data.get("parameters", {})
-            print("\nGARCH Parameters:")
+            print("\nParameters:")
             for k, v in params.items():
                 print(f"  {k}: {v}")
 
-            # ---- Print validation metrics ----
-            metrics = data.get("validation_metrics", {})
-            print("\nValidation Metrics:")
+            metrics = data.get("metrics", {})
+            print("\nMetrics:")
             for k, v in metrics.items():
                 print(f"  {k}: {v}")
 
