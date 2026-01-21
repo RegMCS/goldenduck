@@ -67,7 +67,7 @@ while True:
             raise ValueError(f"No market data returned for ticker {ticker}")
 
         garch = GARCHService()
-        params = garch.fit_with_retry(data, p=req["p"], q=req["q"])
+        params = garch.fit_with_retry(data, p=p, q=q)
 
         scenarios = garch.generate_scenarios(
             num_scenarios=num_scenarios,
