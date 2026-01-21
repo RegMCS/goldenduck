@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 
 from backend_app.redis_client import redis_client
 from backend_app.schemas.jobs import GenerateRequest, GenerateResponse
@@ -72,7 +73,10 @@ async def download_results(job_id: str):
     if not output_file_path.exists():
         raise HTTPException(status_code=404, detail="File not ready")
 
-    return FileResponse(
+    return Fi
+  
+  
+  (
         str(output_file_path),
         media_type="text/csv",
         filename=f"synthetic_garch_{job_id}.csv",
