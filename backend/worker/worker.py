@@ -17,6 +17,7 @@ logger = logging.getLogger("garch-worker")
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 
+
 def create_redis_client(retry_delay: int = 5) -> redis.Redis:
     """
     Create a Redis client and validate the connection.
@@ -33,7 +34,9 @@ def create_redis_client(retry_delay: int = 5) -> redis.Redis:
             )
             # Force a connection attempt to validate that Redis is reachable
             client.ping()
-            logger.info("Successfully connected to Redis at %s:%s", REDIS_HOST, REDIS_PORT)
+            logger.info(
+                "Successfully connected to Redis at %s:%s", REDIS_HOST, REDIS_PORT
+            )
             return client
         except Exception as e:
             logger.error(
@@ -44,6 +47,7 @@ def create_redis_client(retry_delay: int = 5) -> redis.Redis:
                 retry_delay,
             )
             time.sleep(retry_delay)
+
 
 redis_client = create_redis_client()
 OUTPUT_DIR = "output"
