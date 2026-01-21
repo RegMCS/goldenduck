@@ -8,6 +8,7 @@ import uuid
 import yfinance as yf
 import logging
 from datetime import datetime
+import pandas as pd
 
 from models.schemas import (
     GenerateRequest,
@@ -16,6 +17,7 @@ from models.schemas import (
     ValidationMetrics,
 )
 from services.garch_service import GARCHService
+from services.msgarch_service import MSGARCHService
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -39,7 +41,6 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # Job storage (in-memory for PoC, move to Redis/DB for production)
 jobs = {}
 
-
 def get_db():
     db = SessionLocal()
     try:
@@ -49,8 +50,6 @@ def get_db():
 
 
 # ========== EXISTING ENDPOINTS ==========
-
-
 @app.get("/")
 def read_root():
     return {
@@ -261,3 +260,118 @@ async def list_jobs():
             for job_id, job in jobs.items()
         ],
     }
+
+# ========== MS-GARCH ENDPOINTS ==========
+@app.post("/api/generate-ms", response_model=GenerateResponse)
+async def generate_ms_garch(
+    request: GenerateRequest,
+    background_tasks: BackgroundTasks,
+):
+    """
+    Generate synthetic OHLCV data using MS-GARCH model
+    """
+    job_id = str(uuid.uuid4())
+
+    try:
+        # Initialize job status
+        jobs[job_id] = {
+            "status": "initializing",
+            "progress": 0,
+            "total": request.num_scenarios,
+            "created_at": datetime.now().isoformat(),
+            "parameters": None,
+            "validation_metrics": None,
+            "error": None,
+        }
+
+        # Fetch historical data
+        logger.info(f"Fetching historical data for {request.ticker} (MS-GARCH)")
+        historical_data = yf.download(request.ticker, period="2y", progress=False)
+
+        if historical_data.empty:
+            raise HTTPException(
+                status_code=404, detail=f"No data found for ticker {request.ticker}"
+            )
+
+        # Submit background task (same pattern as GARCH)
+        background_tasks.add_task(
+            generate_msgarch_background, job_id, historical_data, request
+        )
+
+        return GenerateResponse(
+            job_id=job_id,
+            status="queued",
+            message=f"MS-GARCH job submitted. Track progress at /api/status/{job_id}",
+        )
+
+    except Exception as e:
+        logger.error(f"Error submitting MS-GARCH job: {e}")
+        jobs[job_id]["status"] = "failed"
+        jobs[job_id]["error"] = str(e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def generate_msgarch_background(job_id: str, historical_data, request: GenerateRequest):
+    """
+    Background task for MS-GARCH generation.
+    Mirrors generate_garch_background but uses MSGARCHService.
+    """
+    try:
+        jobs[job_id]["status"] = "fitting_model"
+
+        # Initialize MS-GARCH service
+        msgarch = MSGARCHService()
+
+        # Fit model
+        logger.info(f"Fitting MS-GARCH(2 regimes) with GARCH({request.p},{request.q}) per regime")
+        ms_params = msgarch.fit_model(
+            historical_data=historical_data,
+            p=request.p,
+            q=request.q,
+            dist="normal",
+            n_iter=10,
+        )
+        jobs[job_id]["parameters"] = ms_params
+
+        # Generate scenarios
+        jobs[job_id]["status"] = "generating"
+        logger.info(f"Generating {request.num_scenarios} MS-GARCH scenarios")
+
+        scenarios = msgarch.generate_scenarios(
+            num_scenarios=request.num_scenarios,
+            horizon=request.horizon,
+            volatility_multiplier=request.volatility_multiplier,
+        )
+
+        # Validate
+        jobs[job_id]["status"] = "validating"
+        validation_metrics = msgarch.validate_scenarios(scenarios)
+        jobs[job_id]["validation_metrics"] = validation_metrics
+
+        # Save to CSV (same as GARCH)
+        jobs[job_id]["status"] = "saving"
+        output_dir = "output"
+        os.makedirs(output_dir, exist_ok=True)
+
+        all_data = []
+        for i, scenario in enumerate(scenarios):
+            scenario_df = scenario.copy()
+            scenario_df["scenario_id"] = i + 1
+            scenario_df["day"] = range(1, len(scenario_df) + 1)
+            all_data.append(scenario_df)
+
+        combined = pd.concat(all_data, ignore_index=True)
+        output_path = f"{output_dir}/{job_id}.csv"
+        combined.to_csv(output_path, index=False)
+
+        # Update job status
+        jobs[job_id]["status"] = "completed"
+        jobs[job_id]["output_file"] = output_path
+        jobs[job_id]["num_scenarios"] = len(scenarios)
+
+        logger.info(f"MS-GARCH Job {job_id} completed successfully")
+
+    except Exception as e:
+        logger.error(f"Error in MS-GARCH background task: {e}", exc_info=True)
+        jobs[job_id]["status"] = "failed"
+        jobs[job_id]["error"] = str(e)
