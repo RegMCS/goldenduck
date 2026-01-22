@@ -90,6 +90,10 @@ class MSGARCHService:
         # EM-ish loop - iteration algo - Expectation-Maximization - can read up if you want
         prev_ll = -np.inf
         converged = False
+
+        prev_params = None
+        param_diff = np.inf
+
         for it in range(n_iter):
             
             # E-step: compute conditional likelihoods under each regime model
@@ -114,6 +118,19 @@ class MSGARCHService:
                 fallback_models=self.regime_models,
             )
 
+            # --- Add after 'models_new =' inside the loop ---
+            # Extract omega, alpha, beta for both regimes into one array
+            current_params = np.array([[m.params['omega'], m.params.get('alpha[1]', 0), m.params.get('beta[1]', 0)] for m in models_new])
+            
+            if prev_params is not None:
+                param_diff = np.mean(np.abs(current_params - prev_params))
+            
+            ll_diff = abs(ll - prev_ll) if np.isfinite(prev_ll) else np.inf
+
+            # Update your convergence check
+            if ll_diff < 1e-1 and param_diff < 1e-4:
+                converged = True
+
             # Check improvement
             logger.info(f"MS-GARCH iter {it+1}/{n_iter}: loglik={ll:.2f}")
             if np.isfinite(prev_ll) and abs(ll - prev_ll) < 1e-1:
@@ -126,6 +143,7 @@ class MSGARCHService:
             P, self.regime_models = P_new, models_new
             self.filtered_probs = filtered_probs
             prev_ll = ll
+            prev_params = current_params
 
         self.P = P
         self.regime_params = self._extract_regime_params(self.regime_models, dist=dist)
@@ -133,6 +151,7 @@ class MSGARCHService:
         out = {
             "num_regimes": 2,
             "converged": converged,
+            "param_diff": float(param_diff),
             "transition_matrix": P.tolist(),
             "regimes": [
                 {
@@ -141,8 +160,10 @@ class MSGARCHService:
                     "beta": rp.beta,
                     "dist": rp.dist,
                     "df": rp.df,
+                    "garch_converged": bool(self.regime_models[i].convergence_flag == 0),
+                    "garch_status": self.regime_models[i].fit_stop,
                 }
-                for rp in self.regime_params
+                for i, rp in enumerate(self.regime_params)
             ],
             "loglik": float(prev_ll),
         }
