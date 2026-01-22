@@ -58,6 +58,11 @@ services:
     depends_on:
       - db
 
+  api-gateway:
+    build: ./api-gateway
+    ports:
+      - "8080:80"
+
 volumes:
   postgres_data:
   redis_data:
