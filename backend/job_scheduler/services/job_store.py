@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from typing import Optional
 
-from backend_app.redis_client import redis_client
+from job_scheduler.redis_client import redis_client
 
 
 class JobStore:

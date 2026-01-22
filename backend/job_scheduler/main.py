@@ -1,8 +1,8 @@
 from fastapi import FastAPI
-from backend_app.routes import jobs, health
+from job_scheduler.routes import jobs, health
 
 app = FastAPI(
-    title="GARCH Synthetic Data Generator",
+    title="Job Scheduler",
     version="1.0.0",
 )
 
@@ -13,7 +13,7 @@ app.include_router(health.router)
 @app.get("/")
 def read_root():
     return {
-        "message": "GARCH Synthetic Data Generator API",
+        "message": "Job Scheduler",
         "version": "1.0.0",
         "endpoints": {
             "generate": "/api/generate",
