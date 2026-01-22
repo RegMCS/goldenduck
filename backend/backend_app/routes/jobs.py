@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 import json
 import os
 import uuid
@@ -5,9 +6,15 @@ from datetime import datetime
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
+=======
+import uuid
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
+import os
+>>>>>>> Stashed changes
 
-from backend_app.redis_client import redis_client
 from backend_app.schemas.jobs import GenerateRequest, GenerateResponse
+from backend_app.models.enums import JobStatus
 from backend_app.services.job_store import job_store
 
 router = APIRouter(prefix="/api", tags=["jobs"])
@@ -16,43 +23,66 @@ router = APIRouter(prefix="/api", tags=["jobs"])
 OUTPUT_DIR = Path("output").resolve()
 
 
-@router.post("/generate", response_model=GenerateResponse)
-async def generate_job(request: GenerateRequest):
+@router.post("/generate/user/{user_id}", response_model=GenerateResponse)
+async def generate_job(user_id: str, request: GenerateRequest):
     job_id = str(uuid.uuid4())
 
-    job_store.create_job(job_id, request.dict())
+    job_store.create_job(
+        job_id=job_id,
+        user_id=user_id,
+        parameters=request.dict(),
+        status=JobStatus.queued,
+    )
     job_store.enqueue(job_id)
 
     return GenerateResponse(
         job_id=job_id,
-        status="queued",
-        message=f"Job submitted. Poll /api/status/{job_id}",
+        status=JobStatus.queued,
+        message=f"Job submitted. Poll /api/status/user/{user_id}/{job_id}",
     )
 
 
-@router.get("/status/{job_id}")
-async def get_job_status(job_id: str):
-    status = job_store.get_status(job_id)
+@router.get("/status/user/{user_id}/{job_id}")
+async def get_job_status(user_id: str, job_id: str):
+    job = job_store.get_job(job_id)
 
-    if not status:
+    if not job or job["user_id"] != user_id:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    response = {"job_id": job_id, "status": status}
+    status = JobStatus(job["status"])
 
-    if status == "completed":
-        response["parameters"] = job_store.get_parameters(job_id)
-        response["metrics"] = job_store.get_metrics(job_id)
-        response["download_url"] = f"/api/download/{job_id}"
+    response = {
+        "job_id": job_id,
+        "status": status,
+    }
 
-    if status == "failed":
+    if status == JobStatus.completed:
+        response.update(
+            {
+                "parameters": job_store.get_parameters(job_id),
+                "metrics": job_store.get_metrics(job_id),
+                "download_url": f"/api/download/user/{user_id}/{job_id}",
+            }
+        )
+
+    if status == JobStatus.failed:
         response["error"] = job_store.get_error(job_id)
 
     return response
 
 
+<<<<<<< Updated upstream
 @router.get("/download/{job_id}")
 async def download_results(job_id: str):
     from fastapi.responses import FileResponse
+=======
+@router.get("/download/user/{user_id}/{job_id}")
+async def download_results(user_id: str, job_id: str):
+    job = job_store.get_job(job_id)
+
+    if not job or job["user_id"] != user_id:
+        raise HTTPException(status_code=404, detail="Job not found")
+>>>>>>> Stashed changes
 
     output_file = job_store.get_output_file(job_id)
 
@@ -74,7 +104,11 @@ async def download_results(job_id: str):
         raise HTTPException(status_code=404, detail="File not ready")
 
     return FileResponse(
+<<<<<<< Updated upstream
         path=str(output_file_path),
+=======
+        path=output_file,
+>>>>>>> Stashed changes
         media_type="text/csv",
         filename=f"synthetic_garch_{job_id}.csv",
     )

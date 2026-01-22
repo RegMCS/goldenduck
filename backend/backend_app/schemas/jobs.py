@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Dict, Any
+from backend_app.models.enums import JobStatus
 
 
 class GenerateRequest(BaseModel):
@@ -13,5 +14,5 @@ class GenerateRequest(BaseModel):
 
 class GenerateResponse(BaseModel):
     job_id: str
-    status: str
+    status: JobStatus
     message: str
