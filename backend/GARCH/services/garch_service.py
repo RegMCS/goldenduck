@@ -60,7 +60,7 @@ class GARCHService:
                 "omega": float(self.fitted_model.params["omega"]),
                 "alpha": float(self.fitted_model.params.get("alpha[1]", 0)),
                 "beta": float(self.fitted_model.params.get("beta[1]", 0)),
-                "converged": bool(self.fitted_model.convergence_flag),
+                "converged": bool(self.fitted_model.convergence_flag == 0),
                 "aic": float(self.fitted_model.aic),
                 "bic": float(self.fitted_model.bic),
             }
