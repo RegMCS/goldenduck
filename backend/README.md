@@ -36,6 +36,7 @@ This directory contains the backend services for the GoldenDuck project, featuri
    - **FastAPI Interactive Docs**: http://localhost:8000/docs
    - **Health Check**: http://localhost:8000/health
    - **Database**: PostgreSQL on `localhost:5432`
+   - **Redis**:: localhost:6379
 
 4. View logs:
 
@@ -64,7 +65,7 @@ Run the script from the backend directory (ensure services are up):
 
 ```bash
 cd backend
-python3 scripts/run_garch_job.py --ticker AAPL
+python3 GARCH/scripts/run_garch_job.py --ticker AAPL
 ```
 
 ### Defaults
@@ -139,7 +140,7 @@ Run controlled evaluation experiments across multiple distributions and tickers.
 ### Run (inside container)
 
 ```bash
-docker-compose exec garch python GARCH/scripts/run_evaluation.py
+docker-compose exec worker python GARCH/scripts/run_evaluation.py
 ```
 
 ### What It Does
@@ -430,6 +431,13 @@ docker-compose logs db
 - Minimum 500 days of historical data required
 - Check for data gaps or delisted securities
 
+
+Job stuck in queued
+
+Check worker logs:
+
+docker-compose logs -f worker
+
 ## Support
 
 For questions or issues:
@@ -439,5 +447,5 @@ For questions or issues:
 
 ---
 
-**Version**: 1.0  
-**Last Updated**: January 14, 2026
+**Version**: 1.1  
+**Last Updated**: January 21, 2026

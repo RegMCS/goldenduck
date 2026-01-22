@@ -40,4 +40,4 @@ pp.pprint(all_results)
 report_path = "/app/reports/garch_evaluation_report.md"
 generate_markdown_report(all_results, report_path)
 
-print(f"\n📄 Report saved to {report_path}")
+print(f"\nReport saved to {report_path}")

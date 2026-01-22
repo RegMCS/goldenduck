@@ -5,6 +5,7 @@ import sys
 
 BASE_URL = "http://localhost:8000"
 POLL_INTERVAL = 3
+USER_ID = "9b8f3f0c-7b9e-4c6e-9f6e-2d9d6f9a3c21"
 
 
 def main():
@@ -36,7 +37,6 @@ def main():
 
     args = parser.parse_args()
 
-    # 1️⃣ Submit job
     payload = {
         "ticker": args.ticker,
         "num_scenarios": args.scenarios,
@@ -45,120 +45,50 @@ def main():
         "q": args.q,
     }
 
+    submit_url = f"{BASE_URL}/api/generate/user/{USER_ID}"
+
     print("Submitting GARCH job:")
     print(payload)
 
     try:
-        resp = requests.post(f"{BASE_URL}/api/generate", json=payload, timeout=30)
+        resp = requests.post(submit_url, json=payload, timeout=30)
         resp.raise_for_status()
-    except requests.exceptions.ConnectionError:
-        print(
-            f"Error: Unable to connect to the API at {BASE_URL}. Please ensure the service is running.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    except requests.exceptions.Timeout:
-        print(
-            f"Error: Request to {BASE_URL}/api/generate timed out. The service may be overloaded.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    except requests.exceptions.HTTPError as e:
-        print(
-            f"Error: API returned an error: {e.response.status_code} - {e.response.text}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
     except requests.exceptions.RequestException as e:
-        print(
-            f"Error: An unexpected error occurred while submitting the job: {e}",
-            file=sys.stderr,
-        )
+        print(f"Failed to submit job: {e}", file=sys.stderr)
         sys.exit(1)
 
     job = resp.json()
     job_id = job["job_id"]
 
-    print(f"Job started: {job_id}")
+    print(f"Job queued: {job_id}")
 
-    # 2️⃣ Poll status
+    status_url = f"{BASE_URL}/api/status/user/{USER_ID}/{job_id}"
+
     while True:
         try:
-            resp = requests.get(f"{BASE_URL}/api/status/{job_id}", timeout=10)
+            resp = requests.get(status_url, timeout=10)
             resp.raise_for_status()
-        except requests.exceptions.ConnectionError:
-            print(
-                f"Error: Unable to connect to the API at {BASE_URL}. Please ensure the service is running.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        except requests.exceptions.Timeout:
-            print(
-                f"Error: Request to {BASE_URL}/api/status/{job_id} timed out. Retrying...",
-                file=sys.stderr,
-            )
+        except requests.exceptions.RequestException as e:
+            print(f"Status check failed: {e}", file=sys.stderr)
             time.sleep(POLL_INTERVAL)
             continue
-        except requests.exceptions.HTTPError as e:
-            print(
-                f"Error: API returned an error: {e.response.status_code} - {e.response.text}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        except requests.exceptions.RequestException as e:
-            print(
-                f"Error: An unexpected error occurred while checking job status: {e}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
 
         data = resp.json()
-
         status = data["status"]
+
         print(f"Status: {status}")
 
         if status == "completed":
             print("\nJob completed")
 
-            # ---- Print GARCH parameters ----
-            params = data.get("parameters", {})
-            print("\nGARCH Parameters:")
-            for k, v in params.items():
-                print(f"  {k}: {v}")
-
-            # ---- Print validation metrics ----
-            metrics = data.get("validation_metrics", {})
-            print("\nValidation Metrics:")
-            for k, v in metrics.items():
-                print(f"  {k}: {v}")
-
-            # ---- Download CSV ----
-            download_url = BASE_URL + data["download_url"]
+            download_url = f"{BASE_URL}{data['download_url']}"
             print("\nDownloading results...")
 
             try:
                 out = requests.get(download_url, timeout=60)
                 out.raise_for_status()
-            except requests.exceptions.ConnectionError:
-                print(
-                    f"Error: Unable to connect to {download_url}. Please ensure the service is running.",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
-            except requests.exceptions.Timeout:
-                print(f"Error: Request to download results timed out.", file=sys.stderr)
-                sys.exit(1)
-            except requests.exceptions.HTTPError as e:
-                print(
-                    f"Error: Failed to download results: {e.response.status_code} - {e.response.text}",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
             except requests.exceptions.RequestException as e:
-                print(
-                    f"Error: An unexpected error occurred while downloading results: {e}",
-                    file=sys.stderr,
-                )
+                print(f"Download failed: {e}", file=sys.stderr)
                 sys.exit(1)
 
             filename = f"{args.ticker}_{args.scenarios}.csv"

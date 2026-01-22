@@ -16,7 +16,7 @@ def generate_markdown_report(all_results: dict, output_path: str):
             for dist, result in dist_results.items():
                 if "error" in result:
                     f.write(f"### {dist}\n")
-                    f.write(f"- ❌ Error: {result['error']}\n\n")
+                    f.write(f"- Error: {result['error']}\n\n")
                     continue
 
                 params = result["parameters"]
