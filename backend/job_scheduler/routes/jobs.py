@@ -4,9 +4,9 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-from backend_app.schemas.jobs import GenerateRequest, GenerateResponse
-from backend_app.models.enums import JobStatus
-from backend_app.services.job_store import job_store
+from job_scheduler.schemas.jobs import GenerateRequest, GenerateResponse
+from job_scheduler.models.enums import JobStatus
+from job_scheduler.services.job_store import job_store
 
 router = APIRouter(prefix="/api", tags=["jobs"])
 

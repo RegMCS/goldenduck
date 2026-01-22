@@ -5,7 +5,7 @@ import os
 import uuid
 import pytest
 
-from backend_app.main import app
+from job_scheduler.main import app
 
 client = TestClient(app)
 
@@ -15,7 +15,7 @@ USER_ID = str(uuid.uuid4())
 # Global mock: replace Redis-backed job_store everywhere in routes
 @pytest.fixture(autouse=True)
 def mock_job_store():
-    with patch("backend_app.routes.jobs.job_store") as store:
+    with patch("job_scheduler.routes.jobs.job_store") as store:
         store.create_job.return_value = None
         store.enqueue.return_value = None
 

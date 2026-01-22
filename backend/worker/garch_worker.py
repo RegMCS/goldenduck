@@ -5,9 +5,9 @@ import logging
 import yfinance as yf
 import pandas as pd
 
-from backend_app.redis_client import redis_client
-from backend_app.services.job_store import job_store
-from GARCH.services.garch_service import GARCHService
+from job_scheduler.redis_client import redis_client
+from job_scheduler.services.job_store import job_store
+from worker.GARCH.services.garch_service import GARCHService
 
 logging.basicConfig(
     level=logging.INFO,

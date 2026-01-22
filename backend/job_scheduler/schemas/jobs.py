@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
-from backend_app.models.enums import JobStatus
+from job_scheduler.models.enums import JobStatus
 
 
 class GenerateRequest(BaseModel):
