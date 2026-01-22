@@ -5,7 +5,7 @@ import sys
 
 BASE_URL = "http://localhost:8000"
 POLL_INTERVAL = 3
-USER_ID = "9b8f3f0c-7b9e-4c6e-9f6e-2d9d6f9a3c21"  
+USER_ID = "9b8f3f0c-7b9e-4c6e-9f6e-2d9d6f9a3c21"
 
 
 def main():

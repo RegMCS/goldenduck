@@ -1,17 +1,8 @@
-<<<<<<< Updated upstream
-import json
-import os
 import uuid
-from datetime import datetime
 from pathlib import Path
+
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
-=======
-import uuid
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
-import os
->>>>>>> Stashed changes
 
 from backend_app.schemas.jobs import GenerateRequest, GenerateResponse
 from backend_app.models.enums import JobStatus
@@ -71,44 +62,30 @@ async def get_job_status(user_id: str, job_id: str):
     return response
 
 
-<<<<<<< Updated upstream
-@router.get("/download/{job_id}")
-async def download_results(job_id: str):
-    from fastapi.responses import FileResponse
-=======
 @router.get("/download/user/{user_id}/{job_id}")
 async def download_results(user_id: str, job_id: str):
     job = job_store.get_job(job_id)
 
     if not job or job["user_id"] != user_id:
         raise HTTPException(status_code=404, detail="Job not found")
->>>>>>> Stashed changes
 
     output_file = job_store.get_output_file(job_id)
 
     if not output_file:
         raise HTTPException(status_code=404, detail="File not ready")
 
-    # Validate that the output_file path is within the expected OUTPUT_DIR
-    # to prevent path traversal attacks
+    # Prevent path traversal
     try:
         output_file_path = Path(output_file).resolve()
-        # Check if the output_file_path is a child of OUTPUT_DIR
         output_file_path.relative_to(OUTPUT_DIR)
     except (ValueError, OSError):
-        # ValueError: not relative to OUTPUT_DIR
-        # OSError: malformed path
         raise HTTPException(status_code=403, detail="Access denied")
 
     if not output_file_path.exists():
         raise HTTPException(status_code=404, detail="File not ready")
 
     return FileResponse(
-<<<<<<< Updated upstream
-        path=str(output_file_path),
-=======
-        path=output_file,
->>>>>>> Stashed changes
+        path=output_file_path,
         media_type="text/csv",
         filename=f"synthetic_garch_{job_id}.csv",
     )
