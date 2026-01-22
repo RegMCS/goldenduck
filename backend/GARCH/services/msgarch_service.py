@@ -48,7 +48,7 @@ class MSGARCHService:
         p: int = 1,
         q: int = 1,
         dist: str = "normal",
-        n_iter: int = 10,
+        n_iter: int = 5,
         init_split_quantile: float = 0.7,
         min_points_per_regime: int = 200,
     ) -> Dict:
@@ -116,7 +116,7 @@ class MSGARCHService:
 
             # Check improvement
             logger.info(f"MS-GARCH iter {it+1}/{n_iter}: loglik={ll:.2f}")
-            if np.isfinite(prev_ll) and abs(ll - prev_ll) < 1e-2:
+            if np.isfinite(prev_ll) and abs(ll - prev_ll) < 1e-1:
                 converged = True
                 P, self.regime_models = P_new, models_new
                 self.filtered_probs = filtered_probs
