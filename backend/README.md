@@ -65,7 +65,7 @@ Run the script from the backend directory (ensure services are up):
 
 ```bash
 cd backend
-python3 GARCH/scripts/run_garch_job.py --ticker AAPL
+python3 worker/GARCH/scripts/run_garch_job.py --ticker AAPL
 ```
 
 ### Defaults

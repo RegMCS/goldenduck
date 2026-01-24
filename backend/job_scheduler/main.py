@@ -16,8 +16,8 @@ def read_root():
         "message": "Job Scheduler",
         "version": "1.0.0",
         "endpoints": {
-            "generate": "/api/generate",
-            "status": "/api/status/{job_id}",
-            "download": "/api/download/{job_id}",
+            "generate": "/api/generate/user/{user_id}",
+            "status": "/api/status/user/{user_id}/{job_id}",
+            "download": "/api/download/user/{user_id}/{job_id}",
         },
     }
