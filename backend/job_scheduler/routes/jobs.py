@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pathlib import Path
+import logging
 
 from backend_app.db.session import get_db
 from backend_app.models.user import User
@@ -13,6 +14,7 @@ from job_scheduler.schemas.jobs import GenerateRequest, GenerateResponse
 
 router = APIRouter(prefix="/api", tags=["jobs"])
 OUTPUT_DIR = Path("output").resolve()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/generate/user/{user_id}", response_model=GenerateResponse)
@@ -27,22 +29,35 @@ async def generate_job(
         db.add(user)
         db.commit()
 
-    # Create job in DB
-    job = create_job(
-        db=db,
-        user_id=user_id,
-        job_type=request.job_type,
-    )
+    try:
+        # Create job in DB without committing
+        job = create_job(
+            db=db,
+            user_id=user_id,
+            job_type=request.job_type,
+            commit=False,
+        )
 
-    job_store.create_job(
-        job_id=str(job.id),
-        user_id=user_id,
-        parameters=request.model_dump(),
-        status=JobStatus.queued,
-    )
+        # Create job metadata in Redis
+        job_store.create_job(
+            job_id=str(job.id),
+            user_id=user_id,
+            parameters=request.model_dump(),
+            status=JobStatus.queued,
+        )
 
-    # Enqueue job
-    job_store.enqueue(str(job.id))
+        # Enqueue job
+        job_store.enqueue(str(job.id))
+
+        # Commit DB transaction only after Redis operations succeed
+        db.commit()
+    except Exception as e:
+        # Rollback DB transaction if Redis operations fail
+        db.rollback()
+        logger.error(
+            f"Failed to enqueue job for user {user_id}: {str(e)}", exc_info=True
+        )
+        raise HTTPException(status_code=500, detail="Failed to submit job")
 
     return GenerateResponse(
         job_id=str(job.id),
