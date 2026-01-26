@@ -47,8 +47,10 @@ services:
     environment:
       PYTHONPATH: /app
       REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
     depends_on:
       - redis
+      - db
 
   flyway:
     image: flyway/flyway

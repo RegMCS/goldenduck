@@ -1,35 +1,53 @@
-import uuid
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from backend_app.db.session import get_db
+from backend_app.models.user import User
 from fastapi.responses import FileResponse
 
-from job_scheduler.schemas.jobs import GenerateRequest, GenerateResponse
-from job_scheduler.models.enums import JobStatus
+from backend_app.services.job_service import create_job
+from job_scheduler.models.enums import JobStatus, JobType
 from job_scheduler.services.job_store import job_store
+from job_scheduler.schemas.jobs import GenerateRequest, GenerateResponse
 
 router = APIRouter(prefix="/api", tags=["jobs"])
-
-# Define OUTPUT_DIR as a module-level constant
 OUTPUT_DIR = Path("output").resolve()
 
 
 @router.post("/generate/user/{user_id}", response_model=GenerateResponse)
-async def generate_job(user_id: str, request: GenerateRequest):
-    job_id = str(uuid.uuid4())
+async def generate_job(
+    user_id: str,
+    request: GenerateRequest,
+    db: Session = Depends(get_db),
+):
+    user = db.query(User).filter_by(id=user_id).first()
+    if not user:
+        user = User(id=user_id)
+        db.add(user)
+        db.commit()
+
+    # Create job in DB
+    job = create_job(
+        db=db,
+        user_id=user_id,
+        job_type=request.job_type,
+    )
 
     job_store.create_job(
-        job_id=job_id,
+        job_id=str(job.id),
         user_id=user_id,
         parameters=request.dict(),
         status=JobStatus.queued,
     )
-    job_store.enqueue(job_id)
+
+    # Enqueue job
+    job_store.enqueue(str(job.id))
 
     return GenerateResponse(
-        job_id=job_id,
+        job_id=str(job.id),
         status=JobStatus.queued,
-        message=f"Job submitted. Poll /api/status/user/{user_id}/{job_id}",
+        message=f"Job submitted. Poll /api/status/user/{user_id}/{job.id}",
     )
 
 
