@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 from pathlib import Path
 
 from backend_app.db.session import get_db
@@ -23,9 +24,14 @@ async def generate_job(
 ):
     user = db.query(User).filter_by(id=user_id).first()
     if not user:
-        user = User(id=user_id)
-        db.add(user)
-        db.commit()
+        try:
+            user = User(id=user_id)
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+        except SQLAlchemyError as e:
+            db.rollback()
+            raise HTTPException(status_code=500, detail=f"Failed to create user: {str(e)}")
 
     # Create job in DB
     job = create_job(
