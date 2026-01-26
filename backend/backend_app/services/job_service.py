@@ -4,14 +4,18 @@ from backend_app.models.ai_model_job import AIModelJob
 from job_scheduler.models.enums import JobStatus, JobType
 
 
-def create_job(db: Session, user_id: str, job_type: JobType) -> AIModelJob:
+def create_job(
+    db: Session, user_id: str, job_type: JobType, commit: bool = True
+) -> AIModelJob:
     job = AIModelJob(
         status=JobStatus.queued,
         job_type=job_type,
         requestor=user_id,
     )
     db.add(job)
-    db.commit()
+    db.flush()  # Flush to get the job ID without committing
+    if commit:
+        db.commit()
     db.refresh(job)
     return job
 

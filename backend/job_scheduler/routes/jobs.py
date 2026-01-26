@@ -27,22 +27,32 @@ async def generate_job(
         db.add(user)
         db.commit()
 
-    # Create job in DB
-    job = create_job(
-        db=db,
-        user_id=user_id,
-        job_type=request.job_type,
-    )
+    try:
+        # Create job in DB without committing
+        job = create_job(
+            db=db,
+            user_id=user_id,
+            job_type=request.job_type,
+            commit=False,
+        )
 
-    job_store.create_job(
-        job_id=str(job.id),
-        user_id=user_id,
-        parameters=request.model_dump(),
-        status=JobStatus.queued,
-    )
+        # Create job metadata in Redis
+        job_store.create_job(
+            job_id=str(job.id),
+            user_id=user_id,
+            parameters=request.model_dump(),
+            status=JobStatus.queued,
+        )
 
-    # Enqueue job
-    job_store.enqueue(str(job.id))
+        # Enqueue job
+        job_store.enqueue(str(job.id))
+
+        # Commit DB transaction only after Redis operations succeed
+        db.commit()
+    except Exception as e:
+        # Rollback DB transaction if Redis operations fail
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to enqueue job: {str(e)}")
 
     return GenerateResponse(
         job_id=str(job.id),
