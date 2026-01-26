@@ -37,7 +37,7 @@ async def generate_job(
     job_store.create_job(
         job_id=str(job.id),
         user_id=user_id,
-        parameters=request.dict(),
+        parameters=request.model_dump(),
         status=JobStatus.queued,
     )
 
