@@ -7,7 +7,7 @@ from backend_app.models.user import User
 from fastapi.responses import FileResponse
 
 from backend_app.services.job_service import create_job
-from job_scheduler.models.enums import JobStatus, JobType
+from job_scheduler.models.enums import JobStatus
 from job_scheduler.services.job_store import job_store
 from job_scheduler.schemas.jobs import GenerateRequest, GenerateResponse
 
