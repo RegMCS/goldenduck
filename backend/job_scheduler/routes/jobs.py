@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pathlib import Path
+import logging
 
 from backend_app.db.session import get_db
 from backend_app.models.user import User
@@ -13,6 +14,7 @@ from job_scheduler.schemas.jobs import GenerateRequest, GenerateResponse
 
 router = APIRouter(prefix="/api", tags=["jobs"])
 OUTPUT_DIR = Path("output").resolve()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/generate/user/{user_id}", response_model=GenerateResponse)
@@ -52,7 +54,10 @@ async def generate_job(
     except Exception as e:
         # Rollback DB transaction if Redis operations fail
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to enqueue job: {str(e)}")
+        logger.error(
+            f"Failed to enqueue job for user {user_id}: {str(e)}", exc_info=True
+        )
+        raise HTTPException(status_code=500, detail="Failed to submit job")
 
     return GenerateResponse(
         job_id=str(job.id),
