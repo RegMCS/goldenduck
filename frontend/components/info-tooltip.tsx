@@ -17,17 +17,14 @@ export function InfoTooltip({ content }: InfoTooltipProps) {
     <TooltipProvider delayDuration={200}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <span
-            role="button"
-            tabIndex={0}
-            aria-label="More info"
+          <button
+            type="button"
             className="inline-flex items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <Info className="h-4 w-4" />
             <span className="sr-only">More info</span>
-          </span>
+          </button>
         </TooltipTrigger>
-
         <TooltipContent
           side="top"
           className="max-w-[280px] bg-popover text-popover-foreground"
