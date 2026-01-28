@@ -19,3 +19,7 @@ venv/
 
 # GARCH output files
 GARCH/output/
+
+#datasets
+.csv
+.txt

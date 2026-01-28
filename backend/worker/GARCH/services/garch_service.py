@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from arch import arch_model
-from typing import List, Dict
+from typing import List, Dict, Optional, Literal
 import logging
 
 logger = logging.getLogger(__name__)
@@ -9,13 +9,20 @@ logger = logging.getLogger(__name__)
 
 class GARCHService:
     """
-    Service for GARCH-based synthetic data generation
+    Service for GARCH-based synthetic data generation.
+    Now supports both standard GARCH and GARCH-FX (stochastic + regime-aware) modes.
     """
 
     def __init__(self):
         self.fitted_model = None
         self.historical_data = None
         self.scale_factor = 100  # For numerical stability
+        # NEW: Store GARCH parameters for GARCH-FX
+        self.garch_params = None
+        self.last_conditional_volatility = None
+        self.distribution = "normal"
+
+    # GARCH/services/garch_service.py
 
     def _fit_once(
         self,
@@ -67,9 +74,31 @@ class GARCHService:
         if dist == "skewt" and "lambda" in fitted.params:
             params["lambda"] = float(fitted.params["lambda"])
 
+        # Store GARCH parameters for GARCH-FX usage
+        self.garch_params = {
+            "alpha": params["alpha"],
+            "beta": params["beta"],
+            "omega": params["omega"],
+        }
+
+        # FIX: Store distribution type separately
+        self.distribution = dist  # ADD THIS LINE
+
+        # Handle both numpy array and pandas Series
+        conditional_vol = fitted.conditional_volatility
+
+        if isinstance(conditional_vol, np.ndarray):
+            self.last_conditional_volatility = (
+                float(conditional_vol[-1]) / self.scale_factor
+            )
+        else:
+            self.last_conditional_volatility = (
+                float(conditional_vol.iloc[-1]) / self.scale_factor
+            )
+
         logger.info(
             f"Fit attempt: dist={dist}, converged={params['converged']}, "
-            f"AIC={params['aic']:.2f}"
+            f"AIC={params['aic']:.2f}, last_vol={self.last_conditional_volatility:.6f}"
         )
 
         return params
@@ -121,6 +150,77 @@ class GARCHService:
         logger.warning("No converged model found; returning best non-converged fit")
         return best_result
 
+    # ========== NEW: GARCH-FX METHODS ==========
+
+    def generate_scenarios_fx(
+        self,
+        num_scenarios: int = 1000,
+        horizon: int = 252,
+        theta: float = 0.005,
+        scenario_type: Optional[str] = None,
+        delta_sequence: Optional[np.ndarray] = None,
+        regime_switching: bool = False,
+        regime_states: Optional[np.ndarray] = None,
+        regimes: Optional[List[float]] = None,
+        seed_start: int = 42,
+    ) -> List[pd.DataFrame]:
+        """Generate synthetic scenarios using GARCH-FX framework"""
+        if self.fitted_model is None or self.garch_params is None:
+            raise ValueError("Must fit model first! Call fit_with_retry()")
+
+        logger.info(
+            f"Starting GARCH-FX generation: {num_scenarios} scenarios, "
+            f"θ={theta}, scenario={scenario_type}"
+        )
+
+        from GARCH.services.garchfx_engine import GARCHFXEngine
+
+        engine = GARCHFXEngine(
+            volatility=self.last_conditional_volatility,
+            params=self.garch_params,
+            scale_factor=self.scale_factor,
+        )
+
+        if scenario_type and delta_sequence is None:
+            from GARCH.services.scenarios import generate_scenario
+
+            delta_sequence, _ = generate_scenario(scenario_type, horizon)
+            logger.info(f"Using scenario: {scenario_type}")
+
+        initial_price = float(self.historical_data["Close"].iloc[-1])
+        scenarios = []
+
+        for scenario_idx in range(num_scenarios):
+            np.random.seed(seed_start + scenario_idx)
+
+            volatility_forecast = engine.forecast(
+                horizon=horizon,
+                theta=theta,
+                delta_sequence=delta_sequence,
+                regime_switching=regime_switching,
+                regime_states=regime_states,
+                regimes=regimes,
+            )
+
+            # FIX: Use self.distribution instead of self.fitted_model.distribution
+            returns = engine.generate_returns_from_volatility(
+                volatility_forecast, self.distribution  # CHANGED THIS LINE
+            )
+
+            cumulative_returns = np.cumsum(returns)
+            close_prices = initial_price * np.exp(cumulative_returns)
+
+            ohlcv = self._generate_ohlcv_from_close(close_prices, volatility_forecast)
+            scenarios.append(ohlcv)
+
+            if (scenario_idx + 1) % 100 == 0:
+                logger.info(f"Generated {scenario_idx + 1}/{num_scenarios} scenarios")
+
+        logger.info(f"Successfully generated {num_scenarios} GARCH-FX scenarios")
+        return scenarios
+
+    # ========== ORIGINAL METHOD (PRESERVED) ==========
+
     def generate_scenarios(
         self,
         num_scenarios: int = 1000,
@@ -128,14 +228,16 @@ class GARCHService:
         volatility_multiplier: float = 1.0,
     ) -> List[pd.DataFrame]:
         """
-        Generate multiple synthetic OHLCV scenarios (one at a time for reliability)
+        Generate multiple synthetic OHLCV scenarios using standard GARCH.
+        (Original method preserved for backward compatibility)
         """
         if self.fitted_model is None:
             raise ValueError("Must fit model first! Call fit_with_retry()")
 
         try:
             logger.info(
-                f"Starting generation of {num_scenarios} scenarios, {horizon} days each"
+                f"Starting generation of {num_scenarios} scenarios (standard GARCH), "
+                f"{horizon} days each"
             )
 
             initial_price_value = float(self.historical_data["Close"].iloc[-1].item())
@@ -146,12 +248,12 @@ class GARCHService:
                 forecast = self.fitted_model.forecast(
                     horizon=horizon,
                     method="simulation",
-                    simulations=1,  # ← Generate only 1 scenario per loop
+                    simulations=1,
                     reindex=False,
                 )
 
                 # Extract and flatten returns
-                returns_scaled = forecast.simulations.values.flatten()  # Always 1D
+                returns_scaled = forecast.simulations.values.flatten()
                 returns = returns_scaled / self.scale_factor
 
                 # Extract and flatten volatility
@@ -176,7 +278,6 @@ class GARCHService:
                 ohlcv = self._generate_ohlcv_from_close(close_prices, volatility)
                 scenarios.append(ohlcv)
 
-                # Log progress
                 if (scenario_idx + 1) % 100 == 0:
                     logger.info(
                         f"Generated {scenario_idx + 1}/{num_scenarios} scenarios"
@@ -203,10 +304,8 @@ class GARCHService:
                 f"Volatility length {len(volatility)} != close prices length {n}"
             )
             if len(volatility) < n:
-                # Pad with last value
                 volatility = np.pad(volatility, (0, n - len(volatility)), mode="edge")
             else:
-                # Truncate
                 volatility = volatility[:n]
 
         # Build OHLCV data row by row
@@ -232,10 +331,8 @@ class GARCHService:
             base_volume = 1_000_000
             V = int(base_volume * (1 + sigma * np.random.exponential(2)))
 
-            # Append as dictionary
             ohlcv_rows.append({"Open": O, "High": H, "Low": L, "Close": C, "Volume": V})
 
-        # Create DataFrame from list of dictionaries
         df = pd.DataFrame(ohlcv_rows)
 
         logger.debug(
@@ -261,10 +358,7 @@ class GARCHService:
                 returns = scenario["Close"].pct_change().dropna().values
                 all_synthetic_returns.extend(returns)
 
-            # Convert to numpy array
             synthetic_returns_array = np.array(all_synthetic_returns)
-
-            # Validate
             metrics = validator.validate(synthetic_returns_array)
 
             logger.info(f"Validation complete: {metrics}")
@@ -272,7 +366,6 @@ class GARCHService:
 
         except Exception as e:
             logger.error(f"Error during validation: {e}", exc_info=True)
-            # Return metrics with error flag to indicate validation failure
             return {
                 "ks_statistic": 0.0,
                 "ks_pvalue": 0.0,
