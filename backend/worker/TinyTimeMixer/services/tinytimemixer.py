@@ -1,377 +1,265 @@
-import numpy as np
-import pandas as pd
-from arch import arch_model
-from typing import List, Dict, Optional, Literal
-import logging
+"""
+Uses IBM Granite TinyTimeMixer (TTM) pretrained models hosted on Hugging Face:
+- ibm-granite/granite-timeseries-ttm-r1
+- ibm-granite/granite-timeseries-ttm-r2
 
-logger = logging.getLogger(__name__)
+Input convention (simple + explicit):
+- past_values: torch.Tensor of shape [batch, context_length, channels]
+- optional: past_observed_mask: same shape, 1 for observed, 0 for missing (if you have missing)
+
+Output:
+- forecast: torch.Tensor of shape [batch, prediction_length, channels]
+
+Notes:
+- For "zero-shot" inference, you typically just load the pretrained model and call predict().
+- For fine-tuning, you should use TimeSeriesPreprocessor + Hugging Face Trainer (separate pipeline).
+"""
+
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import Literal, Optional, Tuple, Dict, Any
+
+import torch
+
+TTMVariant = Literal["r1", "r2"]
+
+MODEL_IDS: Dict[str, str] = {
+    "r1": "ibm-granite/granite-timeseries-ttm-r1",
+    "r2": "ibm-granite/granite-timeseries-ttm-r2",
+}
 
 
-class GARCHService:
+@dataclass
+class ChannelScaler:
     """
-    Service for GARCH-based synthetic data generation.
-    Now supports both standard GARCH and GARCH-FX (stochastic + regime-aware) modes.
+    Per-channel standard scaler fitted on the provided context window.
+    """
+    mean_: torch.Tensor  # [batch, 1, channels] or [1, 1, channels]
+    std_: torch.Tensor   # [batch, 1, channels] or [1, 1, channels]
+    eps: float = 1e-6
+
+    @classmethod
+    def fit(cls, x: torch.Tensor, eps: float = 1e-6) -> "ChannelScaler":
+        """
+        Fit scaler on x of shape [B, T, C].
+        Computes mean/std over T, separately per batch and channel.
+        """
+        if x.ndim != 3:
+            raise ValueError(f"Expected x shape [B,T,C], got {tuple(x.shape)}")
+
+        mean_ = x.mean(dim=1, keepdim=True)  # [B,1,C]
+        var_ = x.var(dim=1, keepdim=True, unbiased=False)
+        std_ = torch.sqrt(var_ + eps)
+        return cls(mean_=mean_, std_=std_, eps=eps)
+
+    def transform(self, x: torch.Tensor) -> torch.Tensor:
+        return (x - self.mean_) / (self.std_ + self.eps)
+
+    def inverse_transform(self, x: torch.Tensor) -> torch.Tensor:
+        return x * (self.std_ + self.eps) + self.mean_
+
+
+class GraniteTinyTimeMixer:
+    """
+    Wrapper for loading + running IBM Granite TinyTimeMixer (TTM) models.
+
+    Uses tsfm_public.models.tinytimemixer.TinyTimeMixerForPrediction under the hood.
     """
 
-    def __init__(self):
-        self.fitted_model = None
-        self.historical_data = None
-        self.scale_factor = 100  # For numerical stability
-        # NEW: Store GARCH parameters for GARCH-FX
-        self.garch_params = None
-        self.last_conditional_volatility = None
-        self.distribution = "normal"
-
-    # GARCH/services/garch_service.py
-
-    def _fit_once(
+    def __init__(
         self,
-        historical_data: pd.DataFrame,
-        p: int,
-        q: int,
-        dist: str,
-    ) -> Dict:
+        variant: TTMVariant = "r2",
+        device: Optional[str] = None,
+        torch_dtype: Optional[torch.dtype] = None,
+        *,
+        # Overrides you might want when adapting the checkpoint to your dataset:
+        num_input_channels: Optional[int] = None,
+        prediction_length: Optional[int] = None,
+        decoder_mode: Optional[str] = None,
+        prediction_channel_indices: Optional[list[int]] = None,
+        exogenous_channel_indices: Optional[list[int]] = None,
+    ) -> None:
+        self.variant = variant
+        self.model_id = MODEL_IDS[variant]
+
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = device
+
+        self.torch_dtype = torch_dtype
+
+        self.model = self._load_model(
+            model_id=self.model_id,
+            torch_dtype=torch_dtype,
+            num_input_channels=num_input_channels,
+            prediction_length=prediction_length,
+            decoder_mode=decoder_mode,
+            prediction_channel_indices=prediction_channel_indices,
+            exogenous_channel_indices=exogenous_channel_indices,
+        ).to(self.device)
+
+        self.model.eval()
+
+    @staticmethod
+    def _load_model(
+        model_id: str,
+        torch_dtype: Optional[torch.dtype],
+        num_input_channels: Optional[int],
+        prediction_length: Optional[int],
+        decoder_mode: Optional[str],
+        prediction_channel_indices: Optional[list[int]],
+        exogenous_channel_indices: Optional[list[int]],
+    ):
         """
-        Single attempt to fit a GARCH model.
+        Load TinyTimeMixerForPrediction via TSFM.
+
+        If you see import errors:
+        - Ensure granite-tsfm is installed.
+        - Pin transformers close to the model's config version (e.g., 4.37.x for R2 configs). :contentReference[oaicite:6]{index=6}
         """
-        self.historical_data = historical_data
+        try:
+            from tsfm_public.models.tinytimemixer import TinyTimeMixerForPrediction
+        except Exception as e:
+            raise ImportError(
+                "Failed to import TinyTimeMixerForPrediction from tsfm_public. "
+                "Install IBM Granite TSFM library (granite-tsfm / tsfm_public)."
+            ) from e
 
-        # Calculate log returns
-        close_prices = historical_data["Close"].values
-        returns = np.log(close_prices[1:] / close_prices[:-1])
+        extra_kwargs: Dict[str, Any] = {}
+        if num_input_channels is not None:
+            extra_kwargs["num_input_channels"] = int(num_input_channels)
+        if prediction_length is not None:
+            extra_kwargs["prediction_length"] = int(prediction_length)
+        if decoder_mode is not None:
+            extra_kwargs["decoder_mode"] = decoder_mode
+        if prediction_channel_indices is not None:
+            extra_kwargs["prediction_channel_indices"] = prediction_channel_indices
+        if exogenous_channel_indices is not None:
+            extra_kwargs["exogenous_channel_indices"] = exogenous_channel_indices
+        if torch_dtype is not None:
+            extra_kwargs["torch_dtype"] = torch_dtype
 
-        # Scale for numerical stability
-        scaled_returns = returns * self.scale_factor
+        # IBM Granite docs show this from_pretrained pattern for fine-tuning as well. :contentReference[oaicite:7]{index=7}
+        model = TinyTimeMixerForPrediction.from_pretrained(model_id, **extra_kwargs)
+        return model
 
-        model = arch_model(
-            scaled_returns,
-            vol="GARCH",
-            p=p,
-            q=q,
-            mean="Zero",
-            dist=dist,
-            rescale=False,
-        )
+    @torch.inference_mode()
+    def predict(
+        self,
+        past_values: torch.Tensor,
+        *,
+        past_observed_mask: Optional[torch.Tensor] = None,
+        scale: bool = True,
+        return_scaled: bool = False,
+    ) -> Tuple[torch.Tensor, Optional[ChannelScaler]]:
+        """
+        Run inference.
 
-        fitted = model.fit(disp="off", options={"maxiter": 5000})
+        Args:
+            past_values: [B, context_length, C]
+            past_observed_mask: optional [B, context_length, C]
+            scale: if True, fit per-channel scaler on past_values and feed scaled values
+            return_scaled: if True, return the scaled forecast instead of inverse-transformed
 
-        # Store fitted model (IMPORTANT)
-        self.fitted_model = fitted
+        Returns:
+            forecast: [B, prediction_length, C]
+            scaler: ChannelScaler if scale=True else None
+        """
+        if past_values.ndim != 3:
+            raise ValueError(f"past_values must be [B,T,C], got {tuple(past_values.shape)}")
 
-        params = {
-            "omega": float(fitted.params.get("omega", np.nan)),
-            "alpha": float(fitted.params.get("alpha[1]", np.nan)),
-            "beta": float(fitted.params.get("beta[1]", np.nan)),
-            "converged": fitted.convergence_flag == 0,
-            "aic": float(fitted.aic),
-            "bic": float(fitted.bic),
-            "distribution": dist,
-        }
+        x = past_values.to(self.device)
+        mask = past_observed_mask.to(self.device) if past_observed_mask is not None else None
 
-        # Optional skew-t params
-        if dist in ("t", "skewt") and "nu" in fitted.params:
-            params["nu"] = float(fitted.params["nu"])
-        if dist == "skewt" and "lambda" in fitted.params:
-            params["lambda"] = float(fitted.params["lambda"])
-
-        # Store GARCH parameters for GARCH-FX usage
-        self.garch_params = {
-            "alpha": params["alpha"],
-            "beta": params["beta"],
-            "omega": params["omega"],
-        }
-
-        # FIX: Store distribution type separately
-        self.distribution = dist  # ADD THIS LINE
-
-        # Handle both numpy array and pandas Series
-        conditional_vol = fitted.conditional_volatility
-
-        if isinstance(conditional_vol, np.ndarray):
-            self.last_conditional_volatility = (
-                float(conditional_vol[-1]) / self.scale_factor
-            )
+        scaler: Optional[ChannelScaler] = None
+        if scale:
+            scaler = ChannelScaler.fit(x)
+            x_in = scaler.transform(x)
         else:
-            self.last_conditional_volatility = (
-                float(conditional_vol.iloc[-1]) / self.scale_factor
+            x_in = x
+
+        # Try a few common argument names used in TSFM/Transformers-style forward signatures.
+        # We keep it defensive so small upstream API changes don't break your project.
+        outputs = None
+        forward_errors = []
+
+        for kwargs in (
+            {"past_values": x_in, "past_observed_mask": mask},
+            {"inputs": x_in, "past_observed_mask": mask},
+            {"x": x_in, "mask": mask},
+            {"past_values": x_in},
+            {"inputs": x_in},
+            {"x": x_in},
+        ):
+            try:
+                # Drop None values so we don't pass mask=None if not supported
+                clean_kwargs = {k: v for k, v in kwargs.items() if v is not None}
+                outputs = self.model(**clean_kwargs)
+                break
+            except Exception as e:
+                forward_errors.append((kwargs, repr(e)))
+
+        if outputs is None:
+            err_preview = "\n".join([f"kwargs={k} -> {e}" for k, e in forward_errors[:3]])
+            raise RuntimeError(
+                "TinyTimeMixer forward() failed with several common signatures.\n"
+                "First errors:\n" + err_preview
             )
 
-        logger.info(
-            f"Fit attempt: dist={dist}, converged={params['converged']}, "
-            f"AIC={params['aic']:.2f}, last_vol={self.last_conditional_volatility:.6f}"
-        )
+        # Normalize output extraction.
+        # Depending on TSFM version, it may return:
+        # - a ModelOutput-like object with .predictions / .prediction_outputs / .logits
+        # - a tuple where first element is prediction tensor
+        y_hat = None
 
-        return params
+        if hasattr(outputs, "predictions"):
+            y_hat = outputs.predictions
+        elif hasattr(outputs, "prediction_outputs"):
+            y_hat = outputs.prediction_outputs
+        elif hasattr(outputs, "logits"):
+            y_hat = outputs.logits
+        elif isinstance(outputs, (tuple, list)) and len(outputs) > 0 and torch.is_tensor(outputs[0]):
+            y_hat = outputs[0]
+        elif torch.is_tensor(outputs):
+            y_hat = outputs
 
-    def fit_with_retry(
-        self,
-        historical_data: pd.DataFrame,
-        p: int = 1,
-        q: int = 1,
-    ) -> Dict:
-        """
-        Fit GARCH model with bounded retries across distributions.
-        Convergence is preferred but not forced.
-        """
-
-        best_result = None
-        best_model = None
-
-        for dist in ["t", "skewt"]:  # safe → expressive
-            for attempt in range(2):  # bounded retries
-                result = self._fit_once(
-                    historical_data=historical_data,
-                    p=p,
-                    q=q,
-                    dist=dist,
-                )
-
-                # Keep first result as baseline
-                if best_result is None:
-                    best_result = result
-                    best_model = self.fitted_model
-
-                # Prefer converged models immediately
-                if result["converged"]:
-                    logger.info(
-                        f"GARCH converged using dist={dist} on attempt={attempt+1}"
-                    )
-                    return result
-
-                # Otherwise keep the statistically better one
-                if result["aic"] < best_result["aic"]:
-                    best_result = result
-                    best_model = self.fitted_model
-
-        # Restore best non-converged model ONCE
-        if best_model is not None:
-            self.fitted_model = best_model
-
-        logger.warning("No converged model found; returning best non-converged fit")
-        return best_result
-
-    # ========== NEW: GARCH-FX METHODS ==========
-
-    def generate_scenarios_fx(
-        self,
-        num_scenarios: int = 1000,
-        horizon: int = 252,
-        theta: float = 0.005,
-        scenario_type: Optional[str] = None,
-        delta_sequence: Optional[np.ndarray] = None,
-        regime_switching: bool = False,
-        regime_states: Optional[np.ndarray] = None,
-        regimes: Optional[List[float]] = None,
-        seed_start: int = 42,
-    ) -> List[pd.DataFrame]:
-        """Generate synthetic scenarios using GARCH-FX framework"""
-        if self.fitted_model is None or self.garch_params is None:
-            raise ValueError("Must fit model first! Call fit_with_retry()")
-
-        logger.info(
-            f"Starting GARCH-FX generation: {num_scenarios} scenarios, "
-            f"θ={theta}, scenario={scenario_type}"
-        )
-
-        from GARCH.services.garchfx_engine import GARCHFXEngine
-
-        engine = GARCHFXEngine(
-            volatility=self.last_conditional_volatility,
-            params=self.garch_params,
-            scale_factor=self.scale_factor,
-        )
-
-        if scenario_type and delta_sequence is None:
-            from GARCH.services.scenarios import generate_scenario
-
-            delta_sequence, _ = generate_scenario(scenario_type, horizon)
-            logger.info(f"Using scenario: {scenario_type}")
-
-        initial_price = float(self.historical_data["Close"].iloc[-1])
-        scenarios = []
-
-        for scenario_idx in range(num_scenarios):
-            np.random.seed(seed_start + scenario_idx)
-
-            volatility_forecast = engine.forecast(
-                horizon=horizon,
-                theta=theta,
-                delta_sequence=delta_sequence,
-                regime_switching=regime_switching,
-                regime_states=regime_states,
-                regimes=regimes,
+        if y_hat is None or not torch.is_tensor(y_hat):
+            raise RuntimeError(
+                "Could not extract forecast tensor from model outputs. "
+                f"Got output type: {type(outputs)} with attrs: {dir(outputs)[:20]}"
             )
 
-            # FIX: Use self.distribution instead of self.fitted_model.distribution
-            returns = engine.generate_returns_from_volatility(
-                volatility_forecast, self.distribution  # CHANGED THIS LINE
-            )
+        # Ensure [B, pred_len, C] ordering
+        # If upstream returns [B, C, pred_len], fix it.
+        if y_hat.ndim == 3:
+            b, a, c = y_hat.shape
+            # Heuristic: if middle dim equals channels and last dim equals pred_len, it might be [B,C,H]
+            # We detect channels by matching past_values C.
+            past_c = past_values.shape[-1]
+            if a == past_c and c != past_c:
+                y_hat = y_hat.transpose(1, 2)  # [B,H,C]
 
-            cumulative_returns = np.cumsum(returns)
-            close_prices = initial_price * np.exp(cumulative_returns)
+        if return_scaled or (not scale):
+            return y_hat.detach().cpu(), scaler
 
-            ohlcv = self._generate_ohlcv_from_close(close_prices, volatility_forecast)
-            scenarios.append(ohlcv)
+        if scaler is None:
+            return y_hat.detach().cpu(), None
 
-            if (scenario_idx + 1) % 100 == 0:
-                logger.info(f"Generated {scenario_idx + 1}/{num_scenarios} scenarios")
+        y_out = scaler.inverse_transform(y_hat)
+        return y_out.detach().cpu(), scaler
 
-        logger.info(f"Successfully generated {num_scenarios} GARCH-FX scenarios")
-        return scenarios
 
-    # ========== ORIGINAL METHOD (PRESERVED) ==========
+def load_ttm_r1(
+    device: Optional[str] = None,
+    torch_dtype: Optional[torch.dtype] = None,
+    **kwargs,
+) -> GraniteTinyTimeMixer:
+    return GraniteTinyTimeMixer("r1", device=device, torch_dtype=torch_dtype, **kwargs)
 
-    def generate_scenarios(
-        self,
-        num_scenarios: int = 1000,
-        horizon: int = 252,
-        volatility_multiplier: float = 1.0,
-    ) -> List[pd.DataFrame]:
-        """
-        Generate multiple synthetic OHLCV scenarios using standard GARCH.
-        (Original method preserved for backward compatibility)
-        """
-        if self.fitted_model is None:
-            raise ValueError("Must fit model first! Call fit_with_retry()")
 
-        try:
-            logger.info(
-                f"Starting generation of {num_scenarios} scenarios (standard GARCH), "
-                f"{horizon} days each"
-            )
-
-            initial_price_value = float(self.historical_data["Close"].iloc[-1].item())
-            scenarios = []
-
-            for scenario_idx in range(num_scenarios):
-                # Generate ONE scenario at a time
-                forecast = self.fitted_model.forecast(
-                    horizon=horizon,
-                    method="simulation",
-                    simulations=1,
-                    reindex=False,
-                )
-
-                # Extract and flatten returns
-                returns_scaled = forecast.simulations.values.flatten()
-                returns = returns_scaled / self.scale_factor
-
-                # Extract and flatten volatility
-                variance = forecast.variance.values.flatten()
-                volatility = (
-                    np.sqrt(variance) / self.scale_factor
-                ) * volatility_multiplier
-
-                # Ensure correct length
-                returns = returns[:horizon]
-                volatility = volatility[:horizon]
-
-                logger.debug(
-                    f"Scenario {scenario_idx}: returns={len(returns)}, vol={len(volatility)}"
-                )
-
-                # Calculate prices
-                cumulative_returns = np.cumsum(returns)
-                close_prices = initial_price_value * np.exp(cumulative_returns)
-
-                # Generate OHLCV
-                ohlcv = self._generate_ohlcv_from_close(close_prices, volatility)
-                scenarios.append(ohlcv)
-
-                if (scenario_idx + 1) % 100 == 0:
-                    logger.info(
-                        f"Generated {scenario_idx + 1}/{num_scenarios} scenarios"
-                    )
-
-            logger.info(f"Successfully generated {num_scenarios} scenarios")
-            return scenarios
-
-        except Exception as e:
-            logger.error(f"Error generating scenarios: {e}", exc_info=True)
-            raise
-
-    def _generate_ohlcv_from_close(
-        self, close_prices: np.ndarray, volatility: np.ndarray
-    ) -> pd.DataFrame:
-        """
-        Generate realistic OHLCV from close prices
-        """
-        n = len(close_prices)
-
-        # Ensure volatility matches length
-        if len(volatility) != n:
-            logger.warning(
-                f"Volatility length {len(volatility)} != close prices length {n}"
-            )
-            if len(volatility) < n:
-                volatility = np.pad(volatility, (0, n - len(volatility)), mode="edge")
-            else:
-                volatility = volatility[:n]
-
-        # Build OHLCV data row by row
-        ohlcv_rows = []
-
-        for i in range(n):
-            C = float(close_prices[i])
-            sigma = float(volatility[i])
-
-            # Open: Previous close + gap
-            if i > 0:
-                gap = np.random.normal(0, sigma * 0.3)
-                O = float(close_prices[i - 1] * (1 + gap))
-            else:
-                O = C
-
-            # High/Low using Parkinson range
-            hl_range = abs(np.random.normal(0, sigma * 1.5))
-            H = max(O, C) * (1 + hl_range)
-            L = min(O, C) * (1 - hl_range)
-
-            # Volume: Correlated with volatility
-            base_volume = 1_000_000
-            V = int(base_volume * (1 + sigma * np.random.exponential(2)))
-
-            ohlcv_rows.append({"Open": O, "High": H, "Low": L, "Close": C, "Volume": V})
-
-        df = pd.DataFrame(ohlcv_rows)
-
-        logger.debug(
-            f"Created OHLCV DataFrame: {len(df)} rows x {len(df.columns)} columns"
-        )
-
-        return df
-
-    def validate_scenarios(self, scenarios: List[pd.DataFrame]) -> Dict:
-        """
-        Validate synthetic data quality
-        """
-        try:
-            from GARCH.services.validation_service import ValidationService
-
-            validator = ValidationService(self.historical_data)
-
-            # Sample first 100 scenarios and collect returns
-            sample_size = min(100, len(scenarios))
-            all_synthetic_returns = []
-
-            for scenario in scenarios[:sample_size]:
-                returns = scenario["Close"].pct_change().dropna().values
-                all_synthetic_returns.extend(returns)
-
-            synthetic_returns_array = np.array(all_synthetic_returns)
-            metrics = validator.validate(synthetic_returns_array)
-
-            logger.info(f"Validation complete: {metrics}")
-            return metrics
-
-        except Exception as e:
-            logger.error(f"Error during validation: {e}", exc_info=True)
-            return {
-                "ks_statistic": 0.0,
-                "ks_pvalue": 0.0,
-                "kurtosis_historical": 0.0,
-                "kurtosis_synthetic": 0.0,
-                "acf_lag1_historical": 0.0,
-                "acf_lag1_synthetic": 0.0,
-                "error": str(e),
-            }
+def load_ttm_r2(
+    device: Optional[str] = None,
+    torch_dtype: Optional[torch.dtype] = None,
+    **kwargs,
+) -> GraniteTinyTimeMixer:
+    return GraniteTinyTimeMixer("r2", device=device, torch_dtype=torch_dtype, **kwargs)
