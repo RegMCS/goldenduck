@@ -67,7 +67,6 @@ Run the script from the backend directory (ensure services are up):
 cd backend
 python3 worker/GARCH/scripts/run_garch_job.py --ticker AAPL
 ```
-
 ### Defaults
 - `num_scenarios`: `100`
 - `horizon`: `252`

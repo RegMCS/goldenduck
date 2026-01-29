@@ -1,15 +1,25 @@
 from fastapi.testclient import TestClient
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 import tempfile
 import os
 import uuid
 import pytest
-
+from backend_app.db.session import get_db
 from job_scheduler.main import app
 
 client = TestClient(app)
 
 USER_ID = str(uuid.uuid4())
+
+
+@pytest.fixture(autouse=True)
+def override_db_dependency():
+    def fake_db():
+        yield MagicMock()  # fake SQLAlchemy session
+
+    app.dependency_overrides[get_db] = fake_db
+    yield
+    app.dependency_overrides.clear()
 
 
 # Global mock: replace Redis-backed job_store everywhere in routes

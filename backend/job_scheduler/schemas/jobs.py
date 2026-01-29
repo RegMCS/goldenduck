@@ -1,9 +1,10 @@
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
-from job_scheduler.models.enums import JobStatus
+from job_scheduler.models.enums import JobStatus, JobType
 
 
 class GenerateRequest(BaseModel):
+    job_type: JobType = JobType.garch  # default
     ticker: str
     p: int
     q: int
