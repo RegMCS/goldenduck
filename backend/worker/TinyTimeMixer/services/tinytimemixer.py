@@ -59,7 +59,7 @@ class ChannelScaler:
         return x * (self.std_ + self.eps) + self.mean_
 
 
-class GraniteTinyTimeMixer:
+class TinyTimeMixer:
     """
     Wrapper for loading + running IBM Granite TinyTimeMixer (TTM) models.
 
@@ -253,13 +253,13 @@ def load_ttm_r1(
     device: Optional[str] = None,
     torch_dtype: Optional[torch.dtype] = None,
     **kwargs,
-) -> GraniteTinyTimeMixer:
-    return GraniteTinyTimeMixer("r1", device=device, torch_dtype=torch_dtype, **kwargs)
+) -> TinyTimeMixer:
+    return TinyTimeMixer("r1", device=device, torch_dtype=torch_dtype, **kwargs)
 
 
 def load_ttm_r2(
     device: Optional[str] = None,
     torch_dtype: Optional[torch.dtype] = None,
     **kwargs,
-) -> GraniteTinyTimeMixer:
-    return GraniteTinyTimeMixer("r2", device=device, torch_dtype=torch_dtype, **kwargs)
+) -> TinyTimeMixer:
+    return TinyTimeMixer("r2", device=device, torch_dtype=torch_dtype, **kwargs)
