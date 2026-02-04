@@ -173,7 +173,7 @@ class GARCHService:
             f"θ={theta}, scenario={scenario_type}"
         )
 
-        from GARCH.services.garchfx_engine import GARCHFXEngine
+        from .garchfx_engine import GARCHFXEngine
 
         engine = GARCHFXEngine(
             volatility=self.last_conditional_volatility,
@@ -182,7 +182,7 @@ class GARCHService:
         )
 
         if scenario_type and delta_sequence is None:
-            from GARCH.services.scenarios import generate_scenario
+            from .scenarios import generate_scenario
 
             delta_sequence, _ = generate_scenario(scenario_type, horizon)
             logger.info(f"Using scenario: {scenario_type}")
@@ -346,7 +346,7 @@ class GARCHService:
         Validate synthetic data quality
         """
         try:
-            from GARCH.services.validation_service import ValidationService
+            from .validation_service import ValidationService
 
             validator = ValidationService(self.historical_data)
 

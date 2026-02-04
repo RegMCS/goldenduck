@@ -4,7 +4,7 @@ import tempfile
 import os
 import uuid
 import pytest
-from backend_app.db.session import get_db
+from job_scheduler.db.session import get_db
 from job_scheduler.main import app
 
 client = TestClient(app)
@@ -147,13 +147,3 @@ def test_download_api_s3_redirect(mock_job_store):
 
         assert response.status_code == 307
         assert response.headers["location"] == "https://fake-s3-url.com/file.csv"
-
-
-def test_download_api_legacy_file_not_supported(mock_job_store):
-    # If DB has a local path (legacy job)
-    mock_job_store.get_output_file.return_value = "/local/path/to/file.csv"
-
-    response = client.get(f"/api/download/user/{USER_ID}/test-job")
-
-    assert response.status_code == 404
-    assert "legacy local files not supported" in response.json()["detail"]

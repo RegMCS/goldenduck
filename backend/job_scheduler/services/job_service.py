@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
-from backend_app.models.ai_model_job import AIModelJob
+from job_scheduler.models.ai_model_job import AIModelJob
 from job_scheduler.models.enums import JobStatus, JobType
 
 
