@@ -4,7 +4,7 @@ import tempfile
 import os
 import uuid
 import pytest
-from backend_app.db.session import get_db
+from job_scheduler.db.session import get_db
 from job_scheduler.main import app
 
 client = TestClient(app)

@@ -3,7 +3,7 @@ from sqlalchemy import Column, DateTime, Text, ForeignKey, Enum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 
-from backend_app.db.base import Base
+from job_scheduler.db.base import Base
 from job_scheduler.models.enums import JobStatus, JobType
 
 

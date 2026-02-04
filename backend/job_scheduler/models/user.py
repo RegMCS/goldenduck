@@ -2,7 +2,7 @@ from sqlalchemy import Column, Text
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
 
-from backend_app.db.base import Base
+from job_scheduler.db.base import Base
 
 
 class User(Base):

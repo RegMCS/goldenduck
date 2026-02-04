@@ -12,7 +12,7 @@ import logging
 from datetime import datetime
 from typing import Optional, List
 
-from GARCH.models.schemas import (
+from worker.GARCH.models.schemas import (
     GenerateRequest,
     GenerateResponse,
     GARCHParameters,
@@ -22,8 +22,8 @@ from GARCH.models.schemas import (
     GenerateFXResponse,
     ScenarioListResponse,
 )
-from GARCH.services.garch_service import GARCHService
-from GARCH.services.scenarios import list_scenarios  # NEW
+from worker.GARCH.services.garch_service import GARCHService
+from worker.GARCH.services.scenarios import list_scenarios  # NEW
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -256,7 +256,7 @@ async def generate_garchfx_data(
     try:
         # Validate scenario if provided
         if request.scenario_type:
-            from GARCH.services.scenarios import list_scenarios
+            from worker.GARCH.services.scenarios import list_scenarios
 
             available_scenarios = list_scenarios()
             if request.scenario_type not in available_scenarios:
