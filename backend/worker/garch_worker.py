@@ -5,9 +5,14 @@ import logging
 import yfinance as yf
 import pandas as pd
 
+import io
+import boto3
 from job_scheduler.redis_client import redis_client
 from job_scheduler.services.job_store import job_store
+from job_scheduler.models.enums import JobStatus
 from worker.GARCH.services.garch_service import GARCHService
+from backend_app.db.session import SessionLocal
+from backend_app.services.job_service import update_job_status
 
 logging.basicConfig(
     level=logging.INFO,
@@ -15,8 +20,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("garch-worker")
 
-OUTPUT_DIR = "output"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+S3_BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "goldenduck-results")
+s3_client = boto3.client("s3")
+
 
 logger.info("GARCH worker started, waiting for jobs...")
 
@@ -80,14 +87,32 @@ while True:
 
         combined = pd.concat(all_rows, ignore_index=True)
 
-        output_path = os.path.join(OUTPUT_DIR, f"{job_id}.csv")
-        combined.to_csv(output_path, index=False)
+        # Upload to S3
+        csv_buffer = io.StringIO()
+        combined.to_csv(csv_buffer, index=False)
+        s3_key = f"garch/{job_id}.csv"
 
-        # Persist results
+        s3_client.put_object(
+            Bucket=S3_BUCKET_NAME, Key=s3_key, Body=csv_buffer.getvalue()
+        )
+
+        s3_url = f"s3://{S3_BUCKET_NAME}/{s3_key}"
+
+        # Persist results in Redis
         job_store.set_parameters(job_id, fitted_params)
         job_store.set_metrics(job_id, metrics)
-        job_store.set_output_file(job_id, output_path)
+        job_store.set_output_file(job_id, s3_url)
         job_store.set_status(job_id, "completed")
+
+        # Update DB
+        try:
+            db = SessionLocal()
+            update_job_status(db, job_id, JobStatus.completed, s3_url=s3_url)
+            logger.info("Updated DB status for job %s", job_id)
+        except Exception as db_exc:
+            logger.error("Failed to update DB for job %s: %s", job_id, db_exc)
+        finally:
+            db.close()
 
         logger.info("Job %s completed successfully", job_id)
 

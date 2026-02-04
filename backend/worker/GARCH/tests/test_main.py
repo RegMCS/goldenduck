@@ -133,69 +133,17 @@ def test_status_api_nonexistent_job(mock_job_store):
     assert response.json()["detail"] == "Job not found"
 
 
-def test_download_api_success(mock_job_store):
-    os.makedirs("output", exist_ok=True)
+def test_download_api_s3_redirect(mock_job_store):
+    mock_job_store.get_output_file.return_value = "s3://my-bucket/garch/test-job.csv"
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", delete=False, suffix=".csv", dir="output"
-    ) as f:
-        f.write("a,b,c\n1,2,3\n")
-        temp_file = f.name
+    with patch("job_scheduler.routes.jobs.boto3.client") as mock_boto:
+        mock_s3 = MagicMock()
+        mock_boto.return_value = mock_s3
+        mock_s3.generate_presigned_url.return_value = "https://fake-s3-url.com/file.csv"
 
-    try:
-        mock_job_store.get_output_file.return_value = temp_file
+        response = client.get(
+            f"/api/download/user/{USER_ID}/test-job", follow_redirects=False
+        )
 
-        response = client.get(f"/api/download/user/{USER_ID}/test-job")
-
-        assert response.status_code == 200
-        assert "text/csv" in response.headers["content-type"]
-        assert "a,b,c" in response.text
-    finally:
-        os.unlink(temp_file)
-
-
-def test_download_api_file_not_ready(mock_job_store):
-    mock_job_store.get_output_file.return_value = None
-
-    response = client.get(f"/api/download/user/{USER_ID}/test-job")
-
-    assert response.status_code == 404
-    assert response.json()["detail"] == "File not ready"
-
-
-def test_download_api_path_traversal_attack(mock_job_store):
-    mock_job_store.get_output_file.return_value = "/etc/passwd"
-
-    response = client.get(f"/api/download/user/{USER_ID}/test-job")
-
-    assert response.status_code == 403
-    assert response.json()["detail"] == "Access denied"
-
-
-def test_download_api_path_traversal_with_relative_path(mock_job_store):
-    mock_job_store.get_output_file.return_value = "output/../../etc/passwd"
-
-    response = client.get(f"/api/download/user/{USER_ID}/test-job")
-
-    assert response.status_code == 403
-    assert response.json()["detail"] == "Access denied"
-
-
-def test_download_api_valid_path_in_output_dir(mock_job_store):
-    os.makedirs("output", exist_ok=True)
-
-    with tempfile.NamedTemporaryFile(
-        mode="w", delete=False, suffix=".csv", dir="output"
-    ) as f:
-        f.write("scenario,value\n1,100\n")
-        temp_file = f.name
-
-    try:
-        mock_job_store.get_output_file.return_value = temp_file
-
-        response = client.get(f"/api/download/user/{USER_ID}/test-job")
-
-        assert response.status_code == 200
-        assert "scenario,value" in response.text
-    finally:
-        os.unlink(temp_file)
+        assert response.status_code == 307
+        assert response.headers["location"] == "https://fake-s3-url.com/file.csv"

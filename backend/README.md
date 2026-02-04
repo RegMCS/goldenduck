@@ -396,6 +396,10 @@ uvicorn main:app --reload --port 8000
 See `docker-compose.env` or `.env` for configuration options:
 - `DB_HOST`, `DB_PORT`, `DB_NAME`: Database connection
 - `DB_USER`, `DB_PASSWORD`: Database credentials
+- `S3_BUCKET_NAME`: Name of the S3 bucket for storing results (default: `goldenduck-results`)
+- `AWS_ACCESS_KEY_ID`: AWS access key for S3 access
+- `AWS_SECRET_ACCESS_KEY`: AWS secret key for S3 access
+- `AWS_DEFAULT_REGION`: AWS region for S3 access
 
 ### Running Tests
 
