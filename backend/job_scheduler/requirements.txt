@@ -12,3 +12,4 @@ scipy>=1.10.0
 yfinance>=0.2.0          # For fetching historical data
 python-multipart          # For file uploads
 redis
+boto3
