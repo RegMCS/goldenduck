@@ -10,7 +10,6 @@ const _geistMono = Geist_Mono({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: 'SynthMarket - Synthetic Market Data Generator',
   description: 'Generate realistic synthetic financial time series data for backtesting, stress-testing, and model development',
-  generator: 'v0.app',
   icons: {
     icon: [
       {
