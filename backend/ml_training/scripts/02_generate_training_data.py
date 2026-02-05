@@ -72,7 +72,6 @@ def generate_samples_for_assets(asset_list, split="train"):
                 "desired_trend": np.random.choice([-1.0, -0.5, 0.0, 0.5, 1.0]),
                 "desired_fat_tails": np.random.choice([0.8, 1.0, 1.2, 1.5]),
                 "desired_momentum": np.random.choice([0.5, 0.75, 1.0, 1.25]),
-                "desired_mean_reversion": np.random.choice([0.3, 0.5, 0.7, 1.0]),
             }
 
             # Find optimal parameters (ground truth)

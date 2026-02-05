@@ -10,9 +10,10 @@ import sys
 sys.path.append("../..")
 from config.training_config import RAW_DATA_DIR
 from parameter_optimization.grid_search import garch_fx_simulate, score_synthetic_data
+from parameter_optimization.heuristic_theta import compute_theta_hybrid
 
 
-def evaluate_end_to_end(rf_delta, rf_theta, test_samples, save_results=True):
+def evaluate_end_to_end(rf_delta, test_samples, save_results=True):
     """
     End-to-end evaluation:
     1. Use AI to predict parameters
@@ -39,20 +40,21 @@ def evaluate_end_to_end(rf_delta, rf_theta, test_samples, save_results=True):
             "desired_trend": X[29],
             "desired_fat_tails": X[30],
             "desired_momentum": X[31],
-            "desired_mean_reversion": X[32],
         }
 
         # AI predicts parameters
         delta_pred = rf_delta.predict(X.reshape(1, -1))[0]
 
         # Predict log-theta
-        theta_log_pred = rf_theta.predict(X.reshape(1, -1))[0]
+        # theta_log_pred = rf_theta.predict(X.reshape(1, -1))[0]
 
         # Convert back to theta (inverse of ln)
-        theta_pred = float(np.exp(theta_log_pred))
+        # theta_pred = float(np.exp(theta_log_pred))
 
         # Clip to sensible range
-        theta_pred = float(np.clip(theta_pred, 1e-6, 0.1))
+        # theta_pred = float(np.clip(theta_pred, 1e-6, 0.1))
+
+        theta_pred = compute_theta_hybrid(user_knobs, historical_returns)
 
         # Generate synthetic data
         try:

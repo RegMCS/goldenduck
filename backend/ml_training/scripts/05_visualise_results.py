@@ -14,7 +14,10 @@ sns.set_style("whitegrid")
 plt.rcParams["figure.figsize"] = (15, 10)
 
 # Load results
-EVALUATION_DIR = Path("ml_training/models/evaluation")
+SCRIPT_DIR = Path(__file__).parent
+ML_TRAINING_DIR = SCRIPT_DIR.parent
+EVALUATION_DIR = ML_TRAINING_DIR / "models" / "evaluation"
+
 with open(EVALUATION_DIR / "evaluation_report.json", "r") as f:
     report = json.load(f)
 
@@ -28,7 +31,6 @@ fig.suptitle("Model Evaluation Results", fontsize=16, fontweight="bold")
 ax = axes[0, 0]
 r2_scores = {
     "Delta": report["direct_metrics"]["delta"]["r2"],
-    "Theta": report["direct_metrics"]["theta"]["r2"],
 }
 colors = [
     "red" if v < 0.3 else "orange" if v < 0.7 else "green" for v in r2_scores.values()
@@ -59,9 +61,8 @@ for bar in bars:
 ax = axes[0, 1]
 rmse_scores = {
     "Delta": report["direct_metrics"]["delta"]["rmse"],
-    "Theta": report["direct_metrics"]["theta"]["rmse"],
 }
-ax.bar(rmse_scores.keys(), rmse_scores.values(), color=["coral", "skyblue"], alpha=0.7)
+ax.bar(rmse_scores.keys(), rmse_scores.values(), color=["coral"], alpha=0.7)
 ax.set_ylabel("RMSE")
 ax.set_title("Root Mean Square Error (Lower is Better)")
 
@@ -109,18 +110,15 @@ mape_scores = {
     "Delta": min(
         report["direct_metrics"]["delta"]["mape"], 100
     ),  # Cap at 100% for visualization
-    "Theta": min(report["direct_metrics"]["theta"]["mape"], 100),
 }
-bars = ax.bar(
-    mape_scores.keys(), mape_scores.values(), color=["red", "darkred"], alpha=0.7
-)
+bars = ax.bar(mape_scores.keys(), mape_scores.values(), color=["red"], alpha=0.7)
 ax.axhline(y=20, color="green", linestyle="--", label="Good (<20%)")
 ax.set_ylabel("MAPE (%)")
 ax.set_title("Mean Absolute Percentage Error (Lower is Better)")
 ax.legend()
 
-for bar, (k, v) in zip(bars, report["direct_metrics"].items()):
-    actual_mape = v["mape"]
+for bar, (k, v) in zip(bars, mape_scores.items()):
+    actual_mape = report["direct_metrics"]["delta"]["mape"]
     height = bar.get_height()
     label = (
         f"{actual_mape:.1f}%"
@@ -217,10 +215,7 @@ print(f"  MAPE: {report['direct_metrics']['delta']['mape']:.1f}%")
 print(f"  Status: Cannot predict delta reliably")
 
 print("\n📉 Theta Parameter:")
-print(f"  R²:   {report['direct_metrics']['theta']['r2']:.3f} (target: >0.6) ❌")
-print(f"  RMSE: {report['direct_metrics']['theta']['rmse']:.4f}")
-print(f"  MAPE: {report['direct_metrics']['theta']['mape']:.1f}%")
-print(f"  Status: Worse than predicting mean (negative R²)")
+print(f"  Status: Using heuristic approach (no ML model)")
 
 print("\n🎯 End-to-End Quality:")
 print(f"  Score: {report['end_to_end_metrics']['mean_score']:.3f} (target: >0.7) ❌")
@@ -238,7 +233,7 @@ print(f"  Status: ❌ AI is WORSE than baselines")
 print("\n💡 Recommended Actions:")
 print("  1. CRITICAL: Increase dataset to 25,000 samples")
 print("     → Set TESTING_MODE = False in config")
-print("  2. Reduce features from 33 to 15")
+print("  2. Reduce features from 32 to 15")
 print("  3. Try simpler models (Ridge, Lasso)")
 print("  4. Ensemble AI with heuristic baseline")
 print("  5. Improve feature engineering")

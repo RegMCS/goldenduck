@@ -61,7 +61,7 @@ def main():
     # ──────────────────────────────────────────────────────────
     print("\n📦 Loading trained models...")
     rf_delta = joblib.load(f"{MODEL_SAVE_DIR}/rf_delta.pkl")
-    rf_theta = joblib.load(f"{MODEL_SAVE_DIR}/rf_theta.pkl")
+    # rf_theta = joblib.load(f"{MODEL_SAVE_DIR}/rf_theta.pkl")
     print("✓ Models loaded")
 
     # ──────────────────────────────────────────────────────────
@@ -81,7 +81,7 @@ def main():
 
     X_test = np.array([s["X"] for s in test_samples])
     y_delta_test = np.array([s["y_delta"] for s in test_samples])
-    y_theta_test = np.array([s["y_theta"] for s in test_samples])
+    # y_theta_test = np.array([s["y_theta"] for s in test_samples])
 
     print(f"✓ Loaded {len(test_samples)} test samples")
     print(f"  Test assets: {len(set([s['asset'] for s in test_samples]))} unique")
@@ -97,18 +97,18 @@ def main():
         rf_delta, X_test, y_delta_test, param_name="delta"
     )
 
-    theta_metrics = evaluate_direct_metrics(
-        rf_theta, X_test, y_theta_test, param_name="theta", is_log_theta=True
-    )
+    # theta_metrics = evaluate_direct_metrics(
+    #     rf_theta, X_test, y_theta_test, param_name="theta", is_log_theta=True
+    # )
 
     # Extract individual metrics
     delta_rmse = delta_metrics["rmse"]
     delta_mae = delta_metrics["mae"]
     delta_r2 = delta_metrics["r2"]
 
-    theta_rmse = theta_metrics["rmse"]
-    theta_mae = theta_metrics["mae"]
-    theta_r2 = theta_metrics["r2"]
+    # theta_rmse = theta_metrics["rmse"]
+    # theta_mae = theta_metrics["mae"]
+    # theta_r2 = theta_metrics["r2"]
 
     # ──────────────────────────────────────────────────────────
     # 4. EVALUATION LEVEL 2: End-to-End Quality
@@ -120,7 +120,7 @@ def main():
 
     end_to_end_scores = evaluate_end_to_end(
         rf_delta=rf_delta,
-        rf_theta=rf_theta,
+        # rf_theta=rf_theta,
         test_samples=test_samples[:50],  # Test on 50 samples
         save_results=True,
     )
@@ -139,7 +139,7 @@ def main():
     print("=" * 80)
 
     baseline_scores = evaluate_baselines(
-        rf_delta=rf_delta, rf_theta=rf_theta, test_samples=test_samples[:50]
+        rf_delta=rf_delta, test_samples=test_samples[:50]
     )
 
     # ──────────────────────────────────────────────────────────
@@ -159,9 +159,9 @@ def main():
                 "test_delta_rmse": float(delta_rmse),
                 "test_delta_mae": float(delta_mae),
                 "test_delta_r2": float(delta_r2),
-                "test_theta_rmse": float(theta_rmse),
-                "test_theta_mae": float(theta_mae),
-                "test_theta_r2": float(theta_r2),
+                # "test_theta_rmse": float(theta_rmse),
+                # "test_theta_mae": float(theta_mae),
+                # "test_theta_r2": float(theta_r2),
             }
         )
 
@@ -201,7 +201,7 @@ def main():
 
     print("\n📊 Direct Metrics:")
     print(f"  Delta - RMSE: {delta_rmse:.4f}, R²: {delta_r2:.3f}")
-    print(f"  Theta - RMSE: {theta_rmse:.6f}, R²: {theta_r2:.3f}")
+    # print(f"  Theta - RMSE: {theta_rmse:.6f}, R²: {theta_r2:.3f}")
 
     print(f"\n🎯 End-to-End Quality: {end_to_end_score:.3f}")
 
@@ -220,7 +220,7 @@ def main():
 
     checks = {
         "Delta R² > 0.7": delta_r2 > 0.7,
-        "Theta R² > 0.6": theta_r2 > 0.6,
+        # "Theta R² > 0.6": theta_r2 > 0.6,
         "End-to-End > 0.7": end_to_end_score > 0.7,
         "Better than fixed": baseline_scores["ai_score"]
         > baseline_scores["baseline_fixed"],
@@ -248,7 +248,7 @@ def main():
             "val": len(val_samples),
             "test": len(test_samples),
         },
-        "direct_metrics": {"delta": delta_metrics, "theta": theta_metrics},
+        "direct_metrics": {"delta": delta_metrics},
         "end_to_end_metrics": (
             {"mean_score": end_to_end_score}
             if isinstance(end_to_end_score, (int, float))
@@ -272,12 +272,13 @@ def main():
     print(f"\n✓ Full report saved to {report_path}")
 
 
-def evaluate_baselines(rf_delta, rf_theta, test_samples):
+def evaluate_baselines(rf_delta, test_samples):
     """
     Compare AI approach to baseline methods
     """
     from evaluation.end_to_end_eval import score_synthetic_data
     from parameter_optimization.grid_search import garch_fx_simulate
+    from parameter_optimization.heuristic_theta import compute_theta_hybrid
 
     ai_scores = []
     baseline_fixed_scores = []
@@ -297,25 +298,14 @@ def evaluate_baselines(rf_delta, rf_theta, test_samples):
                 "desired_trend": float(X[29]),
                 "desired_fat_tails": float(X[30]),
                 "desired_momentum": float(X[31]),
-                "desired_mean_reversion": float(X[32]),
             }
 
             # AI approach
             delta_ai = float(rf_delta.predict(X.reshape(1, -1))[0])
-            # theta_ai = float(rf_theta.predict(X.reshape(1, -1))[0])
-
-            # Predict log-theta
-            theta_log_ai = rf_theta.predict(X.reshape(1, -1))[0]
-
-            # Convert back to theta (inverse of ln)
-            theta_ai = float(np.exp(theta_log_ai))
-
-            # Clip to sensible range
-            theta_ai = float(np.clip(theta_ai, 1e-6, 0.1))
-
-            # Clip predictions
             delta_ai = np.clip(delta_ai, 0.001, 100)
-            # theta_ai = np.clip(theta_ai, 0.001, 10)
+
+            # Theta: using heuristic approach (more reliable than ML)
+            theta_ai = compute_theta_hybrid(user_knobs, historical_returns)
 
             synthetic_ai = garch_fx_simulate(
                 historical_returns, delta_ai, theta_ai, horizon=252, num_paths=10

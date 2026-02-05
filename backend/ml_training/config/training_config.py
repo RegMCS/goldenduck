@@ -32,7 +32,7 @@ PROCESSED_DATA_DIR = BASE_DIR / "data/processed"
 MODEL_SAVE_DIR = BASE_DIR / "models/saved_models"
 EVALUATION_DIR = BASE_DIR / "models/evaluation"
 
-TESTING_MODE = True  # Set to False for production
+TESTING_MODE = False  # Set to False for production
 # Testing: Use only 50 assets (instead of 500)
 if TESTING_MODE:
     N_ASSETS = 100  # ← Changed from 50 to 100
@@ -55,8 +55,8 @@ TEST_SPLIT = 0.15  # 7 assets for testing
 
 CATCH22_FEATURES = 22
 FINANCIAL_FEATURES = 6
-USER_KNOB_FEATURES = 5
-TOTAL_FEATURES = CATCH22_FEATURES + FINANCIAL_FEATURES + USER_KNOB_FEATURES  # 33
+USER_KNOB_FEATURES = 4
+TOTAL_FEATURES = CATCH22_FEATURES + FINANCIAL_FEATURES + USER_KNOB_FEATURES  # 32
 
 
 # ============================================================

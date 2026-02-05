@@ -7,14 +7,25 @@ import numpy as np
 from scipy import stats
 
 
+def _normalize_returns(returns):
+    """Normalize input to a 1D float array and remove non-finite values."""
+    arr = np.asarray(returns, dtype=float).reshape(-1)
+    arr = arr[np.isfinite(arr)]
+    if arr.size < 10:
+        raise ValueError("Not enough valid return values for feature extraction")
+    return arr
+
+
 def extract_catch22_features(returns):
     """Extract 22 catch22 features from time series"""
+    returns = _normalize_returns(returns)
     c22 = pycatch22.catch22_all(returns.tolist())
     return np.array(c22["values"])
 
 
 def extract_financial_features(returns):
     """Extract 6 financial domain features"""
+    returns = _normalize_returns(returns)
     features = [
         np.std(returns) * np.sqrt(252),  # realized vol
         stats.kurtosis(returns),  # tail thickness

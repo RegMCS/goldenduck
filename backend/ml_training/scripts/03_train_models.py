@@ -40,23 +40,23 @@ def main():
 
     X_train = np.array([s["X"] for s in train_samples])
     y_delta_train = np.array([s["y_delta"] for s in train_samples])
-    y_theta_train = np.array([s["y_theta"] for s in train_samples])
-    y_theta_train_log = np.log(y_theta_train)  # Direct log (all theta values > 0)
+    # y_theta_train = np.array([s["y_theta"] for s in train_samples])
+    # y_theta_train_log = np.log(y_theta_train)  # Direct log (all theta values > 0)
 
     X_val = np.array([s["X"] for s in val_samples])
     y_delta_val = np.array([s["y_delta"] for s in val_samples])
-    y_theta_val = np.array([s["y_theta"] for s in val_samples])
-    y_theta_val_log = np.log(y_theta_val)  # Direct log (all theta values > 0)
+    # y_theta_val = np.array([s["y_theta"] for s in val_samples])
+    # y_theta_val_log = np.log(y_theta_val)  # Direct log (all theta values > 0)
 
     # Train models
     rf_delta = train_random_forest(X_train, y_delta_train, X_val, y_delta_val, "delta")
-    rf_theta = train_random_forest(
-        X_train, y_theta_train_log, X_val, y_theta_val_log, "theta"
-    )
+    # rf_theta = train_random_forest(
+    #     X_train, y_theta_train_log, X_val, y_theta_val_log, "theta"
+    # )
 
     # Save models
     joblib.dump(rf_delta, f"{MODEL_SAVE_DIR}/rf_delta.pkl")
-    joblib.dump(rf_theta, f"{MODEL_SAVE_DIR}/rf_theta.pkl")
+    # joblib.dump(rf_theta, f"{MODEL_SAVE_DIR}/rf_theta.pkl")
 
     print("✓ Models trained and saved!")
 

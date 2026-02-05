@@ -23,6 +23,7 @@ GARCH/output/
 #datasets
 *.csv
 *.txt
+*.png
 
 # ============================================================
 # ML Training Data & Artifacts
