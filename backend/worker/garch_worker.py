@@ -11,8 +11,8 @@ from job_scheduler.redis_client import redis_client
 from job_scheduler.services.job_store import job_store
 from job_scheduler.models.enums import JobStatus
 from worker.GARCH.services.garch_service import GARCHService
-from backend_app.db.session import SessionLocal
-from backend_app.services.job_service import update_job_status
+from job_scheduler.db.session import SessionLocal
+from job_scheduler.services.job_service import update_job_status
 
 logging.basicConfig(
     level=logging.INFO,
