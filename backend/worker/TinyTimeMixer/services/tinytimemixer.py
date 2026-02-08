@@ -3,6 +3,11 @@ Uses IBM Granite TinyTimeMixer (TTM) pretrained models hosted on Hugging Face:
 - ibm-granite/granite-timeseries-ttm-r1
 - ibm-granite/granite-timeseries-ttm-r2
 
+Notes on daily/weekly:
+- Use the TSFM `get_model` selector with `freq="D"` or `freq="W"` and a matching
+  `context_length`/`prediction_length` to auto-pick r2.1 revisions that support
+  daily/weekly data.
+
 Input convention (simple + explicit):
 - past_values: torch.Tensor of shape [batch, context_length, channels]
 - optional: past_observed_mask: same shape, 1 for observed, 0 for missing (if you have missing)
@@ -72,6 +77,10 @@ class TinyTimeMixer:
         device: Optional[str] = None,
         torch_dtype: Optional[torch.dtype] = None,
         *,
+        # If provided, enables TSFM's get_model selector (required for daily/weekly).
+        context_length: Optional[int] = None,
+        freq: Optional[str] = None,
+        use_get_model: Optional[bool] = None,
         # Overrides you might want when adapting the checkpoint to your dataset:
         num_input_channels: Optional[int] = None,
         prediction_length: Optional[int] = None,
@@ -91,6 +100,9 @@ class TinyTimeMixer:
         self.model = self._load_model(
             model_id=self.model_id,
             torch_dtype=torch_dtype,
+            context_length=context_length,
+            freq=freq,
+            use_get_model=use_get_model,
             num_input_channels=num_input_channels,
             prediction_length=prediction_length,
             decoder_mode=decoder_mode,
@@ -104,6 +116,9 @@ class TinyTimeMixer:
     def _load_model(
         model_id: str,
         torch_dtype: Optional[torch.dtype],
+        context_length: Optional[int],
+        freq: Optional[str],
+        use_get_model: Optional[bool],
         num_input_channels: Optional[int],
         prediction_length: Optional[int],
         decoder_mode: Optional[str],
@@ -138,6 +153,36 @@ class TinyTimeMixer:
             extra_kwargs["exogenous_channel_indices"] = exogenous_channel_indices
         if torch_dtype is not None:
             extra_kwargs["torch_dtype"] = torch_dtype
+
+        if use_get_model is None:
+            use_get_model = (context_length is not None) or (freq is not None)
+
+        if use_get_model:
+            try:
+                from tsfm_public.toolkit.get_model import get_model
+            except Exception as e:
+                raise ImportError(
+                    "Failed to import get_model from tsfm_public.toolkit. "
+                    "Install IBM Granite TSFM library (granite-tsfm / tsfm_public)."
+                ) from e
+
+            if context_length is None or prediction_length is None:
+                raise ValueError(
+                    "context_length and prediction_length are required when use_get_model is enabled. "
+                    "These are needed to select the correct pretrained revision."
+                )
+
+            # Do not pass prediction_length via kwargs here; get_model uses it to select a revision
+            # and will pass prediction_filter_length to from_pretrained when needed.
+            extra_kwargs_no_pred = {k: v for k, v in extra_kwargs.items() if k != "prediction_length"}
+            model = get_model(
+                model_id,
+                context_length=int(context_length),
+                prediction_length=int(prediction_length),
+                freq=freq,
+                **extra_kwargs_no_pred,
+            )
+            return model
 
         # IBM Granite docs show this from_pretrained pattern for fine-tuning as well. :contentReference[oaicite:7]{index=7}
         model = TinyTimeMixerForPrediction.from_pretrained(model_id, **extra_kwargs)
