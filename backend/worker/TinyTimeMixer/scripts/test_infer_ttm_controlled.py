@@ -60,18 +60,18 @@ except Exception:
 # User-configurable section
 # ----------------------------
 TICKER = "AAPL"
-INPUT_START = "2023-01-01"
-INPUT_END = "2023-12-31"
+INPUT_START = "2020-01-01"
+INPUT_END = "2020-12-31"
 
 PREDICTION_LENGTH = 180
 ROLL_STEP = 1
 
 CONTROLS = ControlValues(
-    volatility_mult=1.3,
-    trend=0.1,
-    fat_tails=1.2,
-    momentum=0.25,
-    mean_reversion=0.1,
+    volatility_mult=1.0,
+    trend=0.0,
+    fat_tails=1.0,
+    momentum=0.0,
+    mean_reversion=0.0,
     horizon=float(PREDICTION_LENGTH),
 )
 
@@ -124,7 +124,7 @@ def build_context(
     scaler: StandardScaler,
     controls: ControlValues,
 ) -> Tuple[np.ndarray, float, pd.Timestamp, float]:
-    feats = build_base_features(df)
+    feats = build_base_features(df, cfg)
     if len(feats) < cfg.context_length:
         raise ValueError(
             f"Not enough rows for context_length={cfg.context_length}. "
@@ -317,6 +317,9 @@ def main() -> None:
         prediction_length=int(config["prediction_length"]),
     )
     cfg.control_ranges = ControlRanges(**config["control_ranges"])
+    cfg.detrend_returns = bool(config.get("detrend_returns", cfg.detrend_returns))
+    cfg.detrend_window = int(config.get("detrend_window", cfg.detrend_window))
+    cfg.detrend_mode = str(config.get("detrend_mode", cfg.detrend_mode))
 
     scaler_state = torch.load(scaler_path, weights_only=False)
     scaler = StandardScaler.from_state_dict(scaler_state)
@@ -374,6 +377,9 @@ def main() -> None:
         controls=CONTROLS,
         cfg=cfg,
     )
+
+    if abs(CONTROLS.trend) < 1e-8:
+        pred_features[:, 0] = pred_features[:, 0] - float(pred_features[:, 0].mean())
 
     synth_df = reconstruct_ohlcv_from_features(last_close, pred_features, last_date)
     synth_df.to_csv(OUTPUT_CSV, index=False)

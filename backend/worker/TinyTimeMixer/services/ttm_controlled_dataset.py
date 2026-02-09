@@ -85,6 +85,9 @@ class TTMControlledConfig:
     infer_return_noise_scale: float = 0.15
     infer_range_noise_scale: float = 0.05
     infer_volume_noise_scale: float = 0.05
+    detrend_returns: bool = True
+    detrend_window: int = 20
+    detrend_mode: str = "rolling"
 
     @property
     def num_target_features(self) -> int:
@@ -188,11 +191,24 @@ def download_daily_ohlcv(
     return df
 
 
-def build_base_features(df: pd.DataFrame) -> pd.DataFrame:
+def build_base_features(
+    df: pd.DataFrame, cfg: Optional[TTMControlledConfig] = None
+) -> pd.DataFrame:
     out = df.copy()
     out["log_return"] = np.log(out["Close"] / out["Close"].shift(1))
     out["log_range"] = np.log(out["High"] / out["Low"])
     out["log_volume"] = np.log1p(out["Volume"].astype(float))
+
+    if cfg is not None and cfg.detrend_returns:
+        if cfg.detrend_mode == "rolling":
+            roll = out["log_return"].rolling(cfg.detrend_window, min_periods=1).mean()
+            out["log_return"] = out["log_return"] - roll
+        elif cfg.detrend_mode == "mean":
+            out["log_return"] = out["log_return"] - out["log_return"].mean()
+        else:
+            raise ValueError(
+                f"Invalid detrend_mode={cfg.detrend_mode}. Use 'rolling' or 'mean'."
+            )
     out = out.dropna().reset_index(drop=True)
     return out[["date", "Close"] + TARGET_FEATURES]
 

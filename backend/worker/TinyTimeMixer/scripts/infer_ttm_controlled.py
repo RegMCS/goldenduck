@@ -98,7 +98,7 @@ def build_context(
     scaler: StandardScaler,
     controls: ControlValues,
 ) -> Tuple[np.ndarray, float, pd.Timestamp, float]:
-    feats = build_base_features(df)
+    feats = build_base_features(df, cfg)
     if len(feats) < cfg.context_length:
         raise ValueError(
             f"Not enough rows for context_length={cfg.context_length}. "
@@ -231,6 +231,9 @@ def main() -> None:
         prediction_length=int(config["prediction_length"]),
     )
     cfg.control_ranges = ControlRanges(**config["control_ranges"])
+    cfg.detrend_returns = bool(config.get("detrend_returns", cfg.detrend_returns))
+    cfg.detrend_window = int(config.get("detrend_window", cfg.detrend_window))
+    cfg.detrend_mode = str(config.get("detrend_mode", cfg.detrend_mode))
 
     scaler_state = torch.load(scaler_path, weights_only=False)
     scaler = StandardScaler.from_state_dict(scaler_state)
@@ -309,6 +312,9 @@ def main() -> None:
         controls=controls,
         cfg=cfg,
     )
+
+    if abs(controls.trend) < 1e-8:
+        pred_features[:, 0] = pred_features[:, 0] - float(pred_features[:, 0].mean())
 
     ohlcv = reconstruct_ohlcv_from_features(last_close, pred_features, last_date)
     ohlcv.to_csv(output_csv, index=False)

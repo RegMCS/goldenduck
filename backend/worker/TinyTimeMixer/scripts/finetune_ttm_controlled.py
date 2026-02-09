@@ -279,7 +279,7 @@ def main() -> None:
         print(f"Downloading {ticker}...")
         raw = download_daily_ohlcv(ticker, start=START_DATE, end=END_DATE)
         print(f"  rows downloaded: {len(raw)}")
-        feats = build_base_features(raw)
+        feats = build_base_features(raw, cfg)
         print(f"  rows after features: {len(feats)}")
         if len(feats) < (CONTEXT_LEN + PRED_LEN + 1):
             print(f"[skip] {ticker}: not enough rows ({len(feats)}).")
@@ -387,7 +387,7 @@ def main() -> None:
         lr=LR,
         weight_decay=WEIGHT_DECAY,
     )
-    loss_fn = torch.nn.MSELoss()
+    loss_fn = torch.nn.HuberLoss(delta=1.0)
 
     best_val = float("inf")
     best_state: Optional[Dict[str, torch.Tensor]] = None
@@ -465,6 +465,9 @@ def main() -> None:
         "infer_return_noise_scale": cfg.infer_return_noise_scale,
         "infer_range_noise_scale": cfg.infer_range_noise_scale,
         "infer_volume_noise_scale": cfg.infer_volume_noise_scale,
+        "detrend_returns": cfg.detrend_returns,
+        "detrend_window": cfg.detrend_window,
+        "detrend_mode": cfg.detrend_mode,
         "train_end_year": TRAIN_END_YEAR,
         "val_year": VAL_YEAR,
         "test_year": TEST_YEAR,
