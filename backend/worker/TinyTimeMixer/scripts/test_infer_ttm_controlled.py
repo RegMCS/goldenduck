@@ -64,6 +64,7 @@ INPUT_START = "2023-01-01"
 INPUT_END = "2023-12-31"
 
 PREDICTION_LENGTH = 180
+ROLL_STEP = 1
 
 CONTROLS = ControlValues(
     volatility_mult=1.3,
@@ -155,6 +156,7 @@ def rollout_forecast(
     controls: ControlValues,
     *,
     horizon: int,
+    roll_step: int,
     device: str,
     freq_token_value: Optional[int] = None,
 ) -> np.ndarray:
@@ -164,7 +166,7 @@ def rollout_forecast(
     outputs_scaled = []
 
     while remaining > 0:
-        step = min(cfg.prediction_length, remaining)
+        step = min(roll_step, remaining)
         past_ctrl = np.repeat(ctrl_scaled[None, :], cfg.context_length, axis=0)
         past_values = np.concatenate([current, past_ctrl], axis=1)
 
@@ -361,6 +363,7 @@ def main() -> None:
         scaler,
         CONTROLS,
         horizon=int(PREDICTION_LENGTH),
+        roll_step=int(ROLL_STEP),
         device=device,
         freq_token_value=freq_token_value,
     )

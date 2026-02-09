@@ -128,6 +128,7 @@ def rollout_forecast(
     controls: ControlValues,
     *,
     horizon: int,
+    roll_step: int,
     device: str,
     freq_token_value: Optional[int] = None,
 ) -> np.ndarray:
@@ -138,7 +139,7 @@ def rollout_forecast(
     outputs_scaled = []
 
     while remaining > 0:
-        step = min(cfg.prediction_length, remaining)
+        step = min(roll_step, remaining)
         past_ctrl = np.repeat(ctrl_scaled[None, :], cfg.context_length, axis=0)
         past_values = np.concatenate([current, past_ctrl], axis=1)
 
@@ -179,6 +180,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--horizon", type=int, default=60, help="Forecast horizon (days)."
+    )
+    parser.add_argument(
+        "--roll-step",
+        type=int,
+        default=1,
+        help="Rollout step size (days). Use 1 for day-by-day generation.",
     )
     parser.add_argument("--volatility-mult", type=float, default=1.0)
     parser.add_argument("--trend", type=float, default=0.0)
@@ -291,6 +298,7 @@ def main() -> None:
         scaler,
         controls,
         horizon=int(args.horizon),
+        roll_step=int(args.roll_step),
         device=device,
         freq_token_value=freq_token_value,
     )
