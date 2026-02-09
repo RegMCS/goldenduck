@@ -1,0 +1,63 @@
+{
+  "model_id": "ibm-granite/granite-timeseries-ttm-r2",
+  "freq": "D",
+  "context_length": 180,
+  "prediction_length": 60,
+  "channels": [
+    "log_return",
+    "log_range",
+    "log_volume",
+    "volatility_mult",
+    "trend",
+    "fat_tails",
+    "momentum",
+    "mean_reversion",
+    "horizon"
+  ],
+  "target_features": [
+    "log_return",
+    "log_range",
+    "log_volume"
+  ],
+  "controls": [
+    "volatility_mult",
+    "trend",
+    "fat_tails",
+    "momentum",
+    "mean_reversion",
+    "horizon"
+  ],
+  "control_ranges": {
+    "volatility_mult": [
+      0.5,
+      2.0
+    ],
+    "trend": [
+      -0.5,
+      0.5
+    ],
+    "fat_tails": [
+      0.5,
+      2.0
+    ],
+    "momentum": [
+      0.0,
+      1.0
+    ],
+    "mean_reversion": [
+      0.0,
+      1.0
+    ],
+    "horizon": [
+      60.0,
+      500.0
+    ]
+  },
+  "trend_sigma_scale": 0.1,
+  "tail_clip_z": 3.0,
+  "tail_range_coef": 0.25,
+  "vol_volume_coef": 0.3,
+  "train_end_year": 2023,
+  "val_year": 2024,
+  "test_year": 2025
+}
