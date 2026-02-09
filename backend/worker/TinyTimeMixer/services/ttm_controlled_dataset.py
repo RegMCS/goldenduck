@@ -75,6 +75,16 @@ class TTMControlledConfig:
     tail_clip_z: float = 3.0
     tail_range_coef: float = 0.25
     vol_volume_coef: float = 0.30
+    train_noise_enabled: bool = True
+    infer_noise_enabled: bool = True
+    noise_df_min: float = 3.0
+    noise_df_max: float = 30.0
+    train_return_noise_scale: float = 0.15
+    train_range_noise_scale: float = 0.05
+    train_volume_noise_scale: float = 0.05
+    infer_return_noise_scale: float = 0.15
+    infer_range_noise_scale: float = 0.05
+    infer_volume_noise_scale: float = 0.05
 
     @property
     def num_target_features(self) -> int:
@@ -242,11 +252,49 @@ def sample_controls(ranges: ControlRanges, rng: np.random.Generator) -> ControlV
     )
 
 
+def _fat_tail_df(fat_tails: float, ranges: ControlRanges, df_min: float, df_max: float) -> float:
+    lo, hi = ranges.fat_tails
+    if hi <= lo:
+        return df_max
+    alpha = (fat_tails - lo) / (hi - lo)
+    alpha = float(np.clip(alpha, 0.0, 1.0))
+    return float(df_max - alpha * (df_max - df_min))
+
+
+def _apply_feature_noise(
+    features: np.ndarray,
+    *,
+    sigma: float,
+    fat_tails: float,
+    cfg: TTMControlledConfig,
+    rng: np.random.Generator,
+    mode: str,
+) -> np.ndarray:
+    df = _fat_tail_df(fat_tails, cfg.control_ranges, cfg.noise_df_min, cfg.noise_df_max)
+    eps = rng.standard_t(df, size=(features.shape[0], 3)).astype(np.float32)
+
+    if mode == "train":
+        r_scale = cfg.train_return_noise_scale * sigma
+        rg_scale = cfg.train_range_noise_scale
+        v_scale = cfg.train_volume_noise_scale
+    else:
+        r_scale = cfg.infer_return_noise_scale * sigma
+        rg_scale = cfg.infer_range_noise_scale
+        v_scale = cfg.infer_volume_noise_scale
+
+    out = features.copy()
+    out[:, 0] = out[:, 0] + eps[:, 0] * r_scale
+    out[:, 1] = out[:, 1] + eps[:, 1] * rg_scale
+    out[:, 2] = out[:, 2] + eps[:, 2] * v_scale
+    return out
+
+
 def apply_controls_to_future(
     future_features: np.ndarray,
     past_returns: np.ndarray,
     controls: ControlValues,
     cfg: TTMControlledConfig,
+    rng: Optional[np.random.Generator] = None,
 ) -> np.ndarray:
     out = future_features.copy()
     r = out[:, 0]
@@ -254,6 +302,8 @@ def apply_controls_to_future(
     log_volume = out[:, 2]
 
     sigma = float(np.std(past_returns) + 1e-8)
+    if rng is None:
+        rng = np.random.default_rng()
 
     r = r * controls.volatility_mult
     r = r + controls.trend * cfg.trend_sigma_scale * sigma
@@ -291,7 +341,39 @@ def apply_controls_to_future(
     out[:, 0] = r
     out[:, 1] = log_range
     out[:, 2] = log_volume
+
+    if cfg.train_noise_enabled:
+        out = _apply_feature_noise(
+            out,
+            sigma=sigma,
+            fat_tails=controls.fat_tails,
+            cfg=cfg,
+            rng=rng,
+            mode="train",
+        )
     return out
+
+
+def apply_inference_noise(
+    pred_features: np.ndarray,
+    *,
+    sigma: float,
+    controls: ControlValues,
+    cfg: TTMControlledConfig,
+    rng: Optional[np.random.Generator] = None,
+) -> np.ndarray:
+    if not cfg.infer_noise_enabled:
+        return pred_features
+    if rng is None:
+        rng = np.random.default_rng()
+    return _apply_feature_noise(
+        pred_features,
+        sigma=sigma,
+        fat_tails=controls.fat_tails,
+        cfg=cfg,
+        rng=rng,
+        mode="infer",
+    )
 
 
 class ControlledWindowDataset(Dataset):
@@ -360,6 +442,7 @@ class ControlledWindowDataset(Dataset):
             past_raw[:, 0],
             controls,
             self.cfg,
+            rng=self.rng,
         )
 
         past_scaled = self.scaler.transform(past_raw)

@@ -31,6 +31,7 @@ from backend.worker.TinyTimeMixer.services.ttm_controlled_dataset import (
     ControlValues,
     StandardScaler,
     TTMControlledConfig,
+    apply_inference_noise,
     build_base_features,
     download_daily_ohlcv,
     reconstruct_ohlcv_from_features,
@@ -121,7 +122,7 @@ def build_context(
     cfg: TTMControlledConfig,
     scaler: StandardScaler,
     controls: ControlValues,
-) -> Tuple[np.ndarray, float, pd.Timestamp]:
+) -> Tuple[np.ndarray, float, pd.Timestamp, float]:
     feats = build_base_features(df)
     if len(feats) < cfg.context_length:
         raise ValueError(
@@ -133,6 +134,7 @@ def build_context(
     past_raw = feats[["log_return", "log_range", "log_volume"]].values.astype(
         np.float32
     )
+    past_sigma = float(np.std(past_raw[:, 0]) + 1e-8)
     past_scaled = scaler.transform(past_raw)
 
     ctrl_scaled = scale_controls(controls, cfg.control_ranges)
@@ -141,7 +143,7 @@ def build_context(
 
     last_close = float(feats["Close"].iloc[-1])
     last_date = pd.to_datetime(feats["date"].iloc[-1])
-    return past_values, last_close, last_date
+    return past_values, last_close, last_date, past_sigma
 
 
 @torch.no_grad()
@@ -318,7 +320,9 @@ def main() -> None:
     scaler = StandardScaler.from_state_dict(scaler_state)
 
     raw = download_daily_ohlcv(TICKER, start=INPUT_START, end=INPUT_END)
-    past_values, last_close, last_date = build_context(raw, cfg, scaler, CONTROLS)
+    past_values, last_close, last_date, past_sigma = build_context(
+        raw, cfg, scaler, CONTROLS
+    )
 
     try:
         from tsfm_public.toolkit.get_model import get_model
@@ -359,6 +363,13 @@ def main() -> None:
         horizon=int(PREDICTION_LENGTH),
         device=device,
         freq_token_value=freq_token_value,
+    )
+
+    pred_features = apply_inference_noise(
+        pred_features,
+        sigma=past_sigma,
+        controls=CONTROLS,
+        cfg=cfg,
     )
 
     synth_df = reconstruct_ohlcv_from_features(last_close, pred_features, last_date)
