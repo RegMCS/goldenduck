@@ -25,7 +25,6 @@ import torch
 from torch.utils.data import Dataset
 import yfinance as yf
 
-
 TARGET_FEATURES = ["log_return", "log_range", "log_volume"]
 CONTROL_NAMES = [
     "volatility_mult",
@@ -116,7 +115,11 @@ class StandardScaler:
         return x * (self.std + self.eps) + self.mean
 
     def state_dict(self) -> Dict[str, np.ndarray]:
-        return {"mean": self.mean, "std": self.std, "eps": np.array(self.eps, dtype=np.float32)}
+        return {
+            "mean": self.mean,
+            "std": self.std,
+            "eps": np.array(self.eps, dtype=np.float32),
+        }
 
     @classmethod
     def from_state_dict(cls, d: Dict[str, np.ndarray]) -> "StandardScaler":
@@ -267,7 +270,9 @@ def apply_controls_to_future(
         r_mr = r.copy()
         prev = float(past_returns[-1])
         for i in range(len(r_mr)):
-            r_mr[i] = (1.0 - controls.mean_reversion) * r[i] - controls.mean_reversion * prev
+            r_mr[i] = (1.0 - controls.mean_reversion) * r[
+                i
+            ] - controls.mean_reversion * prev
             prev = r_mr[i]
         r = r_mr
 
@@ -320,12 +325,17 @@ class ControlledWindowDataset(Dataset):
                     mid = start + cfg.context_length
                     end = mid + cfg.prediction_length
                     end_date = pd.to_datetime(series.dates[end - 1])
-                    if end_date < self.target_date_range[0] or end_date > self.target_date_range[1]:
+                    if (
+                        end_date < self.target_date_range[0]
+                        or end_date > self.target_date_range[1]
+                    ):
                         continue
                 self._index.append((s_idx, start))
 
         if not self._index:
-            raise ValueError("No usable windows found; check data length and context/pred lengths.")
+            raise ValueError(
+                "No usable windows found; check data length and context/pred lengths."
+            )
 
     def __len__(self) -> int:
         return len(self._index)
@@ -357,12 +367,16 @@ class ControlledWindowDataset(Dataset):
 
         ctrl_scaled = scale_controls(controls, self.cfg.control_ranges)
         past_ctrl = np.repeat(ctrl_scaled[None, :], self.cfg.context_length, axis=0)
-        future_ctrl = np.repeat(ctrl_scaled[None, :], self.cfg.prediction_length, axis=0)
+        future_ctrl = np.repeat(
+            ctrl_scaled[None, :], self.cfg.prediction_length, axis=0
+        )
 
         past_values = np.concatenate([past_scaled, past_ctrl], axis=1)
         future_targets = future_scaled.astype(np.float32)
 
-        return torch.tensor(past_values, dtype=torch.float32), torch.tensor(future_targets, dtype=torch.float32)
+        return torch.tensor(past_values, dtype=torch.float32), torch.tensor(
+            future_targets, dtype=torch.float32
+        )
 
 
 def reconstruct_ohlcv_from_features(

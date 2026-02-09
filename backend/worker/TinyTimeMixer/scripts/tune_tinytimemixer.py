@@ -28,7 +28,6 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import yfinance as yf
 
-
 # ----------------------------
 # Config
 # ----------------------------
@@ -91,7 +90,7 @@ PAUSE_BETWEEN_CHUNKS_SEC = 0.0  # set to >0 if you get rate limited
 @dataclass
 class StandardScaler:
     mean: torch.Tensor  # [C]
-    std: torch.Tensor   # [C]
+    std: torch.Tensor  # [C]
     eps: float = 1e-6
 
     def transform(self, x: torch.Tensor) -> torch.Tensor:
@@ -101,7 +100,11 @@ class StandardScaler:
         return x * (self.std + self.eps) + self.mean
 
     def state_dict(self) -> Dict[str, Any]:
-        return {"mean": self.mean.detach().cpu(), "std": self.std.detach().cpu(), "eps": self.eps}
+        return {
+            "mean": self.mean.detach().cpu(),
+            "std": self.std.detach().cpu(),
+            "eps": self.eps,
+        }
 
     @classmethod
     def from_state_dict(cls, d: Dict[str, Any]) -> "StandardScaler":
@@ -133,12 +136,18 @@ def extract_predictions(outputs: Any) -> torch.Tensor:
         y_hat = outputs.prediction_outputs
     elif hasattr(outputs, "logits"):
         y_hat = outputs.logits
-    elif isinstance(outputs, (tuple, list)) and len(outputs) > 0 and torch.is_tensor(outputs[0]):
+    elif (
+        isinstance(outputs, (tuple, list))
+        and len(outputs) > 0
+        and torch.is_tensor(outputs[0])
+    ):
         y_hat = outputs[0]
     elif torch.is_tensor(outputs):
         y_hat = outputs
     else:
-        raise RuntimeError(f"Could not extract predictions from outputs type: {type(outputs)}")
+        raise RuntimeError(
+            f"Could not extract predictions from outputs type: {type(outputs)}"
+        )
 
     if not torch.is_tensor(y_hat):
         raise RuntimeError("Extracted predictions is not a tensor.")
@@ -147,7 +156,9 @@ def extract_predictions(outputs: Any) -> torch.Tensor:
 
 def maybe_fix_pred_shape(y_hat: torch.Tensor, num_channels: int) -> torch.Tensor:
     if y_hat.ndim != 3:
-        raise RuntimeError(f"Expected 3D predictions [B,H,C] or [B,C,H], got {tuple(y_hat.shape)}")
+        raise RuntimeError(
+            f"Expected 3D predictions [B,H,C] or [B,C,H], got {tuple(y_hat.shape)}"
+        )
     _, d1, d2 = y_hat.shape
     if d1 == num_channels and d2 != num_channels:
         return y_hat.transpose(1, 2).contiguous()
@@ -184,7 +195,9 @@ def download_hourly_in_chunks(
     chunks = []
     cur_start = start
 
-    print(f"Downloading {ticker} {interval} from {start.date()} to {end.date()} in ~{chunk_days}d chunks...")
+    print(
+        f"Downloading {ticker} {interval} from {start.date()} to {end.date()} in ~{chunk_days}d chunks..."
+    )
 
     while cur_start < end:
         cur_end = min(cur_start + timedelta(days=chunk_days), end)
@@ -211,7 +224,9 @@ def download_hourly_in_chunks(
             time.sleep(pause_sec)
 
     if not chunks:
-        raise RuntimeError("All yfinance chunks returned empty. Try smaller CHUNK_DAYS or different interval.")
+        raise RuntimeError(
+            "All yfinance chunks returned empty. Try smaller CHUNK_DAYS or different interval."
+        )
 
     out = pd.concat(chunks, axis=0)
     out = out[~out.index.duplicated(keep="last")]
@@ -259,7 +274,9 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     return out[["date"] + FEATURE_COLS]
 
 
-def chronological_split(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def chronological_split(
+    df: pd.DataFrame,
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     n = len(df)
     n_train = int(n * TRAIN_FRAC)
     n_val = int(n * VAL_FRAC)
@@ -301,7 +318,9 @@ class WindowedTimeSeriesDataset(Dataset):
         self.pred_len = pred_len
         self.scaler = scaler
 
-        self.x_all = torch.tensor(self.df[self.feature_cols].values, dtype=torch.float32)
+        self.x_all = torch.tensor(
+            self.df[self.feature_cols].values, dtype=torch.float32
+        )
         self.x_all = self.scaler.transform(self.x_all)
 
         tgt_idx = [self.feature_cols.index(c) for c in self.target_cols]
@@ -321,8 +340,8 @@ class WindowedTimeSeriesDataset(Dataset):
         mid = start + self.context_len
         end = mid + self.pred_len
 
-        past = self.x_all[start:mid]                 # [L, C]
-        future = self.x_all[mid:end]                # [H, C]
+        past = self.x_all[start:mid]  # [L, C]
+        future = self.x_all[mid:end]  # [H, C]
         future_tgt = future.index_select(1, self.tgt_idx)  # [H, C_tgt]
         return past, future_tgt
 
@@ -330,6 +349,7 @@ class WindowedTimeSeriesDataset(Dataset):
 # ----------------------------
 # Model loading (trainable)
 # ----------------------------
+
 
 def load_ttm_for_training(
     model_id: str,
@@ -357,7 +377,6 @@ def load_ttm_for_training(
 
     model = TinyTimeMixerForPrediction.from_pretrained(model_id, **extra_kwargs)
     return model
-
 
 
 def freeze_for_fewshot(model: torch.nn.Module) -> None:
@@ -452,7 +471,9 @@ def main() -> None:
     set_seed(SEED)
 
     print(f"Device: {DEVICE}")
-    print(f"Downloading {TICKER} hourly (~last {LOOKBACK_YEARS}y) via yfinance (chunked)...")
+    print(
+        f"Downloading {TICKER} hourly (~last {LOOKBACK_YEARS}y) via yfinance (chunked)..."
+    )
 
     raw = download_hourly_in_chunks(
         ticker=TICKER,
@@ -479,7 +500,6 @@ def main() -> None:
             f"Adjusting CONTEXT_LEN {context_len} -> {new_context}."
         )
         context_len = new_context
-
 
     scaler = fit_scaler(train_df, FEATURE_COLS)
     torch.save(scaler.state_dict(), OUT_SCALER)
@@ -510,9 +530,15 @@ def main() -> None:
         scaler=scaler,
     )
 
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
-    val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, drop_last=False)
-    test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, drop_last=False)
+    train_loader = DataLoader(
+        train_ds, batch_size=BATCH_SIZE, shuffle=True, drop_last=True
+    )
+    val_loader = DataLoader(
+        val_ds, batch_size=BATCH_SIZE, shuffle=False, drop_last=False
+    )
+    test_loader = DataLoader(
+        test_ds, batch_size=BATCH_SIZE, shuffle=False, drop_last=False
+    )
 
     num_input_channels = len(FEATURE_COLS)
 
@@ -527,7 +553,9 @@ def main() -> None:
 
     freeze_for_fewshot(model)
     trainable, total = count_trainable_params(model)
-    print(f"Trainable params: {trainable:,} / {total:,} ({100.0 * trainable / total:.4f}%)")
+    print(
+        f"Trainable params: {trainable:,} / {total:,} ({100.0 * trainable / total:.4f}%)"
+    )
 
     optimizer = torch.optim.AdamW(
         [p for p in model.parameters() if p.requires_grad],
@@ -560,7 +588,9 @@ def main() -> None:
 
         if va_loss < best_val:
             best_val = va_loss
-            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            best_state = {
+                k: v.detach().cpu().clone() for k, v in model.state_dict().items()
+            }
 
     if best_state is not None:
         torch.save(best_state, OUT_WEIGHTS)

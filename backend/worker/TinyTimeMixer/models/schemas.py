@@ -3,7 +3,6 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 from typing import Dict, List, Literal, Optional
 
-
 # -----------------------------
 # Shared specs
 # -----------------------------
@@ -27,7 +26,9 @@ class FeatureSpec(BaseModel):
 
     # What the model is trained to predict.
     # For most forecasting: target=close or target=log_return
-    target: str = Field(..., description="Target column name, e.g., 'close' or 'log_return'")
+    target: str = Field(
+        ..., description="Target column name, e.g., 'close' or 'log_return'"
+    )
 
     target_type: TargetType = Field(
         "log_return",
@@ -53,7 +54,9 @@ class ModelSpec(BaseModel):
 
     family: ModelFamily = Field("ttm_r2")
     name: str = Field(..., description="Model name, e.g., 'ttm_r2_spy_ohlcv'")
-    version: str = Field("latest", description="Artifact version tag, e.g., 'v1' or 'latest'")
+    version: str = Field(
+        "latest", description="Artifact version tag, e.g., 'v1' or 'latest'"
+    )
 
     device: Literal["cpu", "cuda"] = Field("cpu")
     dtype: Literal["float32", "float16", "bfloat16"] = Field("float32")
@@ -71,6 +74,7 @@ class WindowSpec(BaseModel):
 # -----------------------------
 # Inference / Generation
 # -----------------------------
+
 
 class TinyMixerGenerateRequest(BaseModel):
     """
@@ -120,15 +124,21 @@ class TinyMixerGenerateRequest(BaseModel):
                 "noise_method": "bootstrap_residuals",
                 "noise_scale": 1.0,
                 "seed": 42,
-                "model": {"family": "ttm_r2", "name": "ttm_r2_aapl_ohlcv", "version": "latest", "device": "cpu", "dtype": "float32"},
+                "model": {
+                    "family": "ttm_r2",
+                    "name": "ttm_r2_aapl_ohlcv",
+                    "version": "latest",
+                    "device": "cpu",
+                    "dtype": "float32",
+                },
                 "feature_spec": {
                     "features": ["open", "high", "low", "close", "volume"],
                     "target": "close",
                     "target_type": "log_return",
                     "scaling": "revin",
-                    "reconstruct_price": True
+                    "reconstruct_price": True,
                 },
-                "output_format": "csv"
+                "output_format": "csv",
             }
         }
 
@@ -137,6 +147,7 @@ class ForecastPoint(BaseModel):
     """
     Optional: structured response for direct JSON outputs (if not using download-only).
     """
+
     t: int
     values: Dict[str, float]
 
@@ -168,9 +179,10 @@ class TinyMixerGenerateResponse(BaseModel):
 # Training (optional but recommended)
 # -----------------------------
 
+
 class TinyMixerTrainRequest(BaseModel):
     """
-    A training job spec. 
+    A training job spec.
     """
 
     tickers: List[str] = Field(..., min_length=1)

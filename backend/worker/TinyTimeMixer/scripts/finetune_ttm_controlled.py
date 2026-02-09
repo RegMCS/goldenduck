@@ -59,7 +59,6 @@ from backend.worker.TinyTimeMixer.services.ttm_controlled_dataset import (
     ControlledWindowDataset,
 )
 
-
 # ----------------------------
 # Config
 # ----------------------------
@@ -117,12 +116,18 @@ def extract_predictions(outputs) -> torch.Tensor:
         y_hat = outputs.prediction_outputs
     elif hasattr(outputs, "logits"):
         y_hat = outputs.logits
-    elif isinstance(outputs, (tuple, list)) and len(outputs) > 0 and torch.is_tensor(outputs[0]):
+    elif (
+        isinstance(outputs, (tuple, list))
+        and len(outputs) > 0
+        and torch.is_tensor(outputs[0])
+    ):
         y_hat = outputs[0]
     elif torch.is_tensor(outputs):
         y_hat = outputs
     else:
-        raise RuntimeError(f"Could not extract predictions from outputs type: {type(outputs)}")
+        raise RuntimeError(
+            f"Could not extract predictions from outputs type: {type(outputs)}"
+        )
     if not torch.is_tensor(y_hat):
         raise RuntimeError("Extracted predictions is not a tensor.")
     return y_hat
@@ -185,7 +190,9 @@ def train_one_epoch(
 
         freq_token = None
         if freq_token_value is not None:
-            freq_token = torch.full((past.shape[0],), int(freq_token_value), device=device, dtype=torch.long)
+            freq_token = torch.full(
+                (past.shape[0],), int(freq_token_value), device=device, dtype=torch.long
+            )
         if freq_token is not None:
             outputs = model(past_values=past, freq_token=freq_token)
         else:
@@ -236,7 +243,9 @@ def eval_one_epoch(
 
         freq_token = None
         if freq_token_value is not None:
-            freq_token = torch.full((past.shape[0],), int(freq_token_value), device=device, dtype=torch.long)
+            freq_token = torch.full(
+                (past.shape[0],), int(freq_token_value), device=device, dtype=torch.long
+            )
         if freq_token is not None:
             outputs = model(past_values=past, freq_token=freq_token)
         else:
@@ -292,9 +301,15 @@ def main() -> None:
         horizon=float(PRED_LEN),
     )
 
-    train_range = (np.datetime64("2000-01-01"), np.datetime64(f"{TRAIN_END_YEAR}-12-31"))
+    train_range = (
+        np.datetime64("2000-01-01"),
+        np.datetime64(f"{TRAIN_END_YEAR}-12-31"),
+    )
     val_range = (np.datetime64(f"{VAL_YEAR}-01-01"), np.datetime64(f"{VAL_YEAR}-12-31"))
-    test_range = (np.datetime64(f"{TEST_YEAR}-01-01"), np.datetime64(f"{TEST_YEAR}-12-31"))
+    test_range = (
+        np.datetime64(f"{TEST_YEAR}-01-01"),
+        np.datetime64(f"{TEST_YEAR}-12-31"),
+    )
 
     train_ds = ControlledWindowDataset(
         all_series,
@@ -323,11 +338,21 @@ def main() -> None:
         seed=SEED,
     )
 
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
-    val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, drop_last=False)
-    test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, drop_last=False)
-    print(f"Train windows: {len(train_ds)} | Val windows: {len(val_ds)} | Test windows: {len(test_ds)}")
-    print(f"Train batches: {len(train_loader)} | Val batches: {len(val_loader)} | Test batches: {len(test_loader)}")
+    train_loader = DataLoader(
+        train_ds, batch_size=BATCH_SIZE, shuffle=True, drop_last=True
+    )
+    val_loader = DataLoader(
+        val_ds, batch_size=BATCH_SIZE, shuffle=False, drop_last=False
+    )
+    test_loader = DataLoader(
+        test_ds, batch_size=BATCH_SIZE, shuffle=False, drop_last=False
+    )
+    print(
+        f"Train windows: {len(train_ds)} | Val windows: {len(val_ds)} | Test windows: {len(test_ds)}"
+    )
+    print(
+        f"Train batches: {len(train_loader)} | Val batches: {len(val_loader)} | Test batches: {len(test_loader)}"
+    )
 
     try:
         from tsfm_public.toolkit.get_model import get_model
@@ -353,7 +378,9 @@ def main() -> None:
         freeze_for_fewshot(model)
 
     trainable, total = count_trainable_params(model)
-    print(f"Trainable params: {trainable:,} / {total:,} ({100.0 * trainable / total:.4f}%)")
+    print(
+        f"Trainable params: {trainable:,} / {total:,} ({100.0 * trainable / total:.4f}%)"
+    )
 
     optimizer = torch.optim.AdamW(
         [p for p in model.parameters() if p.requires_grad],
@@ -366,7 +393,9 @@ def main() -> None:
     best_state: Optional[Dict[str, torch.Tensor]] = None
 
     use_freq_token = bool(getattr(model.config, "resolution_prefix_tuning", False))
-    freq_token_value = DEFAULT_FREQUENCY_MAPPING.get(FREQ, None) if use_freq_token else None
+    freq_token_value = (
+        DEFAULT_FREQUENCY_MAPPING.get(FREQ, None) if use_freq_token else None
+    )
     if use_freq_token and freq_token_value is None:
         raise ValueError(f"Frequency token not found for freq={FREQ}.")
 
@@ -394,7 +423,9 @@ def main() -> None:
 
         if va_loss < best_val:
             best_val = va_loss
-            best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+            best_state = {
+                k: v.detach().cpu().clone() for k, v in model.state_dict().items()
+            }
 
     if best_state is not None:
         torch.save(best_state, WEIGHTS_PATH)

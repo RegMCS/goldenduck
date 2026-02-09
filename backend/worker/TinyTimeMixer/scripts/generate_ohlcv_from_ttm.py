@@ -68,7 +68,9 @@ class StandardScaler:
 
     @classmethod
     def from_state_dict(cls, d: Dict[str, Any]) -> "StandardScaler":
-        return cls(mean=d["mean"].float(), std=d["std"].float(), eps=float(d.get("eps", 1e-6)))
+        return cls(
+            mean=d["mean"].float(), std=d["std"].float(), eps=float(d.get("eps", 1e-6))
+        )
 
 
 # ----------------------------
@@ -126,7 +128,7 @@ def load_ttm(num_input_channels: int, prediction_length: int) -> torch.nn.Module
         prediction_length=int(prediction_length),
         decoder_mode="mix_channel",
         ignore_mismatched_sizes=False,  # we want exact match to load your saved weights
-        low_cpu_mem_usage=False,        # avoids meta-loading quirks
+        low_cpu_mem_usage=False,  # avoids meta-loading quirks
     )
     return model
 
@@ -138,7 +140,11 @@ def extract_predictions(outputs: Any) -> torch.Tensor:
         return outputs.prediction_outputs
     if hasattr(outputs, "logits"):
         return outputs.logits
-    if isinstance(outputs, (tuple, list)) and len(outputs) and torch.is_tensor(outputs[0]):
+    if (
+        isinstance(outputs, (tuple, list))
+        and len(outputs)
+        and torch.is_tensor(outputs[0])
+    ):
         return outputs[0]
     if torch.is_tensor(outputs):
         return outputs
@@ -236,12 +242,16 @@ def main() -> None:
     x_scaled = scaler.transform(x)  # [T, C]
 
     if x_scaled.shape[0] < CONTEXT_LEN:
-        raise RuntimeError(f"Not enough rows ({x_scaled.shape[0]}) for CONTEXT_LEN={CONTEXT_LEN}")
+        raise RuntimeError(
+            f"Not enough rows ({x_scaled.shape[0]}) for CONTEXT_LEN={CONTEXT_LEN}"
+        )
 
     ctx = x_scaled[-CONTEXT_LEN:, :].unsqueeze(0).to(DEVICE)  # [1, L, C]
 
     # Load model with checkpoint-native horizon so state_dict loads cleanly
-    model = load_ttm(num_input_channels=len(FEATURE_COLS), prediction_length=MODEL_PRED_LEN).to(DEVICE)
+    model = load_ttm(
+        num_input_channels=len(FEATURE_COLS), prediction_length=MODEL_PRED_LEN
+    ).to(DEVICE)
 
     # Load fine-tuned weights
     state = torch.load(WEIGHTS_PATH, map_location="cpu")
@@ -257,7 +267,7 @@ def main() -> None:
     y_hat = y_hat[:, :PRED_LEN, :]  # [1, 32, C]
 
     # Inverse-scale predictions back to original feature units
-    y_hat = y_hat.squeeze(0).cpu()             # [H, C]
+    y_hat = y_hat.squeeze(0).cpu()  # [H, C]
     y_hat_inv = scaler.inverse_transform(y_hat)  # [H, C]
 
     pred_df = pd.DataFrame(y_hat_inv.numpy(), columns=FEATURE_COLS)

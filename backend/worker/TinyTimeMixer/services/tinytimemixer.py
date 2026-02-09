@@ -39,8 +39,9 @@ class ChannelScaler:
     """
     Per-channel standard scaler fitted on the provided context window.
     """
+
     mean_: torch.Tensor  # [batch, 1, channels] or [1, 1, channels]
-    std_: torch.Tensor   # [batch, 1, channels] or [1, 1, channels]
+    std_: torch.Tensor  # [batch, 1, channels] or [1, 1, channels]
     eps: float = 1e-6
 
     @classmethod
@@ -174,7 +175,9 @@ class TinyTimeMixer:
 
             # Do not pass prediction_length via kwargs here; get_model uses it to select a revision
             # and will pass prediction_filter_length to from_pretrained when needed.
-            extra_kwargs_no_pred = {k: v for k, v in extra_kwargs.items() if k != "prediction_length"}
+            extra_kwargs_no_pred = {
+                k: v for k, v in extra_kwargs.items() if k != "prediction_length"
+            }
             model = get_model(
                 model_id,
                 context_length=int(context_length),
@@ -211,10 +214,16 @@ class TinyTimeMixer:
             scaler: ChannelScaler if scale=True else None
         """
         if past_values.ndim != 3:
-            raise ValueError(f"past_values must be [B,T,C], got {tuple(past_values.shape)}")
+            raise ValueError(
+                f"past_values must be [B,T,C], got {tuple(past_values.shape)}"
+            )
 
         x = past_values.to(self.device)
-        mask = past_observed_mask.to(self.device) if past_observed_mask is not None else None
+        mask = (
+            past_observed_mask.to(self.device)
+            if past_observed_mask is not None
+            else None
+        )
 
         scaler: Optional[ChannelScaler] = None
         if scale:
@@ -245,7 +254,9 @@ class TinyTimeMixer:
                 forward_errors.append((kwargs, repr(e)))
 
         if outputs is None:
-            err_preview = "\n".join([f"kwargs={k} -> {e}" for k, e in forward_errors[:3]])
+            err_preview = "\n".join(
+                [f"kwargs={k} -> {e}" for k, e in forward_errors[:3]]
+            )
             raise RuntimeError(
                 "TinyTimeMixer forward() failed with several common signatures.\n"
                 "First errors:\n" + err_preview
@@ -263,7 +274,11 @@ class TinyTimeMixer:
             y_hat = outputs.prediction_outputs
         elif hasattr(outputs, "logits"):
             y_hat = outputs.logits
-        elif isinstance(outputs, (tuple, list)) and len(outputs) > 0 and torch.is_tensor(outputs[0]):
+        elif (
+            isinstance(outputs, (tuple, list))
+            and len(outputs) > 0
+            and torch.is_tensor(outputs[0])
+        ):
             y_hat = outputs[0]
         elif torch.is_tensor(outputs):
             y_hat = outputs
