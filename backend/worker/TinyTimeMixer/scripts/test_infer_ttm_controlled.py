@@ -59,9 +59,10 @@ except Exception:
 # ----------------------------
 # User-configurable section
 # ----------------------------
-TICKER = "AAPL"
+TICKER = "IBM"
 INPUT_START = "2020-01-01"
-INPUT_END = "2020-12-31"
+INPUT_END = "2020-09-29"
+INPUT_CSV = None  # Optional Path to OHLCV CSV used for inference
 
 PREDICTION_LENGTH = 180
 ROLL_STEP = 1
@@ -79,6 +80,10 @@ OUTPUT_DIR = Path(__file__).resolve().parents[1] / "outputs" / "ttm_controlled_t
 OUTPUT_CSV = OUTPUT_DIR / f"{TICKER.lower()}_synthetic.csv"
 CHART_DIR = OUTPUT_DIR / "charts"
 METRICS_CSV = OUTPUT_DIR / f"{TICKER.lower()}_metrics.csv"
+COMBINED_CHART = CHART_DIR / "all_charts.png"
+SAVE_INDIVIDUAL_CHARTS = False
+ANNUALIZE_METRICS = True
+TRADING_DAYS = 252
 
 
 def extract_predictions(outputs) -> torch.Tensor:
@@ -116,6 +121,35 @@ def maybe_fix_pred_shape(y_hat: torch.Tensor, num_channels: int) -> torch.Tensor
 
 def load_config(path: Path) -> dict:
     return json.loads(path.read_text())
+
+
+def load_input_ohlcv(
+    ticker: str,
+    start: str,
+    end: str,
+    input_csv: Optional[Path],
+) -> pd.DataFrame:
+    if input_csv is None:
+        return download_daily_ohlcv(ticker, start=start, end=end)
+
+    df = pd.read_csv(input_csv)
+    if "date" not in df.columns:
+        if "Date" in df.columns:
+            df = df.rename(columns={"Date": "date"})
+        elif "Datetime" in df.columns:
+            df = df.rename(columns={"Datetime": "date"})
+        else:
+            raise ValueError("Input CSV missing a date column (date/Date/Datetime).")
+
+    required = ["Open", "High", "Low", "Close", "Volume"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(f"Input CSV missing columns {missing}.")
+
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.sort_values("date").reset_index(drop=True)
+    df = df.dropna(subset=required)
+    return df
 
 
 def build_context(
@@ -195,7 +229,12 @@ def rollout_forecast(
     return pred_raw
 
 
-def compute_metrics(df: pd.DataFrame) -> Dict[str, float]:
+def compute_metrics(
+    df: pd.DataFrame,
+    *,
+    annualize: bool = False,
+    trading_days: int = 252,
+) -> Dict[str, float]:
     close = df["Close"].astype(float)
     ret = np.log(close / close.shift(1)).dropna().values
     if len(ret) < 3:
@@ -209,6 +248,9 @@ def compute_metrics(df: pd.DataFrame) -> Dict[str, float]:
 
     vol = float(np.std(ret))
     trend = float(np.mean(ret))
+    if annualize and trading_days > 0:
+        vol = vol * float(np.sqrt(trading_days))
+        trend = trend * float(trading_days)
 
     centered = ret - np.mean(ret)
     std = np.std(centered) + 1e-12
@@ -284,7 +326,11 @@ def plot_volume_compare(
 
 
 def plot_metrics(
-    metrics_input: Dict[str, float], metrics_synth: Dict[str, float], path: Path
+    metrics_input: Dict[str, float],
+    metrics_synth: Dict[str, float],
+    path: Path,
+    *,
+    title_suffix: str = "",
 ) -> None:
     labels = ["volatility", "trend", "fat_tails", "momentum", "mean_reversion"]
     x = np.arange(len(labels))
@@ -295,11 +341,69 @@ def plot_metrics(
     plt.bar(x - 0.2, inp, width=0.4, label="Input")
     plt.bar(x + 0.2, syn, width=0.4, label="Synthetic")
     plt.xticks(x, labels, rotation=15)
-    plt.title("Metrics Comparison")
+    title = "Metrics Comparison"
+    if title_suffix:
+        title = f"{title} ({title_suffix})"
+    plt.title(title)
     plt.legend()
     plt.tight_layout()
     plt.savefig(path, dpi=150)
     plt.close()
+
+
+def plot_all_charts(
+    input_df: pd.DataFrame,
+    synth_df: pd.DataFrame,
+    metrics_input: Dict[str, float],
+    metrics_synth: Dict[str, float],
+    path: Path,
+    *,
+    metrics_title_suffix: str = "",
+) -> None:
+    fig, axes = plt.subplots(2, 2, figsize=(14, 8))
+
+    ax = axes[0, 0]
+    ax.plot(np.arange(len(input_df)), input_df["Close"].values, label="Input Close")
+    ax.plot(np.arange(len(synth_df)), synth_df["Close"].values, label="Synthetic Close")
+    ax.set_title("Close (Input vs Synthetic, aligned by index)")
+    ax.legend()
+
+    ax = axes[0, 1]
+    ax.plot(np.arange(len(input_df)), input_df["Volume"].values, label="Input Volume")
+    ax.plot(np.arange(len(synth_df)), synth_df["Volume"].values, label="Synthetic Volume")
+    ax.set_title("Volume (Input vs Synthetic, aligned by index)")
+    ax.legend()
+
+    ax = axes[1, 0]
+    ax.plot(synth_df["Date"], synth_df["Close"], label="Close", linewidth=1.5)
+    ax.fill_between(
+        synth_df["Date"],
+        synth_df["Low"],
+        synth_df["High"],
+        alpha=0.2,
+        label="High-Low Range",
+    )
+    ax.set_title("Synthetic OHLC (Close + Range)")
+    ax.legend()
+
+    ax = axes[1, 1]
+    labels = ["volatility", "trend", "fat_tails", "momentum", "mean_reversion"]
+    x = np.arange(len(labels))
+    inp = [metrics_input[k] for k in labels]
+    syn = [metrics_synth[k] for k in labels]
+    ax.bar(x - 0.2, inp, width=0.4, label="Input")
+    ax.bar(x + 0.2, syn, width=0.4, label="Synthetic")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=15)
+    title = "Metrics Comparison"
+    if metrics_title_suffix:
+        title = f"{title} ({metrics_title_suffix})"
+    ax.set_title(title)
+    ax.legend()
+
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
 
 
 def main() -> None:
@@ -324,7 +428,16 @@ def main() -> None:
     scaler_state = torch.load(scaler_path, weights_only=False)
     scaler = StandardScaler.from_state_dict(scaler_state)
 
-    raw = download_daily_ohlcv(TICKER, start=INPUT_START, end=INPUT_END)
+    raw = load_input_ohlcv(
+        TICKER,
+        start=INPUT_START,
+        end=INPUT_END,
+        input_csv=(Path(INPUT_CSV) if INPUT_CSV else None),
+    )
+    input_df = raw.rename(columns={"date": "Date"}).copy()
+    if len(input_df) > PREDICTION_LENGTH:
+        input_df = input_df.tail(PREDICTION_LENGTH).reset_index(drop=True)
+
     past_values, last_close, last_date, past_sigma = build_context(
         raw, cfg, scaler, CONTROLS
     )
@@ -382,15 +495,43 @@ def main() -> None:
         pred_features[:, 0] = pred_features[:, 0] - float(pred_features[:, 0].mean())
 
     synth_df = reconstruct_ohlcv_from_features(last_close, pred_features, last_date)
+    if not input_df.empty and not synth_df.empty:
+        anchor_close = float(input_df["Close"].iloc[0])
+        first_synth_close = float(synth_df["Close"].iloc[0])
+        if abs(first_synth_close) > 1e-12:
+            scale = anchor_close / first_synth_close
+            price_cols = ["Open", "High", "Low", "Close"]
+            synth_df[price_cols] = synth_df[price_cols] * scale
+
+        anchor_date = pd.to_datetime(input_df["Date"].iloc[0])
+        if len(input_df) == len(synth_df):
+            synth_df["Date"] = input_df["Date"].values
+        else:
+            synth_df["Date"] = pd.bdate_range(start=anchor_date, periods=len(synth_df))
     synth_df.to_csv(OUTPUT_CSV, index=False)
     print(f"Saved synthetic CSV: {OUTPUT_CSV}")
 
-    input_df = raw.rename(columns={"date": "Date"}).copy()
-    if len(input_df) > PREDICTION_LENGTH:
-        input_df = input_df.tail(PREDICTION_LENGTH).reset_index(drop=True)
-
-    metrics_input = compute_metrics(input_df)
-    metrics_synth = compute_metrics(synth_df)
+    try:
+        input_for_metrics = pd.read_csv(INPUT_CSV) if INPUT_CSV else raw
+    except Exception:
+        input_for_metrics = raw
+    metrics_title_suffix = (
+        f"annualized {TRADING_DAYS}d" if ANNUALIZE_METRICS else "daily"
+    )
+    metrics_input = compute_metrics(
+        input_for_metrics,
+        annualize=ANNUALIZE_METRICS,
+        trading_days=TRADING_DAYS,
+    )
+    try:
+        synth_for_metrics = pd.read_csv(OUTPUT_CSV)
+    except Exception:
+        synth_for_metrics = synth_df
+    metrics_synth = compute_metrics(
+        synth_for_metrics,
+        annualize=ANNUALIZE_METRICS,
+        trading_days=TRADING_DAYS,
+    )
 
     metrics_table = pd.DataFrame(
         [
@@ -401,10 +542,24 @@ def main() -> None:
     metrics_table.to_csv(METRICS_CSV, index=False)
     print(f"Saved metrics CSV: {METRICS_CSV}")
 
-    plot_close_compare(input_df, synth_df, CHART_DIR / "close_compare.png")
-    plot_volume_compare(input_df, synth_df, CHART_DIR / "volume_compare.png")
-    plot_ohlcv_synth(synth_df, CHART_DIR / "ohlcv_synthetic.png")
-    plot_metrics(metrics_input, metrics_synth, CHART_DIR / "metrics_compare.png")
+    plot_all_charts(
+        input_df,
+        synth_df,
+        metrics_input,
+        metrics_synth,
+        COMBINED_CHART,
+        metrics_title_suffix=metrics_title_suffix,
+    )
+    if SAVE_INDIVIDUAL_CHARTS:
+        plot_close_compare(input_df, synth_df, CHART_DIR / "close_compare.png")
+        plot_volume_compare(input_df, synth_df, CHART_DIR / "volume_compare.png")
+        plot_ohlcv_synth(synth_df, CHART_DIR / "ohlcv_synthetic.png")
+        plot_metrics(
+            metrics_input,
+            metrics_synth,
+            CHART_DIR / "metrics_compare.png",
+            title_suffix=metrics_title_suffix,
+        )
     print(f"Charts saved to: {CHART_DIR}")
 
 

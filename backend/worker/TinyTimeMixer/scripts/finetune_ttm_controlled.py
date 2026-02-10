@@ -85,7 +85,7 @@ WEIGHT_DECAY = 1e-2
 GRAD_CLIP_NORM = 1.0
 LOG_EVERY_N_BATCHES = 200
 
-FULL_FINETUNE = False
+FULL_FINETUNE = False 
 UNFREEZE_KEYWORDS = [
     "head",
     "decoder",
