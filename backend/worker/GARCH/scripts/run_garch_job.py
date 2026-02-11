@@ -32,17 +32,40 @@ def main():
         help="Forecast horizon (days)",
     )
 
-    parser.add_argument("--p", type=int, default=1, help="GARCH p order")
-    parser.add_argument("--q", type=int, default=1, help="GARCH q order")
+    parser.add_argument(
+        "--desired-volatility",
+        type=float,
+        default=1.0,
+        help="Desired volatility multiplier (0.5-2.0)",
+    )
+    parser.add_argument(
+        "--desired-trend",
+        type=float,
+        default=0.0,
+        help="Desired trend (-1.0 to 1.0)",
+    )
+    parser.add_argument(
+        "--desired-fat-tails",
+        type=float,
+        default=1.0,
+        help="Desired fat tails (0.8-1.5)",
+    )
+    parser.add_argument(
+        "--desired-momentum",
+        type=float,
+        default=0.5,
+        help="Desired momentum (0.2-1.0)",
+    )
 
     args = parser.parse_args()
 
     payload = {
         "ticker": args.ticker,
-        "num_scenarios": args.scenarios,
         "horizon": args.horizon,
-        "p": args.p,
-        "q": args.q,
+        "desired_volatility": args.desired_volatility,
+        "desired_trend": args.desired_trend,
+        "desired_fat_tails": args.desired_fat_tails,
+        "desired_momentum": args.desired_momentum,
     }
 
     submit_url = f"{BASE_URL}/api/generate/user/{USER_ID}"

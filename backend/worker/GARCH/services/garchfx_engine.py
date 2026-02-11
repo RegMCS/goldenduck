@@ -1,6 +1,6 @@
 # services/garchfx_engine.py
 import numpy as np
-from typing import Optional, List
+from typing import Optional, List, Dict
 import logging
 
 logger = logging.getLogger(__name__)
@@ -30,8 +30,13 @@ class GARCHFXEngine:
         self.alpha = params["alpha"]
         self.beta = params["beta"]
         self.omega = params["omega"]
+        self.params = params
         self.persistence = self.alpha + self.beta
         self.scale_factor = scale_factor
+
+        # Store original parameters for potential modulation
+        self.base_alpha = self.alpha
+        self.base_beta = self.beta
 
         logger.info(
             f"GARCH-FX initialized: σ₀={self.initial_volatility:.4f}, "
@@ -46,6 +51,7 @@ class GARCHFXEngine:
         regime_switching: bool = False,
         regime_states: Optional[np.ndarray] = None,
         regimes: Optional[List[float]] = None,
+        user_knobs: Optional[dict] = None,
     ) -> np.ndarray:
         """
         Generate GARCH-FX volatility forecast.
@@ -64,6 +70,8 @@ class GARCHFXEngine:
             Transition probability matrix
         regimes : List[float], optional
             Delta multipliers for each regime
+        user_knobs : dict, optional
+            User knobs including desired_momentum to modulate persistence
 
         Returns:
         --------
@@ -164,40 +172,102 @@ class GARCHFXEngine:
         return new_regime
 
     def generate_returns_from_volatility(
-        self, volatility: np.ndarray, distribution: str = "normal"
+        self,
+        volatility_forecast: np.ndarray,
+        distribution: str,
+        user_knobs: Optional[Dict] = None,
+        historical_returns: Optional[np.ndarray] = None,
     ) -> np.ndarray:
         """
-        Generate returns from forecasted volatility.
+        Generate returns from volatility path with proper trend and momentum control
 
-        Parameters:
-        -----------
-        volatility : np.ndarray
-            Forecasted volatility path
-        distribution : str
-            Distribution for returns: 'normal', 't', 'skewt'
+        Args:
+            volatility_forecast: Array of volatility values (from forecast())
+            distribution: Distribution type ('normal', 't', 'skewt')
+            user_knobs: User-specified desired characteristics
+            historical_returns: Historical returns for computing baseline mean
 
         Returns:
-        --------
-        np.ndarray : Returns
+            Array of returns with correct trend and momentum
         """
-        n = len(volatility)
 
-        if distribution == "normal":
-            returns = np.random.normal(0, volatility)
-        elif distribution == "t":
-            # Student-t with df=10 (typical for financial data)
-            df = 10
-            returns = (
-                np.random.standard_t(df, size=n) * volatility / np.sqrt(df / (df - 2))
-            )
-        elif distribution == "skewt":
-            # Simplified: use t-distribution as proxy
-            df = 8
-            returns = (
-                np.random.standard_t(df, size=n) * volatility / np.sqrt(df / (df - 2))
-            )
+        horizon = len(volatility_forecast)
+
+        # ============================================================
+        # 1. Compute target mean return (TREND)
+        # ============================================================
+
+        if historical_returns is not None and user_knobs is not None:
+            # Historical baseline
+            historical_mean = np.mean(historical_returns)
+
+            # Adjust for desired trend
+            trend_adjustment = user_knobs.get("desired_trend", 0.0) * 0.15 / 252
+            # Note: 0.15 = ±15% annual, divided by 252 for daily
+
+            mu = historical_mean + trend_adjustment
         else:
-            logger.warning(f"Unknown distribution '{distribution}', using normal")
-            returns = np.random.normal(0, volatility)
+            # Fallback: assume zero drift
+            mu = 0.0
+
+        # ============================================================
+        # 2. Compute AR(1) coefficient (MOMENTUM)
+        # ============================================================
+
+        if user_knobs is not None:
+            momentum = user_knobs.get("desired_momentum", 0.5)
+            # Map [0, 1] → [-0.1, 0.3]
+            phi = -0.1 + 0.4 * momentum
+        else:
+            phi = 0.0  # No autocorrelation by default
+
+        # ============================================================
+        # 3. Generate returns with AR(1) + GARCH volatility
+        # ============================================================
+
+        returns = np.zeros(horizon)
+
+        # First return (no previous return to reference)
+        shock_0 = self._generate_shock(distribution)
+        returns[0] = mu + volatility_forecast[0] * shock_0
+
+        # Subsequent returns with AR(1) component
+        for t in range(1, horizon):
+            # Generate shock (symmetric distribution for unbiased skewness)
+            shock = self._generate_shock(distribution)
+
+            # AR(1) term (creates momentum/autocorrelation)
+            ar_component = phi * (returns[t - 1] - mu)
+
+            # Volatility term (GARCH dynamics)
+            volatility_component = volatility_forecast[t] * shock
+
+            # Combined return: drift + momentum + volatility
+            returns[t] = mu + ar_component + volatility_component
 
         return returns
+
+    def _generate_shock(self, distribution: str) -> float:
+        """
+        Generate a random shock from specified distribution
+        Uses SYMMETRIC distributions to avoid uncontrolled skewness
+        """
+
+        if distribution == "t":
+            # Student's t (symmetric)
+            nu = self.params.get("nu", 8)
+            shock = np.random.standard_t(nu)
+            # Standardize to unit variance
+            shock = shock / np.sqrt(nu / (nu - 2)) if nu > 2 else shock
+
+        elif distribution == "skewt":
+            # For skewed-t, we actually want to USE standard normal
+            # to avoid uncontrolled skewness interfering with trend
+            # (Skewness should be a side effect of volatility dynamics, not forced)
+            shock = np.random.randn()
+
+        else:  # "normal"
+            # Standard normal (symmetric)
+            shock = np.random.randn()
+
+        return shock

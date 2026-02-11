@@ -58,11 +58,11 @@ def test_generate_api_success(mock_job_store):
         f"/api/generate/user/{USER_ID}",
         json={
             "ticker": "AAPL",
-            "num_scenarios": 10,
-            "horizon": 50,
-            "volatility_multiplier": 1.0,
-            "p": 1,
-            "q": 1,
+            "horizon": 252,
+            "desired_volatility": 1.5,
+            "desired_trend": 0.0,
+            "desired_fat_tails": 1.2,
+            "desired_momentum": 0.8,
         },
     )
 
@@ -82,11 +82,11 @@ def test_generate_api_invalid_parameters():
         f"/api/generate/user/{USER_ID}",
         json={
             "ticker": "AAPL",
-            "num_scenarios": 10,
-            "horizon": 50,
-            "volatility_multiplier": -1.0,  # invalid
-            "p": 1,
-            "q": 1,
+            "horizon": 252,
+            "desired_volatility": 3.0,  # invalid: > 2.0
+            "desired_trend": 0.0,
+            "desired_fat_tails": 1.2,
+            "desired_momentum": 0.8,
         },
     )
 
