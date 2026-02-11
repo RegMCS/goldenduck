@@ -11,10 +11,21 @@ jobs:
     defaults:
       run:
         working-directory: ./backend
+    env:
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_password
+      POSTGRES_DB: test_db
+      AWS_ACCESS_KEY_ID: test_key
+      AWS_SECRET_ACCESS_KEY: test_secret
+      AWS_DEFAULT_REGION: us-east-1
+      S3_BUCKET_NAME: test_bucket
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+
+      - name: Create Docker Network
+        run: docker network create goldenduck-network || true
 
       - name: Build Docker images
         run: docker compose -f docker-compose.yml build
