@@ -1,0 +1,16 @@
+services:
+  frontend:
+    build: .
+    container_name: goldenduck-frontend
+    volumes:
+      - .:/app
+      - /app/node_modules
+    networks:
+      - goldenduck-network
+    restart: always
+    environment:
+      - API_GATEWAY_URL=http://job-scheduler:8000
+
+networks:
+  goldenduck-network:
+    external: true
