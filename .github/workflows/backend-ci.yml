@@ -24,9 +24,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Create Docker Network
-        run: docker network create goldenduck-network || true
-
       - name: Build Docker images
         run: docker compose -f docker-compose.yml build
 
