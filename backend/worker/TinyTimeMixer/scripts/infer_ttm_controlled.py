@@ -191,7 +191,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--trend", type=float, default=0.0)
     parser.add_argument("--fat-tails", type=float, default=1.0)
     parser.add_argument("--momentum", type=float, default=0.0)
-    parser.add_argument("--mean-reversion", type=float, default=0.0)
     parser.add_argument(
         "--weights", type=str, default=None, help="Path to finetuned weights."
     )
@@ -243,7 +242,6 @@ def main() -> None:
         trend=float(args.trend),
         fat_tails=float(args.fat_tails),
         momentum=float(args.momentum),
-        mean_reversion=float(args.mean_reversion),
         horizon=float(args.horizon),
     )
 

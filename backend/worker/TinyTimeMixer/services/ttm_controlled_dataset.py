@@ -4,7 +4,7 @@ Controlled TinyTimeMixer (TTM) dataset + feature utilities for daily OHLCV.
 This module builds:
   - Base features: log_return, log_range, log_volume
   - Control channels (exogenous): volatility, trend, fat_tails, momentum,
-    mean_reversion, horizon
+    horizon
 
 It also includes utilities to:
   - download daily OHLCV from yfinance (no backfill)
@@ -31,7 +31,6 @@ CONTROL_NAMES = [
     "trend",
     "fat_tails",
     "momentum",
-    "mean_reversion",
     "horizon",
 ]
 
@@ -42,7 +41,6 @@ class ControlRanges:
     trend: Tuple[float, float] = (-0.5, 0.5)  # scaled in units of sigma/day
     fat_tails: Tuple[float, float] = (0.5, 2.0)
     momentum: Tuple[float, float] = (0.0, 1.0)
-    mean_reversion: Tuple[float, float] = (0.0, 1.0)
     horizon: Tuple[float, float] = (60.0, 500.0)
 
 
@@ -52,7 +50,6 @@ class ControlValues:
     trend: float = 0.0
     fat_tails: float = 1.0
     momentum: float = 0.0
-    mean_reversion: float = 0.0
     horizon: float = 60.0
 
     def to_dict(self) -> Dict[str, float]:
@@ -61,7 +58,6 @@ class ControlValues:
             "trend": float(self.trend),
             "fat_tails": float(self.fat_tails),
             "momentum": float(self.momentum),
-            "mean_reversion": float(self.mean_reversion),
             "horizon": float(self.horizon),
         }
 
@@ -250,7 +246,6 @@ def scale_controls(values: ControlValues, ranges: ControlRanges) -> np.ndarray:
             _scale_control(values.trend, *ranges.trend),
             _scale_control(values.fat_tails, *ranges.fat_tails),
             _scale_control(values.momentum, *ranges.momentum),
-            _scale_control(values.mean_reversion, *ranges.mean_reversion),
             _scale_control(values.horizon, *ranges.horizon),
         ],
         dtype=np.float32,
@@ -263,7 +258,6 @@ def sample_controls(ranges: ControlRanges, rng: np.random.Generator) -> ControlV
         trend=float(rng.uniform(*ranges.trend)),
         fat_tails=float(rng.uniform(*ranges.fat_tails)),
         momentum=float(rng.uniform(*ranges.momentum)),
-        mean_reversion=float(rng.uniform(*ranges.mean_reversion)),
         horizon=float(rng.uniform(*ranges.horizon)),
     )
 
@@ -331,16 +325,6 @@ def apply_controls_to_future(
             r_mom[i] = (1.0 - controls.momentum) * r[i] + controls.momentum * prev
             prev = r_mom[i]
         r = r_mom
-
-    if controls.mean_reversion > 0.0:
-        r_mr = r.copy()
-        prev = float(past_returns[-1])
-        for i in range(len(r_mr)):
-            r_mr[i] = (1.0 - controls.mean_reversion) * r[
-                i
-            ] - controls.mean_reversion * prev
-            prev = r_mr[i]
-        r = r_mr
 
     tail_strength = controls.fat_tails - 1.0
     if abs(tail_strength) > 1e-6:

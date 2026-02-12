@@ -2,8 +2,12 @@
 import numpy as np
 import pandas as pd
 from scipy import stats
-from statsmodels.tsa.stattools import acf
 import logging
+
+try:
+    from statsmodels.tsa.stattools import acf as sm_acf
+except Exception:  # pragma: no cover - optional dependency
+    sm_acf = None
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +44,8 @@ class ValidationService:
         synth_skew = stats.skew(synth_returns)
 
         # Autocorrelation (volatility clustering)
-        hist_acf = acf(hist_returns**2, nlags=10, fft=False)[1]
-        synth_acf = acf(synth_returns**2, nlags=10, fft=False)[1]
+        hist_acf = self._acf_lag1(hist_returns**2)
+        synth_acf = self._acf_lag1(synth_returns**2)
 
         return {
             "ks_statistic": float(ks_stat),
@@ -53,3 +57,16 @@ class ValidationService:
             "acf_lag1_historical": float(hist_acf),
             "acf_lag1_synthetic": float(synth_acf),
         }
+
+    @staticmethod
+    def _acf_lag1(x: np.ndarray) -> float:
+        x = np.asarray(x)
+        if len(x) < 2:
+            return float("nan")
+        if sm_acf is not None:
+            return float(sm_acf(x, nlags=10, fft=False)[1])
+        x0 = x[:-1]
+        x1 = x[1:]
+        if np.std(x0) < 1e-12 or np.std(x1) < 1e-12:
+            return 0.0
+        return float(np.corrcoef(x0, x1)[0, 1])

@@ -37,6 +37,7 @@ from backend.worker.TinyTimeMixer.services.ttm_controlled_dataset import (
     reconstruct_ohlcv_from_features,
     scale_controls,
 )
+from backend.worker.GARCH.services.validation_service import ValidationService
 
 try:
     from tsfm_public.toolkit.time_series_preprocessor import DEFAULT_FREQUENCY_MAPPING
@@ -59,20 +60,19 @@ except Exception:
 # ----------------------------
 # User-configurable section
 # ----------------------------
-TICKER = "IBM"
-INPUT_START = "2020-01-01"
-INPUT_END = "2020-09-29"
+TICKER = "KO"
+INPUT_START = "2025-01-01"
+INPUT_END = "2025-09-29"
 INPUT_CSV = None  # Optional Path to OHLCV CSV used for inference
 
 PREDICTION_LENGTH = 180
 ROLL_STEP = 1
 
 CONTROLS = ControlValues(
-    volatility_mult=1.0,
-    trend=0.0,
+    volatility_mult=1.0, #0.5-2.0
+    trend= 0.0, 
     fat_tails=1.0,
     momentum=0.0,
-    mean_reversion=0.0,
     horizon=float(PREDICTION_LENGTH),
 )
 
@@ -80,6 +80,8 @@ OUTPUT_DIR = Path(__file__).resolve().parents[1] / "outputs" / "ttm_controlled_t
 OUTPUT_CSV = OUTPUT_DIR / f"{TICKER.lower()}_synthetic.csv"
 CHART_DIR = OUTPUT_DIR / "charts"
 METRICS_CSV = OUTPUT_DIR / f"{TICKER.lower()}_metrics.csv"
+VALIDATION_CSV = OUTPUT_DIR / f"{TICKER.lower()}_validation.csv"
+VALIDATION_CHART = CHART_DIR / "validation_compare.png"
 COMBINED_CHART = CHART_DIR / "all_charts.png"
 SAVE_INDIVIDUAL_CHARTS = False
 ANNUALIZE_METRICS = True
@@ -351,16 +353,56 @@ def plot_metrics(
     plt.close()
 
 
+def plot_validation(
+    validation_metrics: Dict[str, float],
+    path: Path,
+) -> None:
+    fig, ax = plt.subplots(figsize=(8, 4))
+    plot_validation_bars(ax, validation_metrics)
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+
+
+def plot_validation_bars(
+    ax: plt.Axes,
+    validation_metrics: Dict[str, float],
+    *,
+    title: str = "Validation Comparison",
+) -> None:
+    labels = ["kurtosis", "skewness", "acf_lag1"]
+    hist = [
+        validation_metrics["kurtosis_historical"],
+        validation_metrics["skewness_historical"],
+        validation_metrics["acf_lag1_historical"],
+    ]
+    synth = [
+        validation_metrics["kurtosis_synthetic"],
+        validation_metrics["skewness_synthetic"],
+        validation_metrics["acf_lag1_synthetic"],
+    ]
+
+    x = np.arange(len(labels))
+    width = 0.35
+    ax.bar(x - width / 2, hist, width, label="Input")
+    ax.bar(x + width / 2, synth, width, label="Synthetic")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=10)
+    ax.set_title(title)
+    ax.legend()
+
+
 def plot_all_charts(
     input_df: pd.DataFrame,
     synth_df: pd.DataFrame,
     metrics_input: Dict[str, float],
     metrics_synth: Dict[str, float],
+    validation_metrics: Dict[str, float],
     path: Path,
     *,
     metrics_title_suffix: str = "",
 ) -> None:
-    fig, axes = plt.subplots(2, 2, figsize=(14, 8))
+    fig, axes = plt.subplots(3, 2, figsize=(14, 10))
 
     ax = axes[0, 0]
     ax.plot(np.arange(len(input_df)), input_df["Close"].values, label="Input Close")
@@ -400,6 +442,11 @@ def plot_all_charts(
         title = f"{title} ({metrics_title_suffix})"
     ax.set_title(title)
     ax.legend()
+
+    ax = axes[2, 0]
+    plot_validation_bars(ax, validation_metrics)
+
+    axes[2, 1].axis("off")
 
     fig.tight_layout()
     fig.savefig(path, dpi=150)
@@ -491,9 +538,6 @@ def main() -> None:
         cfg=cfg,
     )
 
-    if abs(CONTROLS.trend) < 1e-8:
-        pred_features[:, 0] = pred_features[:, 0] - float(pred_features[:, 0].mean())
-
     synth_df = reconstruct_ohlcv_from_features(last_close, pred_features, last_date)
     if not input_df.empty and not synth_df.empty:
         anchor_close = float(input_df["Close"].iloc[0])
@@ -542,11 +586,25 @@ def main() -> None:
     metrics_table.to_csv(METRICS_CSV, index=False)
     print(f"Saved metrics CSV: {METRICS_CSV}")
 
+    validation = ValidationService(input_for_metrics)
+    synthetic_returns = (
+        pd.to_numeric(synth_for_metrics["Close"], errors="coerce")
+        .pct_change()
+        .dropna()
+        .values
+    )
+    validation_metrics = validation.validate(synthetic_returns)
+    pd.DataFrame([validation_metrics]).to_csv(VALIDATION_CSV, index=False)
+    print(f"Saved validation CSV: {VALIDATION_CSV}")
+    plot_validation(validation_metrics, VALIDATION_CHART)
+    print(f"Saved validation chart: {VALIDATION_CHART}")
+
     plot_all_charts(
         input_df,
         synth_df,
         metrics_input,
         metrics_synth,
+        validation_metrics,
         COMBINED_CHART,
         metrics_title_suffix=metrics_title_suffix,
     )

@@ -297,7 +297,6 @@ def main() -> None:
         trend=0.0,
         fat_tails=1.0,
         momentum=0.0,
-        mean_reversion=0.0,
         horizon=float(PRED_LEN),
     )
 
