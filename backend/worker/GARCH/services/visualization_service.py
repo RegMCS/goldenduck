@@ -234,38 +234,63 @@ class VisualizationService:
             ax.legend()
             ax.grid(True, alpha=0.3, axis="y")
 
-            # 4. User knobs (if provided)
+            # 4. Summary Statistics Table
             ax = axes[1, 1]
-            if user_knobs:
-                knob_names = list(user_knobs.keys())
-                knob_values = list(user_knobs.values())
-                colors_knobs = [
-                    "green" if v > 1.0 else "orange" if v < 1.0 else "gray"
-                    for v in knob_values
-                ]
-                bars = ax.barh(knob_names, knob_values, color=colors_knobs, alpha=0.7)
-                ax.axvline(
-                    x=1.0,
-                    color="red",
-                    linestyle="--",
-                    linewidth=2,
-                    label="Baseline (1.0)",
-                )
-                ax.set_xlabel("Value", fontsize=11)
-                ax.set_title("User Knobs", fontsize=12, fontweight="bold")
-                ax.legend()
-                ax.grid(True, alpha=0.3, axis="x")
-            else:
-                ax.text(
-                    0.5,
-                    0.5,
-                    "No user knobs provided",
-                    ha="center",
-                    va="center",
-                    fontsize=12,
-                )
-                ax.set_xlim(0, 1)
-                ax.set_ylim(0, 1)
+            ax.axis('off')
+            
+            # Calculate summary statistics
+            final_prices = np.array([scenario["Close"].iloc[-1] for scenario in scenarios])
+            initial_prices = np.array([scenario["Close"].iloc[0] for scenario in scenarios])
+            
+            stats_data = [
+                ["Metric", "Value"],
+                ["━━━━━━━━━━━━━━━━━━", "━━━━━━━━━━━━━"],
+                ["Num Scenarios", f"{len(scenarios)}"],
+                ["Horizon (days)", f"{len(scenarios[0])}"],
+                ["", ""],
+                ["Initial Price", f"${initial_prices.mean():.2f}"],
+                ["Final Price (Mean)", f"${final_prices.mean():.2f}"],
+                ["Final Price (Median)", f"${np.median(final_prices):.2f}"],
+                ["Final Price (Std)", f"${final_prices.std():.2f}"],
+                ["Final Price Range", f"${final_prices.min():.2f} - ${final_prices.max():.2f}"],
+                ["", ""],
+                ["Returns (Mean)", f"{np.mean(synthetic_returns) * 100:.4f}%"],
+                ["Returns (Std)", f"{np.std(synthetic_returns) * 100:.4f}%"],
+                ["Returns (Skew)", f"{stats.skew(synthetic_returns):.4f}"],
+                ["Returns (Kurtosis)", f"{stats.kurtosis(synthetic_returns):.4f}"],
+                ["", ""],
+            ]
+            
+            # Add autocorrelation
+            from statsmodels.tsa.stattools import acf
+            try:
+                acf_vals = acf(synthetic_returns, nlags=5, fft=False)
+                stats_data.append(["ACF Lag-1", f"{acf_vals[1]:.4f}"])
+                stats_data.append(["ACF Lag-5", f"{acf_vals[5]:.4f}"])
+            except:
+                pass
+            
+            # Create table
+            table = ax.table(
+                cellText=stats_data,
+                cellLoc='left',
+                loc='center',
+                colWidths=[0.6, 0.4],
+            )
+            table.auto_set_font_size(False)
+            table.set_fontsize(10)
+            table.scale(1, 2)
+            
+            # Style header row
+            for i in range(2):
+                table[(0, i)].set_facecolor('#4472C4')
+                table[(0, i)].set_text_props(weight='bold', color='white')
+            
+            # Style separator row
+            for i in range(2):
+                table[(1, i)].set_facecolor('#E7E6E6')
+            
+            ax.set_title("Summary Statistics", fontsize=12, fontweight="bold", pad=20)
 
             # Save
             plt.tight_layout()

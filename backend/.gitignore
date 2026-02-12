@@ -30,7 +30,6 @@ GARCH/output/
 # ============================================================
 ml_training/data/raw/
 ml_training/data/processed/
-ml_training/models/saved_models/
 ml_training/models/**/*.pkl
 ml_training/models/**/*.joblib
 mlruns/

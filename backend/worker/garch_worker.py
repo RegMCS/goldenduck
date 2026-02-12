@@ -36,6 +36,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("garch-worker")
 
+# Use absolute path - Docker WORKDIR is /app, output is mounted at /app/output
+OUTPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "output"))
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+logger.info(f"Output directory: {OUTPUT_DIR}")
 
 S3_BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "goldenduck-results")
 s3_client = boto3.client("s3")
