@@ -11,6 +11,11 @@ US_TICKERS = [
     "JPM",  # JPMorgan Chase
     "V",  # Visa
     "MA",  # Mastercard
+    "XOM",  # Exxon Mobil (Energy)
+    "JNJ",  # Johnson & Johnson (Healthcare)
+    "WMT",  # Walmart (Consumer Staples)
+    "NEE",  # NextEra Energy (Utilities)
+    "CAT",  # Caterpillar (Industrials)
 ]
 
 INDEX_TICKERS = [

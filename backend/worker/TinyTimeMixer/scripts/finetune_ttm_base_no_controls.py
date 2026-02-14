@@ -1,13 +1,13 @@
 """
-Fine-tune TTM (daily) with controllable synthetic parameters for OHLCV generation.
+Fine-tune TTM (daily) without control channels (base OHLCV features only).
 
 Outputs:
-  - weights: outputs/ttm_controlled/ttm_controlled_weights.pt
-  - scaler:  outputs/ttm_controlled/ttm_controlled_scaler.pt
-  - config:  outputs/ttm_controlled/ttm_controlled_config.json
+  - weights: outputs/ttm_base_version_no_controls/ttm_base_weights.pt
+  - scaler:  outputs/ttm_base_version_no_controls/ttm_base_scaler.pt
+  - config:  outputs/ttm_base_version_no_controls/ttm_base_config.json
 
 Run:
-  python finetune_ttm_controlled.py
+  python finetune_ttm_base_no_controls.py
 """
 
 from __future__ import annotations
@@ -47,16 +47,14 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
 from backend.worker.GARCH.config.tickers import US_TICKERS, INDEX_TICKERS
-from backend.worker.TinyTimeMixer.services.ttm_controlled_dataset import (
-    CONTROL_NAMES,
+from backend.worker.TinyTimeMixer.services.ttm_base_dataset import (
     TARGET_FEATURES,
-    ControlValues,
-    TTMControlledConfig,
+    BaseWindowDataset,
+    TTMBaseConfig,
     TimeSeriesBundle,
     build_base_features,
     download_daily_ohlcv,
     fit_feature_scaler,
-    ControlledWindowDataset,
 )
 
 # ----------------------------
@@ -85,13 +83,7 @@ WEIGHT_DECAY = 1e-2
 GRAD_CLIP_NORM = 1.0
 LOG_EVERY_N_BATCHES = 200
 
-# Loss config (Student-t NLL for all channels)
-RETURN_DF = 5.0
-RETURN_SCALE = 1.0
-RETURN_LOSS_WEIGHT = 1.0
-OTHER_LOSS_WEIGHT = 1.0
-
-FULL_FINETUNE = False 
+FULL_FINETUNE = False
 UNFREEZE_KEYWORDS = [
     "head",
     "decoder",
@@ -102,10 +94,10 @@ UNFREEZE_KEYWORDS = [
     "lm_head",
 ]
 
-OUTPUT_DIR = Path(__file__).resolve().parents[1] / "outputs" / "ttm_controlled"
-WEIGHTS_PATH = OUTPUT_DIR / "ttm_controlled_weights.pt"
-SCALER_PATH = OUTPUT_DIR / "ttm_controlled_scaler.pt"
-CONFIG_PATH = OUTPUT_DIR / "ttm_controlled_config.json"
+OUTPUT_DIR = Path(__file__).resolve().parents[1] / "outputs" / "ttm_base_version_no_controls"
+WEIGHTS_PATH = OUTPUT_DIR / "ttm_base_weights.pt"
+SCALER_PATH = OUTPUT_DIR / "ttm_base_scaler.pt"
+CONFIG_PATH = OUTPUT_DIR / "ttm_base_config.json"
 
 
 def set_seed(seed: int) -> None:
@@ -168,60 +160,8 @@ def count_trainable_params(model: torch.nn.Module) -> Tuple[int, int]:
     return trainable, total
 
 
-def student_t_nll(
-    err: torch.Tensor,
-    *,
-    df: float,
-    scale: float,
-) -> torch.Tensor:
-    # Negative log-likelihood up to a constant; robust to extremes.
-    if df <= 2.0:
-        raise ValueError("RETURN_DF must be > 2 for stable Student-t variance.")
-    scale = float(scale)
-    df = float(df)
-    return 0.5 * (df + 1.0) * torch.log1p((err ** 2) / (df * scale * scale)) + np.log(
-        scale
-    )
-
-
-class CombinedLoss:
-    def __init__(
-        self,
-        *,
-        df: float,
-        scale: float,
-        return_weight: float,
-        other_weight: float,
-    ) -> None:
-        self.df = float(df)
-        self.scale = float(scale)
-        self.return_weight = float(return_weight)
-        self.other_weight = float(other_weight)
-        self.huber = torch.nn.HuberLoss(delta=1.0, reduction="mean")
-
-    def __call__(self, y_hat: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
-        # Return channel (index 0) -> Student-t NLL
-        err_ret = y_hat[..., 0] - y_true[..., 0]
-        loss_ret = student_t_nll(err_ret, df=self.df, scale=self.scale).mean()
-
-        # Range + volume channels -> Huber
-        loss_other = self.huber(y_hat[..., 1:], y_true[..., 1:])
-
-        return self.return_weight * loss_ret + self.other_weight * loss_other
-
-
-class StudentTLoss:
-    def __init__(self, *, df: float, scale: float) -> None:
-        self.df = float(df)
-        self.scale = float(scale)
-
-    def __call__(self, y_hat: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
-        err = y_hat - y_true
-        return student_t_nll(err, df=self.df, scale=self.scale).mean()
-
-
 def to_bundle(ticker: str, df) -> TimeSeriesBundle:
-    features = df[["log_return", "log_range", "log_volume"]].values.astype(np.float32)
+    features = df[TARGET_FEATURES].values.astype(np.float32)
     dates = df["date"].values
     close = df["Close"].values.astype(np.float32)
     return TimeSeriesBundle(ticker=ticker, dates=dates, features=features, close=close)
@@ -328,7 +268,7 @@ def main() -> None:
 
     tickers = list(US_TICKERS) + list(INDEX_TICKERS)
 
-    cfg = TTMControlledConfig(context_length=CONTEXT_LEN, prediction_length=PRED_LEN)
+    cfg = TTMBaseConfig(context_length=CONTEXT_LEN, prediction_length=PRED_LEN)
 
     all_series = []
 
@@ -350,14 +290,6 @@ def main() -> None:
     scaler = fit_feature_scaler(all_series)
     torch.save(scaler.state_dict(), SCALER_PATH)
 
-    fixed_controls = ControlValues(
-        volatility_mult=1.0,
-        trend=0.0,
-        fat_tails=1.0,
-        momentum=0.0,
-        horizon=float(PRED_LEN),
-    )
-
     train_range = (
         np.datetime64("2000-01-01"),
         np.datetime64(f"{TRAIN_END_YEAR}-12-31"),
@@ -368,31 +300,23 @@ def main() -> None:
         np.datetime64(f"{TEST_YEAR}-12-31"),
     )
 
-    train_ds = ControlledWindowDataset(
+    train_ds = BaseWindowDataset(
         all_series,
         cfg,
         scaler,
-        control_mode="random",
         target_date_range=train_range,
-        seed=SEED,
     )
-    val_ds = ControlledWindowDataset(
+    val_ds = BaseWindowDataset(
         all_series,
         cfg,
         scaler,
-        control_mode="fixed",
-        fixed_controls=fixed_controls,
         target_date_range=val_range,
-        seed=SEED,
     )
-    test_ds = ControlledWindowDataset(
+    test_ds = BaseWindowDataset(
         all_series,
         cfg,
         scaler,
-        control_mode="fixed",
-        fixed_controls=fixed_controls,
         target_date_range=test_range,
-        seed=SEED,
     )
 
     train_loader = DataLoader(
@@ -444,7 +368,7 @@ def main() -> None:
         lr=LR,
         weight_decay=WEIGHT_DECAY,
     )
-    loss_fn = StudentTLoss(df=RETURN_DF, scale=RETURN_SCALE)
+    loss_fn = torch.nn.HuberLoss(delta=1.0)
 
     best_val = float("inf")
     best_state: Optional[Dict[str, torch.Tensor]] = None
@@ -506,22 +430,7 @@ def main() -> None:
         "prediction_length": PRED_LEN,
         "channels": cfg.channel_names,
         "target_features": TARGET_FEATURES,
-        "controls": CONTROL_NAMES,
-        "control_ranges": asdict(cfg.control_ranges),
-        "trend_sigma_scale": cfg.trend_sigma_scale,
-        "tail_clip_z": cfg.tail_clip_z,
-        "tail_range_coef": cfg.tail_range_coef,
-        "vol_volume_coef": cfg.vol_volume_coef,
-        "train_noise_enabled": cfg.train_noise_enabled,
-        "infer_noise_enabled": cfg.infer_noise_enabled,
-        "noise_df_min": cfg.noise_df_min,
-        "noise_df_max": cfg.noise_df_max,
-        "train_return_noise_scale": cfg.train_return_noise_scale,
-        "train_range_noise_scale": cfg.train_range_noise_scale,
-        "train_volume_noise_scale": cfg.train_volume_noise_scale,
-        "infer_return_noise_scale": cfg.infer_return_noise_scale,
-        "infer_range_noise_scale": cfg.infer_range_noise_scale,
-        "infer_volume_noise_scale": cfg.infer_volume_noise_scale,
+        "controls": [],
         "detrend_returns": cfg.detrend_returns,
         "detrend_window": cfg.detrend_window,
         "detrend_mode": cfg.detrend_mode,

@@ -478,10 +478,14 @@ def reconstruct_ohlcv_from_features(
         close = prev_close * float(np.exp(log_ret))
         open_ = prev_close
         ratio = float(np.exp(log_range))
-        base = float(np.sqrt(ratio))
+        if ratio < 1.0:
+            ratio = 1.0
 
-        high = max(open_, close) * base
-        low = min(open_, close) / base
+        hi_anchor = max(open_, close)
+        lo_anchor = min(open_, close)
+        skew = float(np.tanh(float(log_ret) * 5.0) * 0.25)
+        high = hi_anchor * float(ratio ** (0.5 - skew))
+        low = lo_anchor / float(ratio ** (0.5 + skew))
 
         volume = float(np.expm1(log_vol))
         if volume < 0:

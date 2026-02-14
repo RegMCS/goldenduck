@@ -11,7 +11,6 @@
     "trend",
     "fat_tails",
     "momentum",
-    "mean_reversion",
     "horizon"
   ],
   "target_features": [
@@ -24,7 +23,6 @@
     "trend",
     "fat_tails",
     "momentum",
-    "mean_reversion",
     "horizon"
   ],
   "control_ranges": {
@@ -41,10 +39,6 @@
       2.0
     ],
     "momentum": [
-      0.0,
-      1.0
-    ],
-    "mean_reversion": [
       0.0,
       1.0
     ],

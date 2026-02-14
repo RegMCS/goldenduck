@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="2000" viewBox="0 0 1400 2000">
+  <defs>
+    <style>
+      .title { font: 700 34px "Segoe UI", Arial, sans-serif; fill: #1b1b1b; }
+      .subtitle { font: 600 18px "Segoe UI", Arial, sans-serif; fill: #1b1b1b; }
+      .text { font: 14px "Segoe UI", Arial, sans-serif; fill: #1b1b1b; }
+      .muted { fill: #555; }
+      .box { fill: #f7f7fb; stroke: #2b2b2b; stroke-width: 1.2; rx: 10; }
+      .box-dark { fill: #eef3ff; stroke: #2b2b2b; stroke-width: 1.2; rx: 10; }
+      .box-green { fill: #ecfff4; stroke: #2b2b2b; stroke-width: 1.2; rx: 10; }
+      .arrow { stroke: #2b2b2b; stroke-width: 2; marker-end: url(#arrowhead); }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2b2b2b"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1400" height="2000" fill="#ffffff"/>
+
+  <text x="60" y="60" class="title">Controlled TinyTimeMixer (TTM) — End‑to‑End Pipeline</text>
+  <text x="60" y="92" class="subtitle">Training data → controllable targets → model fine‑tune → inference → OHLCV + metrics</text>
+
+  <!-- TRAINING: DATA INGEST -->
+  <rect x="60" y="130" width="600" height="220" class="box"/>
+  <text x="80" y="160" class="subtitle">1) Raw OHLCV ingestion</text>
+  <text x="80" y="185" class="text">• Source: yfinance daily OHLCV (or input CSV)</text>
+  <text x="80" y="205" class="text">• Columns required: Date, Open, High, Low, Close, Volume</text>
+  <text x="80" y="225" class="text">• Sorted by date; missing rows dropped</text>
+  <text x="80" y="245" class="text muted">File: services/ttm_controlled_dataset.py :: download_daily_ohlcv</text>
+
+  <!-- TRAINING: FEATURE BUILD -->
+  <rect x="60" y="380" width="600" height="260" class="box"/>
+  <text x="80" y="410" class="subtitle">2) Base feature construction</text>
+  <text x="80" y="435" class="text">• log_return = log(Close_t / Close_{t-1})</text>
+  <text x="80" y="455" class="text">• log_range = log(High_t / Low_t)</text>
+  <text x="80" y="475" class="text">• log_volume = log1p(Volume_t)</text>
+  <text x="80" y="495" class="text">• Optional detrend: subtract rolling mean of log_return</text>
+  <text x="80" y="515" class="text">• Output features: [date, Close, log_return, log_range, log_volume]</text>
+  <text x="80" y="535" class="text muted">File: services/ttm_controlled_dataset.py :: build_base_features</text>
+
+  <!-- TRAINING: SCALER -->
+  <rect x="60" y="670" width="600" height="180" class="box"/>
+  <text x="80" y="700" class="subtitle">3) Fit StandardScaler</text>
+  <text x="80" y="725" class="text">• Concatenate features across tickers</text>
+  <text x="80" y="745" class="text">• mean/std computed per feature channel (3 total)</text>
+  <text x="80" y="765" class="text">• All future/past features normalized to zero‑mean unit‑std</text>
+  <text x="80" y="785" class="text muted">File: services/ttm_controlled_dataset.py :: fit_feature_scaler</text>
+
+  <!-- TRAINING: CONTROL SAMPLING -->
+  <rect x="740" y="130" width="600" height="260" class="box-dark"/>
+  <text x="760" y="160" class="subtitle">4) Sample control parameters (per window)</text>
+  <text x="760" y="185" class="text">Controls (current set): volatility_mult, trend, fat_tails, momentum, horizon</text>
+  <text x="760" y="205" class="text">• volatility_mult: scales return magnitude</text>
+  <text x="760" y="225" class="text">• trend: adds drift (scaled by trend_sigma_scale × sigma)</text>
+  <text x="760" y="245" class="text">• fat_tails: increases tail heaviness (kurtosis)</text>
+  <text x="760" y="265" class="text">• momentum: blends returns with previous return</text>
+  <text x="760" y="285" class="text">• horizon: control channel for conditioning (not used in transforms)</text>
+  <text x="760" y="305" class="text muted">File: services/ttm_controlled_dataset.py :: ControlRanges / sample_controls</text>
+
+  <!-- TRAINING: CONTROL EFFECTS -->
+  <rect x="740" y="430" width="600" height="300" class="box-dark"/>
+  <text x="760" y="460" class="subtitle">5) Apply controls to future targets</text>
+  <text x="760" y="485" class="text">• Take real future features (future_raw)</text>
+  <text x="760" y="505" class="text">• r = r × volatility_mult</text>
+  <text x="760" y="525" class="text">• r += trend × trend_sigma_scale × sigma(past_returns)</text>
+  <text x="760" y="545" class="text">• momentum: r_t = (1−m) r_t + m·r_{t−1}</text>
+  <text x="760" y="565" class="text">• fat tails: amplify large |z| returns</text>
+  <text x="760" y="585" class="text">• log_range += log(volatility_mult) + tail_range_coef·(fat_tails−1)</text>
+  <text x="760" y="605" class="text">• log_volume += vol_volume_coef·log(volatility_mult)</text>
+  <text x="760" y="625" class="text">• Add train noise (t‑noise) if enabled</text>
+  <text x="760" y="645" class="text muted">File: services/ttm_controlled_dataset.py :: apply_controls_to_future</text>
+
+  <!-- TRAINING: WINDOWING -->
+  <rect x="60" y="880" width="600" height="260" class="box"/>
+  <text x="80" y="910" class="subtitle">6) Sliding windows → dataset</text>
+  <text x="80" y="935" class="text">• context_length = 180, prediction_length = 60 (default)</text>
+  <text x="80" y="955" class="text">• past_raw = features[t : t+context]</text>
+  <text x="80" y="975" class="text">• future_raw = features[t+context : t+context+pred]</text>
+  <text x="80" y="995" class="text">• future_raw is modified by controls to become target</text>
+  <text x="80" y="1015" class="text">• past_raw and future_raw are standardized with scaler</text>
+  <text x="80" y="1035" class="text muted">File: services/ttm_controlled_dataset.py :: ControlledWindowDataset</text>
+
+  <!-- TRAINING: MODEL INPUTS -->
+  <rect x="60" y="1170" width="600" height="260" class="box"/>
+  <text x="80" y="1200" class="subtitle">7) Model inputs / targets</text>
+  <text x="80" y="1225" class="text">• Controls are scaled to [-1,1] and repeated across the context</text>
+  <text x="80" y="1245" class="text">• past_values = [scaled log_return, log_range, log_volume, controls...]</text>
+  <text x="80" y="1265" class="text">• future_targets = scaled [log_return, log_range, log_volume]</text>
+  <text x="80" y="1285" class="text">• num_input_channels = 3 targets + N controls (here N=5)</text>
+  <text x="80" y="1305" class="text muted">File: services/ttm_controlled_dataset.py :: scale_controls + concat</text>
+
+  <!-- TRAINING: MODEL + LOSS -->
+  <rect x="740" y="760" width="600" height="360" class="box-green"/>
+  <text x="760" y="790" class="subtitle">8) Model setup + optimization</text>
+  <text x="760" y="815" class="text">• Base model: ibm-granite/granite-timeseries-ttm-r2</text>
+  <text x="760" y="835" class="text">• get_model(..., context_length, prediction_length, num_input_channels)</text>
+  <text x="760" y="855" class="text">• prediction_channel_indices = [0,1,2] (the 3 target features)</text>
+  <text x="760" y="875" class="text">• exogenous_channel_indices = control channels</text>
+  <text x="760" y="895" class="text">• decoder_mode = mix_channel, scaling=None</text>
+  <text x="760" y="915" class="text">• Optional freq token based on data frequency</text>
+  <text x="760" y="935" class="text">• Freeze most layers; train head/decoder by default</text>
+  <text x="760" y="955" class="text">• Loss: HuberLoss(delta=1.0) on future targets only</text>
+  <text x="760" y="975" class="text">• Optimizer: AdamW(lr=1e‑4, weight_decay=1e‑2)</text>
+  <text x="760" y="995" class="text">• Best weights saved by val loss</text>
+  <text x="760" y="1015" class="text muted">File: scripts/finetune_ttm_controlled.py</text>
+
+  <!-- ARROWS -->
+  <line x1="360" y1="350" x2="360" y2="380" class="arrow"/>
+  <line x1="360" y1="640" x2="360" y2="670" class="arrow"/>
+  <line x1="360" y1="850" x2="360" y2="880" class="arrow"/>
+  <line x1="360" y1="1140" x2="360" y2="1170" class="arrow"/>
+  <line x1="660" y1="460" x2="740" y2="460" class="arrow"/>
+  <line x1="1040" y1="730" x2="1040" y2="760" class="arrow"/>
+
+  <!-- INFERENCE -->
+  <rect x="60" y="1460" width="1280" height="470" class="box"/>
+  <text x="80" y="1490" class="subtitle">9) Inference pipeline (post‑training)</text>
+  <text x="80" y="1515" class="text">• Load config, weights, scaler</text>
+  <text x="80" y="1535" class="text">• Load input OHLCV (ticker or CSV), build base features</text>
+  <text x="80" y="1555" class="text">• past_raw = last context_length feature rows</text>
+  <text x="80" y="1575" class="text">• past_scaled = scaler.transform(past_raw)</text>
+  <text x="80" y="1595" class="text">• controls → scale to [-1,1], repeat across context, concat to past_scaled</text>
+  <text x="80" y="1615" class="text">• rollout_forecast: feed model step‑by‑step if horizon &gt; pred_len</text>
+  <text x="80" y="1635" class="text">• model outputs scaled future targets (3 channels only)</text>
+  <text x="80" y="1655" class="text">• inverse_transform → pred_features (log_return, log_range, log_volume)</text>
+  <text x="80" y="1675" class="text">• apply_inference_noise (optional)</text>
+  <text x="80" y="1695" class="text">• reconstruct OHLCV:</text>
+  <text x="100" y="1715" class="text">  - close = prev_close * exp(log_return)</text>
+  <text x="100" y="1735" class="text">  - open = prev_close</text>
+  <text x="100" y="1755" class="text">  - range ratio = exp(log_range)</text>
+  <text x="100" y="1775" class="text">  - high/low from symmetric envelope around open/close</text>
+  <text x="100" y="1795" class="text">  - volume = expm1(log_volume)</text>
+  <text x="80" y="1815" class="text">• Anchor synthetic prices to input’s first close + align dates</text>
+  <text x="80" y="1835" class="text">• Save synthetic CSV, metrics CSV, validation CSV, charts PNGs</text>
+  <text x="80" y="1855" class="text muted">Files: scripts/test_infer_ttm_controlled.py + services/ttm_controlled_dataset.py</text>
+</svg>

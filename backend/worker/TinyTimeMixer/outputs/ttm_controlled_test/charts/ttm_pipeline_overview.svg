@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1400" viewBox="0 0 1000 1400">
+  <defs>
+    <style>
+      .title { font: 700 30px "Segoe UI", Arial, sans-serif; fill: #1b1b1b; }
+      .subtitle { font: 600 16px "Segoe UI", Arial, sans-serif; fill: #1b1b1b; }
+      .text { font: 14px "Segoe UI", Arial, sans-serif; fill: #1b1b1b; }
+      .muted { fill: #555; }
+      .box { fill: #f7f7fb; stroke: #2b2b2b; stroke-width: 1.2; rx: 10; }
+      .box-alt { fill: #eef7ff; stroke: #2b2b2b; stroke-width: 1.2; rx: 10; }
+      .arrow { stroke: #2b2b2b; stroke-width: 2; marker-end: url(#arrowhead); }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2b2b2b"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1000" height="1400" fill="#ffffff"/>
+
+  <text x="50" y="60" class="title">Controlled TTM - How It Works (Overview)</text>
+  <text x="50" y="90" class="subtitle">From training data to controllable synthetic OHLCV</text>
+
+  <!-- Training row -->
+  <rect x="50" y="130" width="900" height="280" class="box"/>
+  <text x="70" y="160" class="subtitle">Training: build supervised targets</text>
+  <text x="70" y="185" class="text">1) Load OHLCV -> compute features:</text>
+  <text x="90" y="205" class="text">log_return, log_range, log_volume</text>
+  <text x="70" y="230" class="text">2) Fit scaler on all features (normalize)</text>
+  <text x="70" y="255" class="text">3) Rolling windows: [t..t+context-1], then [t+1..]</text>
+  <text x="70" y="280" class="text">4) Sample controls per window (drawn from ranges to cover regimes)</text>
+  <text x="70" y="305" class="text">5) Modify future features using controls (targets)</text>
+  <text x="70" y="330" class="text">6) Inputs = past features + control channels (controls repeated across window)</text>
+
+  <!-- Model row -->
+  <rect x="50" y="430" width="900" height="220" class="box-alt"/>
+  <text x="70" y="460" class="subtitle">Model learns the mapping</text>
+  <text x="70" y="485" class="text">Input: past window (last context_length) + controls</text>
+  <text x="70" y="510" class="text">Controls are constant channels across the context window</text>
+  <text x="70" y="535" class="text">Output: future feature sequence (3 channels)</text>
+  <text x="70" y="560" class="text">Loss: Huber on future features only (probably not the final one; try others for realism)</text>
+
+  <!-- Inference row -->
+  <rect x="50" y="690" width="900" height="320" class="box"/>
+  <text x="70" y="720" class="subtitle">Inference: generate one synthetic path</text>
+  <text x="70" y="745" class="text">1) Load recent OHLCV -> compute features</text>
+  <text x="70" y="770" class="text">2) Choose controls (volatility, trend, fat tails, momentum, horizon)</text>
+  <text x="70" y="795" class="text">3) Model predicts future features</text>
+  <text x="70" y="820" class="text">4) Reconstruct OHLCV from features:</text>
+  <text x="90" y="845" class="text">close from log_return, range from log_range, volume from log_volume</text>
+  <text x="70" y="870" class="text">5) Save synthetic OHLCV + metrics + validation</text>
+  <text x="70" y="895" class="text muted">Optional: inference noise adds stochasticity</text>
+
+  <!-- Notes -->
+  <rect x="50" y="1050" width="900" height="300" class="box"/>
+  <text x="70" y="1080" class="subtitle">Key points</text>
+  <text x="70" y="1105" class="text">- Controls do NOT change the input data; they condition the output.</text>
+  <text x="70" y="1130" class="text">- One inference run = one synthetic series for the chosen controls.</text>
+  <text x="70" y="1155" class="text">- Different outputs require new controls or stochastic noise/seed.</text>
+  <text x="70" y="1180" class="text">- Rolling windows provide overlapping training examples.</text>
+  <text x="70" y="1205" class="text">- Loss is currently Huber; experiment with other losses for price behavior.</text>
+
+  <!-- Arrows -->
+  <line x1="500" y1="410" x2="500" y2="430" class="arrow"/>
+  <line x1="500" y1="650" x2="500" y2="690" class="arrow"/>
+</svg>
