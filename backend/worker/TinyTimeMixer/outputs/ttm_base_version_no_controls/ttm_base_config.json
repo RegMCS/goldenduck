@@ -1,0 +1,23 @@
+{
+  "model_id": "ibm-granite/granite-timeseries-ttm-r2",
+  "freq": "D",
+  "context_length": 180,
+  "prediction_length": 60,
+  "channels": [
+    "log_return",
+    "log_range",
+    "log_volume"
+  ],
+  "target_features": [
+    "log_return",
+    "log_range",
+    "log_volume"
+  ],
+  "controls": [],
+  "detrend_returns": true,
+  "detrend_window": 20,
+  "detrend_mode": "rolling",
+  "train_end_year": 2023,
+  "val_year": 2024,
+  "test_year": 2025
+}

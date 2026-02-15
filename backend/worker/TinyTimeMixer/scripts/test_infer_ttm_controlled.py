@@ -389,17 +389,48 @@ def plot_validation_bars(
     ax.legend()
 
 
+def plot_nonlog_feature(
+    input_feats: np.ndarray,
+    pred_feats: np.ndarray,
+    *,
+    ax: plt.Axes,
+    idx: int,
+    title: str,
+    y_label: str,
+) -> None:
+    x_in = np.arange(len(input_feats))
+    x_pred = np.arange(len(pred_feats))
+
+    if idx == 0:
+        input_series = np.expm1(input_feats[:, 0])
+        pred_series = np.expm1(pred_feats[:, 0])
+    elif idx == 1:
+        input_series = np.exp(input_feats[:, 1])
+        pred_series = np.exp(pred_feats[:, 1])
+    else:
+        input_series = np.expm1(input_feats[:, 2])
+        pred_series = np.expm1(pred_feats[:, 2])
+
+    ax.plot(x_in, input_series, label="Input")
+    ax.plot(x_pred, pred_series, label="Pred")
+    ax.set_title(title)
+    ax.set_ylabel(y_label)
+    ax.legend(fontsize=8)
+
+
 def plot_all_charts(
     input_df: pd.DataFrame,
     synth_df: pd.DataFrame,
     metrics_input: Dict[str, float],
     metrics_synth: Dict[str, float],
     validation_metrics: Dict[str, float],
+    input_feats: np.ndarray,
+    pred_feats: np.ndarray,
     path: Path,
     *,
     metrics_title_suffix: str = "",
 ) -> None:
-    fig, axes = plt.subplots(3, 2, figsize=(14, 10))
+    fig, axes = plt.subplots(4, 2, figsize=(14, 13))
 
     ax = axes[0, 0]
     ax.plot(np.arange(len(input_df)), input_df["Close"].values, label="Input Close")
@@ -442,8 +473,34 @@ def plot_all_charts(
 
     ax = axes[2, 0]
     plot_validation_bars(ax, validation_metrics)
+    ax = axes[2, 1]
+    plot_nonlog_feature(
+        input_feats,
+        pred_feats,
+        ax=ax,
+        idx=0,
+        title="Raw (Non-Log) Return",
+        y_label="Return",
+    )
 
-    axes[2, 1].axis("off")
+    ax = axes[3, 0]
+    plot_nonlog_feature(
+        input_feats,
+        pred_feats,
+        ax=ax,
+        idx=1,
+        title="Raw (Non-Log) Range Ratio",
+        y_label="High/Low Ratio",
+    )
+    ax = axes[3, 1]
+    plot_nonlog_feature(
+        input_feats,
+        pred_feats,
+        ax=ax,
+        idx=2,
+        title="Raw (Non-Log) Volume",
+        y_label="Volume",
+    )
 
     fig.tight_layout()
     fig.savefig(path, dpi=150)
@@ -535,6 +592,13 @@ def main() -> None:
         cfg=cfg,
     )
 
+    feats_for_compare = build_base_features(raw, cfg)
+    input_feats = (
+        feats_for_compare[["log_return", "log_range", "log_volume"]]
+        .tail(len(pred_features))
+        .values.astype(np.float32)
+    )
+
     synth_df = reconstruct_ohlcv_from_features(last_close, pred_features, last_date)
     if not input_df.empty and not synth_df.empty:
         anchor_close = float(input_df["Close"].iloc[0])
@@ -603,6 +667,8 @@ def main() -> None:
         metrics_input,
         metrics_synth,
         validation_metrics,
+        input_feats,
+        pred_features,
         COMBINED_CHART,
         metrics_title_suffix=metrics_title_suffix,
     )

@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
 import json
 import sys
 
 import numpy as np
 import pandas as pd
 import torch
+import matplotlib.pyplot as plt
 
 ROOT = Path(__file__).resolve().parents[4]
 if str(ROOT) not in sys.path:
@@ -32,6 +33,7 @@ from backend.worker.TinyTimeMixer.services.ttm_controlled_dataset import (
     download_daily_ohlcv,
     reconstruct_ohlcv_from_features,
 )
+from backend.worker.GARCH.services.validation_service import ValidationService
 
 # optional: map frequency string to token id for prefix tuning
 try:
@@ -50,6 +52,17 @@ except Exception:
         "D": 8,
         "W": 9,
     }
+
+
+# ----------------------------
+# Editable defaults
+# ----------------------------
+DEFAULT_TICKER = "AAPL"
+DEFAULT_OUTPUT_CSV_TEMPLATE = (
+    "backend/worker/TinyTimeMixer/outputs/ttm_base_version_no_controls/{ticker}_synthetic.csv"
+)
+ANNUALIZE_METRICS = True
+TRADING_DAYS = 252
 
 
 def extract_predictions(outputs) -> torch.Tensor:
@@ -191,9 +204,201 @@ def rollout_forecast(
     return pred_raw
 
 
+def compute_metrics(
+    df: pd.DataFrame,
+    *,
+    annualize: bool = False,
+    trading_days: int = 252,
+) -> Dict[str, float]:
+    close = df["Close"].astype(float)
+    ret = np.log(close / close.shift(1)).dropna().values
+    if len(ret) < 3:
+        return {
+            "volatility": float("nan"),
+            "trend": float("nan"),
+            "fat_tails": float("nan"),
+            "momentum": float("nan"),
+        }
+
+    vol = float(np.std(ret))
+    trend = float(np.mean(ret))
+    if annualize and trading_days > 0:
+        vol = vol * float(np.sqrt(trading_days))
+        trend = trend * float(trading_days)
+
+    centered = ret - np.mean(ret)
+    std = np.std(centered) + 1e-12
+    kurt = float(np.mean((centered / std) ** 4) - 3.0)
+
+    if len(ret) >= 2:
+        r0 = ret[:-1]
+        r1 = ret[1:]
+        if np.std(r0) < 1e-12 or np.std(r1) < 1e-12:
+            ac1 = 0.0
+        else:
+            ac1 = float(np.corrcoef(r0, r1)[0, 1])
+    else:
+        ac1 = 0.0
+
+    momentum = max(0.0, ac1)
+
+    return {
+        "volatility": vol,
+        "trend": trend,
+        "fat_tails": kurt,
+        "momentum": momentum,
+    }
+
+
+def plot_validation_bars(
+    ax: plt.Axes,
+    validation_metrics: Dict[str, float],
+    *,
+    title: str = "Validation Comparison",
+) -> None:
+    labels = ["kurtosis", "skewness", "acf_lag1"]
+    hist = [
+        validation_metrics["kurtosis_historical"],
+        validation_metrics["skewness_historical"],
+        validation_metrics["acf_lag1_historical"],
+    ]
+    synth = [
+        validation_metrics["kurtosis_synthetic"],
+        validation_metrics["skewness_synthetic"],
+        validation_metrics["acf_lag1_synthetic"],
+    ]
+
+    x = np.arange(len(labels))
+    width = 0.35
+    ax.bar(x - width / 2, hist, width, label="Input")
+    ax.bar(x + width / 2, synth, width, label="Synthetic")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=10)
+    ax.set_title(title)
+    ax.legend()
+
+
+def plot_nonlog_feature(
+    input_feats: np.ndarray,
+    pred_feats: np.ndarray,
+    *,
+    ax: plt.Axes,
+    idx: int,
+    title: str,
+    y_label: str,
+) -> None:
+    x_in = np.arange(len(input_feats))
+    x_pred = np.arange(len(pred_feats))
+
+    if idx == 0:
+        input_series = np.expm1(input_feats[:, 0])
+        pred_series = np.expm1(pred_feats[:, 0])
+    elif idx == 1:
+        input_series = np.exp(input_feats[:, 1])
+        pred_series = np.exp(pred_feats[:, 1])
+    else:
+        input_series = np.expm1(input_feats[:, 2])
+        pred_series = np.expm1(pred_feats[:, 2])
+
+    ax.plot(x_in, input_series, label="Input")
+    ax.plot(x_pred, pred_series, label="Pred")
+    ax.set_title(title)
+    ax.set_ylabel(y_label)
+    ax.legend(fontsize=8)
+
+
+def plot_all_charts(
+    input_df: pd.DataFrame,
+    synth_df: pd.DataFrame,
+    metrics_input: Dict[str, float],
+    metrics_synth: Dict[str, float],
+    validation_metrics: Dict[str, float],
+    input_feats: np.ndarray,
+    pred_feats: np.ndarray,
+    path: Path,
+    *,
+    metrics_title_suffix: str = "",
+) -> None:
+    fig, axes = plt.subplots(4, 2, figsize=(14, 13))
+
+    ax = axes[0, 0]
+    ax.plot(np.arange(len(input_df)), input_df["Close"].values, label="Input Close")
+    ax.plot(np.arange(len(synth_df)), synth_df["Close"].values, label="Synthetic Close")
+    ax.set_title("Close (Input vs Synthetic, aligned by index)")
+    ax.legend()
+
+    ax = axes[0, 1]
+    ax.plot(np.arange(len(input_df)), input_df["Volume"].values, label="Input Volume")
+    ax.plot(np.arange(len(synth_df)), synth_df["Volume"].values, label="Synthetic Volume")
+    ax.set_title("Volume (Input vs Synthetic, aligned by index)")
+    ax.legend()
+
+    ax = axes[1, 0]
+    ax.plot(synth_df["Date"], synth_df["Close"], label="Close", linewidth=1.5)
+    ax.fill_between(
+        synth_df["Date"],
+        synth_df["Low"],
+        synth_df["High"],
+        alpha=0.2,
+        label="High-Low Range",
+    )
+    ax.set_title("Synthetic OHLC (Close + Range)")
+    ax.legend()
+
+    ax = axes[1, 1]
+    labels = ["volatility", "trend", "fat_tails", "momentum"]
+    x = np.arange(len(labels))
+    inp = [metrics_input[k] for k in labels]
+    syn = [metrics_synth[k] for k in labels]
+    ax.bar(x - 0.2, inp, width=0.4, label="Input")
+    ax.bar(x + 0.2, syn, width=0.4, label="Synthetic")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=15)
+    title = "Metrics Comparison"
+    if metrics_title_suffix:
+        title = f"{title} ({metrics_title_suffix})"
+    ax.set_title(title)
+    ax.legend()
+
+    ax = axes[2, 0]
+    plot_validation_bars(ax, validation_metrics)
+    ax = axes[2, 1]
+    plot_nonlog_feature(
+        input_feats,
+        pred_feats,
+        ax=ax,
+        idx=0,
+        title="Raw (Non-Log) Return",
+        y_label="Return",
+    )
+
+    ax = axes[3, 0]
+    plot_nonlog_feature(
+        input_feats,
+        pred_feats,
+        ax=ax,
+        idx=1,
+        title="Raw (Non-Log) Range Ratio",
+        y_label="High/Low Ratio",
+    )
+    ax = axes[3, 1]
+    plot_nonlog_feature(
+        input_feats,
+        pred_feats,
+        ax=ax,
+        idx=2,
+        title="Raw (Non-Log) Volume",
+        y_label="Volume",
+    )
+
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Base TTM inference (daily).")
-    parser.add_argument("--ticker", required=True, help="Ticker symbol (e.g., AAPL).")
+    parser.add_argument("--ticker", default=None, help="Ticker symbol (e.g., AAPL).")
     parser.add_argument("--start", default=None, help="Start date (YYYY-MM-DD). Optional.")
     parser.add_argument("--end", default=None, help="End date (YYYY-MM-DD). Optional.")
     parser.add_argument(
@@ -211,8 +416,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-csv",
         type=str,
-        required=True,
+        default=None,
         help="Path to output CSV (synthetic OHLCV).",
+    )
+    parser.add_argument(
+        "--no-charts",
+        action="store_true",
+        help="Disable metrics/validation CSVs and charts.",
+    )
+    parser.add_argument(
+        "--charts-dir",
+        type=str,
+        default=None,
+        help="Optional charts output directory (defaults to <output_dir>/charts).",
     )
     parser.add_argument("--input-csv", type=str, default=None)
     parser.add_argument(
@@ -231,6 +447,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if not args.ticker:
+        args.ticker = DEFAULT_TICKER
+    if not args.output_csv:
+        args.output_csv = DEFAULT_OUTPUT_CSV_TEMPLATE.format(
+            ticker=str(args.ticker).lower()
+        )
 
     default_dir = Path(__file__).resolve().parents[1] / "outputs" / "ttm_base_version_no_controls"
     config_path = Path(args.config) if args.config else (default_dir / "ttm_base_config.json")
@@ -315,6 +537,73 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     synth_df.to_csv(out_path, index=False)
     print(f"Saved synthetic CSV: {out_path}")
+
+    if args.no_charts:
+        return
+
+    charts_dir = (
+        Path(args.charts_dir)
+        if args.charts_dir
+        else out_path.parent / "charts"
+    )
+    charts_dir.mkdir(parents=True, exist_ok=True)
+
+    input_df = raw.rename(columns={"date": "Date"}).copy()
+    if len(input_df) > len(synth_df):
+        input_df = input_df.tail(len(synth_df)).reset_index(drop=True)
+
+    feats_for_compare = build_base_features(raw, cfg)
+    input_feats = (
+        feats_for_compare[["log_return", "log_range", "log_volume"]]
+        .tail(len(pred_features))
+        .values.astype(np.float32)
+    )
+
+    metrics_title_suffix = (
+        f"annualized {TRADING_DAYS}d" if ANNUALIZE_METRICS else "daily"
+    )
+    metrics_input = compute_metrics(
+        input_df, annualize=ANNUALIZE_METRICS, trading_days=TRADING_DAYS
+    )
+    metrics_synth = compute_metrics(
+        synth_df, annualize=ANNUALIZE_METRICS, trading_days=TRADING_DAYS
+    )
+
+    metrics_table = pd.DataFrame(
+        [
+            {"series": "input", **metrics_input},
+            {"series": "synthetic", **metrics_synth},
+        ]
+    )
+    metrics_csv = out_path.parent / f"{args.ticker.lower()}_metrics.csv"
+    metrics_table.to_csv(metrics_csv, index=False)
+    print(f"Saved metrics CSV: {metrics_csv}")
+
+    validation = ValidationService(input_df)
+    synthetic_returns = (
+        pd.to_numeric(synth_df["Close"], errors="coerce")
+        .pct_change()
+        .dropna()
+        .values
+    )
+    validation_metrics = validation.validate(synthetic_returns)
+    validation_csv = out_path.parent / f"{args.ticker.lower()}_validation.csv"
+    pd.DataFrame([validation_metrics]).to_csv(validation_csv, index=False)
+    print(f"Saved validation CSV: {validation_csv}")
+
+    all_charts = charts_dir / "all_charts.png"
+    plot_all_charts(
+        input_df,
+        synth_df,
+        metrics_input,
+        metrics_synth,
+        validation_metrics,
+        input_feats,
+        pred_features,
+        all_charts,
+        metrics_title_suffix=metrics_title_suffix,
+    )
+    print(f"Saved charts: {all_charts}")
 
 
 if __name__ == "__main__":
