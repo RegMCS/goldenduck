@@ -44,6 +44,8 @@ import {
   type GenerationModel,
 } from "@/lib/types"
 
+import { useRouter } from 'next/navigation'
+
 const steps = [
   { id: 1, label: "Market Setup" },
   { id: 2, label: "Conditions" },
@@ -210,6 +212,7 @@ const generationModelConfig: {
 ]
 
 export function ParameterizationForm() {
+  const router = useRouter()
   const [parameters, setParameters] = useState<MarketParameters>(defaultParameters)
   const [isGenerating, setIsGenerating] = useState(false)
   const [currentStep, setCurrentStep] = useState(1)
@@ -221,11 +224,28 @@ export function ParameterizationForm() {
     setParameters((prev) => ({ ...prev, [key]: value }))
   }
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     setIsGenerating(true)
-    setTimeout(() => {
+    try{
+      // Convert parameters to query string
+      const params = new URLSearchParams()
+      Object.entries(parameters).forEach(([key, value]) => {
+        params.append(key, String(value))
+    })
+
+    // Call API to generate visualization
+      const response = await fetch(`/api/generate?${params.toString()}`)
+      if (!response.ok) throw new Error('Failed to generate data')
+      
+      // Navigate to results page with parameters
+      router.push(`/results?${params.toString()}`)
+    } catch (error) {
+      console.error('Error generating data:', error)
       setIsGenerating(false)
-    }, 2000)
+    }
+    // setTimeout(() => {
+    //   setIsGenerating(false)
+    // }, 2000)
   }
 
   const handleReset = () => {
