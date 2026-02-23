@@ -121,3 +121,12 @@ export interface SeriesStats {
   totalReturn: number
   numDataPoints: number
 }
+
+export interface GeneratedData {
+  historical: OHLCVDataPoint[]
+  synthetic: OHLCVDataPoint[]
+  timeSeries: TimeSeriesPoint[]
+  returns: ReturnPoint[]
+  drawdowns: DrawdownPoint[]
+  stats: DataStatistics
+}
