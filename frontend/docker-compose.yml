@@ -8,8 +8,6 @@ services:
     networks:
       - goldenduck-network
     restart: always
-    environment:
-      - API_GATEWAY_URL=http://job-scheduler:8000
 
 networks:
   goldenduck-network:
