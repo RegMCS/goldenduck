@@ -60,7 +60,7 @@ except Exception:
 # ----------------------------
 # User-configurable section
 # ----------------------------
-TICKER = "KO"
+TICKER = "IBM"
 INPUT_START = "2025-01-01"
 INPUT_END = "2025-12-29"
 INPUT_CSV = None  # Optional Path to OHLCV CSV used for inference
@@ -70,7 +70,7 @@ ROLL_STEP = 1
 ANCHOR_BLEND = 0.25  # 0 = no anchoring, 1 = full match to first input close
 
 CONTROLS = ControlValues(
-    volatility_mult=1.0, #0.5-2.0
+    volatility_mult=1.0, 
     trend= 0.0, 
     fat_tails=1.0,
     momentum=0.0,
@@ -263,7 +263,7 @@ def compute_metrics(
         r1 = ret[1:]
         if np.std(r0) < 1e-12 or np.std(r1) < 1e-12:
             ac1 = 0.0
-        else:
+        else: 
             ac1 = float(np.corrcoef(r0, r1)[0, 1])
     else:
         ac1 = 0.0

@@ -61,7 +61,7 @@
   "infer_return_noise_scale": 0.15,
   "infer_range_noise_scale": 0.05,
   "infer_volume_noise_scale": 0.05,
-  "detrend_returns": true,
+  "detrend_returns": false,
   "detrend_window": 20,
   "detrend_mode": "rolling",
   "train_end_year": 2023,

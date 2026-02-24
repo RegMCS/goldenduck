@@ -18,8 +18,10 @@ from typing import Dict, Optional, Tuple
 
 import json
 import numpy as np
+import pandas as pd
 import torch
 from torch.utils.data import DataLoader
+import matplotlib.pyplot as plt
 
 # optional: map frequency string to token id for prefix tuning
 try:
@@ -67,6 +69,7 @@ FREQ = "D"
 
 CONTEXT_LEN = 180
 PRED_LEN = 60
+DETREND_RETURNS = False
 
 START_DATE = "2000-01-01"
 END_DATE = "2026-01-01"  # end-exclusive, includes all of 2025
@@ -91,7 +94,7 @@ RETURN_SCALE = 1.0
 RETURN_LOSS_WEIGHT = 1.0
 OTHER_LOSS_WEIGHT = 1.0
 
-FULL_FINETUNE = False 
+FULL_FINETUNE = False  # set False to train only head/decoder (see UNFREEZE_KEYWORDS)
 UNFREEZE_KEYWORDS = [
     "head",
     "decoder",
@@ -227,6 +230,17 @@ def to_bundle(ticker: str, df) -> TimeSeriesBundle:
     return TimeSeriesBundle(ticker=ticker, dates=dates, features=features, close=close)
 
 
+def _grad_norm(params) -> float:
+    grads = []
+    for p in params:
+        if p.grad is None:
+            continue
+        grads.append(p.grad.detach().norm(2))
+    if not grads:
+        return 0.0
+    return float(torch.norm(torch.stack(grads), 2).cpu().item())
+
+
 def train_one_epoch(
     model: torch.nn.Module,
     loader: DataLoader,
@@ -237,11 +251,13 @@ def train_one_epoch(
     pred_len: int,
     freq_token_value: Optional[int] = None,
     log_every: int = 0,
-) -> float:
+) -> Tuple[float, float]:
     model.train()
     total_loss = 0.0
     n_batches = 0
+    total_grad_norm = 0.0
     total_batches = len(loader)
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
     for batch_idx, (past, future_tgt) in enumerate(loader, start=1):
         past = past.to(device)
         future_tgt = future_tgt.to(device)
@@ -267,10 +283,13 @@ def train_one_epoch(
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         if GRAD_CLIP_NORM and GRAD_CLIP_NORM > 0:
-            torch.nn.utils.clip_grad_norm_(
-                [p for p in model.parameters() if p.requires_grad],
+            grad_norm = torch.nn.utils.clip_grad_norm_(
+                trainable_params,
                 max_norm=GRAD_CLIP_NORM,
             )
+            total_grad_norm += float(grad_norm)
+        else:
+            total_grad_norm += _grad_norm(trainable_params)
         optimizer.step()
 
         total_loss += float(loss.detach().cpu().item())
@@ -279,7 +298,9 @@ def train_one_epoch(
         if log_every and (batch_idx % log_every == 0 or batch_idx == total_batches):
             avg_loss = total_loss / max(n_batches, 1)
             print(f"  batch {batch_idx:04d}/{total_batches} | avg_loss={avg_loss:.6f}")
-    return total_loss / max(n_batches, 1)
+    avg_loss = total_loss / max(n_batches, 1)
+    avg_grad_norm = total_grad_norm / max(n_batches, 1)
+    return avg_loss, avg_grad_norm
 
 
 @torch.no_grad()
@@ -329,6 +350,7 @@ def main() -> None:
     tickers = list(US_TICKERS) + list(INDEX_TICKERS)
 
     cfg = TTMControlledConfig(context_length=CONTEXT_LEN, prediction_length=PRED_LEN)
+    cfg.detrend_returns = DETREND_RETURNS
 
     all_series = []
 
@@ -456,9 +478,13 @@ def main() -> None:
     if use_freq_token and freq_token_value is None:
         raise ValueError(f"Frequency token not found for freq={FREQ}.")
 
+    train_losses = []
+    val_losses = []
+    grad_norms = []
+
     for epoch in range(1, EPOCHS + 1):
         print(f"Epoch {epoch:02d} starting...")
-        tr_loss = train_one_epoch(
+        tr_loss, tr_grad_norm = train_one_epoch(
             model,
             train_loader,
             optimizer,
@@ -476,7 +502,12 @@ def main() -> None:
             pred_len=PRED_LEN,
             freq_token_value=freq_token_value,
         )
-        print(f"Epoch {epoch:02d} | train_loss={tr_loss:.6f} | val_loss={va_loss:.6f}")
+        train_losses.append(float(tr_loss))
+        val_losses.append(float(va_loss))
+        grad_norms.append(float(tr_grad_norm))
+        print(
+            f"Epoch {epoch:02d} | train_loss={tr_loss:.6f} | val_loss={va_loss:.6f} | grad_norm={tr_grad_norm:.6f}"
+        )
 
         if va_loss < best_val:
             best_val = va_loss
@@ -498,6 +529,36 @@ def main() -> None:
         freq_token_value=freq_token_value,
     )
     print(f"Test loss: {te_loss:.6f}")
+
+    # Save loss curve + grad norms
+    loss_csv = OUTPUT_DIR / "loss_curve.csv"
+    loss_payload = {
+        "epoch": list(range(1, EPOCHS + 1)),
+        "train_loss": train_losses,
+        "val_loss": val_losses,
+        "grad_norm": grad_norms,
+    }
+    pd.DataFrame(loss_payload).to_csv(loss_csv, index=False)
+    print(f"Saved loss curve CSV: {loss_csv}")
+
+    loss_png = OUTPUT_DIR / "loss_curve.png"
+    fig, axes = plt.subplots(2, 1, figsize=(8, 8), sharex=True)
+    axes[0].plot(loss_payload["epoch"], train_losses, label="train")
+    axes[0].plot(loss_payload["epoch"], val_losses, label="val")
+    axes[0].set_title("Loss Curve")
+    axes[0].set_ylabel("Loss")
+    axes[0].legend()
+
+    axes[1].plot(loss_payload["epoch"], grad_norms, label="grad_norm", color="tab:orange")
+    axes[1].set_title("Gradient Norm (avg per epoch)")
+    axes[1].set_xlabel("Epoch")
+    axes[1].set_ylabel("Grad Norm")
+    axes[1].legend()
+
+    fig.tight_layout()
+    fig.savefig(loss_png, dpi=150)
+    plt.close(fig)
+    print(f"Saved loss curve PNG: {loss_png}")
 
     config_payload = {
         "model_id": MODEL_ID,
