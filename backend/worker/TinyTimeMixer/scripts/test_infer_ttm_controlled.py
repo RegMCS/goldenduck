@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 import torch
 import matplotlib.pyplot as plt
+from scipy import stats
 
 ROOT = Path(__file__).resolve().parents[4]
 if str(ROOT) not in sys.path:
@@ -82,9 +83,10 @@ OUTPUT_CSV = OUTPUT_DIR / f"{TICKER.lower()}_synthetic.csv"
 CHART_DIR = OUTPUT_DIR / "charts"
 METRICS_CSV = OUTPUT_DIR / f"{TICKER.lower()}_metrics.csv"
 VALIDATION_CSV = OUTPUT_DIR / f"{TICKER.lower()}_validation.csv"
-VALIDATION_CHART = CHART_DIR / "validation_compare.png"
 COMBINED_CHART = CHART_DIR / "all_charts.png"
-SAVE_INDIVIDUAL_CHARTS = False
+QUALITY_CHART_DIR = Path(__file__).resolve().parents[1] / "outputs" / "charts"
+QUALITY_SCORE_CHART = QUALITY_CHART_DIR / "synthetic_quality_score.png"
+E2E_QUALITY_CHART = QUALITY_CHART_DIR / "end_to_end_quality.png"
 ANNUALIZE_METRICS = True
 TRADING_DAYS = 252
 
@@ -367,16 +369,28 @@ def plot_validation_bars(
     *,
     title: str = "Validation Comparison",
 ) -> None:
-    labels = ["kurtosis", "skewness", "acf_lag1"]
+    # Align with ValidationService keys (acf_returns/volatility). Fall back to legacy acf_lag1.
+    acf_ret_hist = validation_metrics.get(
+        "acf_returns_historical", validation_metrics.get("acf_lag1_historical", np.nan)
+    )
+    acf_ret_synth = validation_metrics.get(
+        "acf_returns_synthetic", validation_metrics.get("acf_lag1_synthetic", np.nan)
+    )
+    acf_vol_hist = validation_metrics.get("acf_volatility_historical", np.nan)
+    acf_vol_synth = validation_metrics.get("acf_volatility_synthetic", np.nan)
+
+    labels = ["kurtosis", "skewness", "acf_returns_lag1", "acf_vol_lag1"]
     hist = [
         validation_metrics["kurtosis_historical"],
         validation_metrics["skewness_historical"],
-        validation_metrics["acf_lag1_historical"],
+        acf_ret_hist,
+        acf_vol_hist,
     ]
     synth = [
         validation_metrics["kurtosis_synthetic"],
         validation_metrics["skewness_synthetic"],
-        validation_metrics["acf_lag1_synthetic"],
+        acf_ret_synth,
+        acf_vol_synth,
     ]
 
     x = np.arange(len(labels))
@@ -387,6 +401,289 @@ def plot_validation_bars(
     ax.set_xticklabels(labels, rotation=10)
     ax.set_title(title)
     ax.legend()
+
+
+def plot_return_distribution(
+    ax: plt.Axes,
+    hist_returns: np.ndarray,
+    synth_returns: np.ndarray,
+    *,
+    title: str = "Return Distribution",
+) -> None:
+    if len(hist_returns) == 0 or len(synth_returns) == 0:
+        ax.text(0.5, 0.5, "No returns available", ha="center", va="center")
+        ax.set_axis_off()
+        return
+
+    ax.hist(
+        hist_returns * 100,
+        bins=50,
+        alpha=0.6,
+        label="Input",
+        density=True,
+        color="black",
+    )
+    ax.hist(
+        synth_returns * 100,
+        bins=50,
+        alpha=0.6,
+        label="Synthetic",
+        density=True,
+        color="blue",
+    )
+    ax.set_xlabel("Daily Returns (%)")
+    ax.set_ylabel("Density")
+    ax.set_title(title)
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+
+def plot_rolling_volatility(
+    ax: plt.Axes,
+    hist_returns: np.ndarray,
+    synth_returns: np.ndarray,
+    *,
+    window: int = 20,
+    title: str = "Rolling 20-Day Volatility",
+) -> None:
+    if len(hist_returns) == 0 or len(synth_returns) == 0:
+        ax.text(0.5, 0.5, "No returns available", ha="center", va="center")
+        ax.set_axis_off()
+        return
+
+    hist_vol = pd.Series(hist_returns).rolling(window=window).std() * 100
+    synth_vol = pd.Series(synth_returns).rolling(window=window).std() * 100
+
+    ax.plot(hist_vol.values, label="Input", linewidth=2, color="black")
+    ax.plot(synth_vol.values, label="Synthetic", linewidth=2, color="blue", alpha=0.8)
+    ax.set_xlabel("Window")
+    ax.set_ylabel("Volatility (%)")
+    ax.set_title(title)
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+
+def plot_distribution_metrics(
+    ax: plt.Axes,
+    hist_returns: np.ndarray,
+    synth_returns: np.ndarray,
+    *,
+    title: str = "Distribution Metrics",
+) -> None:
+    if len(hist_returns) == 0 or len(synth_returns) == 0:
+        ax.text(0.5, 0.5, "No returns available", ha="center", va="center")
+        ax.set_axis_off()
+        return
+
+    metrics = {
+        "Kurtosis": [
+            stats.kurtosis(hist_returns),
+            stats.kurtosis(synth_returns),
+        ],
+        "Skewness": [
+            stats.skew(hist_returns),
+            stats.skew(synth_returns),
+        ],
+        "Volatility": [
+            np.std(hist_returns) * 100,
+            np.std(synth_returns) * 100,
+        ],
+    }
+
+    x = np.arange(len(metrics))
+    width = 0.35
+    hist_vals = [metrics[k][0] for k in metrics]
+    synth_vals = [metrics[k][1] for k in metrics]
+
+    ax.bar(x - width / 2, hist_vals, width, label="Input", color="black", alpha=0.7)
+    ax.bar(x + width / 2, synth_vals, width, label="Synthetic", color="blue", alpha=0.7)
+    ax.set_ylabel("Value")
+    ax.set_title(title)
+    ax.set_xticks(x)
+    ax.set_xticklabels(metrics.keys(), rotation=10)
+    ax.legend()
+    ax.grid(True, alpha=0.3, axis="y")
+
+
+def plot_user_knobs(
+    ax: plt.Axes,
+    controls: ControlValues,
+    *,
+    title: str = "User Knobs",
+) -> None:
+    if controls is None:
+        ax.text(0.5, 0.5, "No user knobs provided", ha="center", va="center")
+        ax.set_axis_off()
+        return
+
+    knob_names = ["volatility", "trend", "fat_tails", "momentum"]
+    knob_values = [
+        float(controls.volatility_mult),
+        float(controls.trend),
+        float(controls.fat_tails),
+        float(controls.momentum),
+    ]
+    baselines = [1.0, 0.0, 1.0, 0.5]
+
+    colors = [
+        "green" if v > b else "orange" if v < b else "gray"
+        for v, b in zip(knob_values, baselines)
+    ]
+
+    y = np.arange(len(knob_names))
+    ax.barh(y, knob_values, color=colors, alpha=0.7)
+    ax.set_yticks(y)
+    ax.set_yticklabels(knob_names)
+    ax.set_xlabel("Value")
+    ax.set_title(title)
+    ax.grid(True, alpha=0.3, axis="x")
+
+    for idx, baseline in enumerate(baselines):
+        ax.vlines(
+            baseline,
+            idx - 0.4,
+            idx + 0.4,
+            colors="red",
+            linestyles="--",
+            linewidth=1.5,
+        )
+
+
+def compute_quality_scores(
+    historical_returns: np.ndarray,
+    synthetic_returns: np.ndarray,
+    controls: ControlValues,
+) -> Dict[str, float]:
+    """
+    Replicates GARCH synthetic quality score components (0-1 scale).
+    """
+    hist = np.asarray(historical_returns).flatten()
+    synth = np.asarray(synthetic_returns).flatten()
+
+    hist = hist[np.isfinite(hist)]
+    synth = synth[np.isfinite(synth)]
+
+    if len(hist) < 100 or len(synth) < 100:
+        return {
+            "vol_score": 0.0,
+            "kurtosis_score": 0.0,
+            "momentum_score": 0.0,
+            "distribution_score": 0.0,
+            "total_score": 0.0,
+        }
+
+    synthetic_vol = float(np.std(synth) * np.sqrt(252))
+    synthetic_kurtosis = float(stats.kurtosis(synth))
+
+    if len(synth) > 1:
+        try:
+            synthetic_autocorr = float(np.corrcoef(synth[:-1], synth[1:])[0, 1])
+            if not np.isfinite(synthetic_autocorr):
+                synthetic_autocorr = 0.0
+        except Exception:
+            synthetic_autocorr = 0.0
+    else:
+        synthetic_autocorr = 0.0
+
+    historical_vol = float(np.std(hist) * np.sqrt(252))
+    historical_kurtosis = float(stats.kurtosis(hist))
+
+    target_vol = historical_vol * float(controls.volatility_mult)
+    target_kurtosis = historical_kurtosis * float(controls.fat_tails)
+    target_autocorr = float(controls.momentum) - 0.5
+
+    vol_error = abs(synthetic_vol - target_vol) / max(target_vol, 0.01)
+    vol_score = max(0.0, 1.0 - vol_error)
+
+    kurtosis_error = abs(synthetic_kurtosis - target_kurtosis) / max(
+        abs(target_kurtosis), 3.0
+    )
+    kurtosis_score = max(0.0, 1.0 - kurtosis_error)
+
+    momentum_error = abs(synthetic_autocorr - target_autocorr)
+    momentum_score = max(0.0, 1.0 - momentum_error)
+
+    try:
+        ks_stat = stats.ks_2samp(hist, synth).statistic
+        distribution_score = max(0.0, 1.0 - float(ks_stat))
+    except Exception:
+        distribution_score = 0.5
+
+    total_score = (
+        0.35 * vol_score
+        + 0.25 * kurtosis_score
+        + 0.20 * momentum_score
+        + 0.20 * distribution_score
+    )
+
+    return {
+        "vol_score": float(vol_score),
+        "kurtosis_score": float(kurtosis_score),
+        "momentum_score": float(momentum_score),
+        "distribution_score": float(distribution_score),
+        "total_score": float(np.clip(total_score, 0.0, 1.0)),
+    }
+
+
+def plot_quality_score(
+    quality_scores: Dict[str, float],
+    path: Path,
+    *,
+    title: str = "Synthetic Data Quality Score",
+) -> None:
+    labels = [
+        "volatility",
+        "kurtosis",
+        "momentum",
+        "distribution",
+        "total",
+    ]
+    values = [
+        quality_scores.get("vol_score", 0.0),
+        quality_scores.get("kurtosis_score", 0.0),
+        quality_scores.get("momentum_score", 0.0),
+        quality_scores.get("distribution_score", 0.0),
+        quality_scores.get("total_score", 0.0),
+    ]
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.bar(labels, values, color=["#444", "#666", "#888", "#aaa", "#1f77b4"])
+    ax.set_ylim(0.0, 1.0)
+    ax.set_ylabel("Score (0-1)")
+    ax.set_title(title)
+    ax.grid(True, axis="y", alpha=0.3)
+    for i, v in enumerate(values):
+        ax.text(i, min(1.0, v + 0.03), f"{v:.2f}", ha="center", fontsize=9)
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+
+
+def plot_end_to_end_quality(
+    total_score: float,
+    path: Path,
+    *,
+    title: str = "End-to-End Synthetic Data Quality",
+    target: float = 0.7,
+    minimum: float = 0.5,
+) -> None:
+    score = float(np.clip(total_score, 0.0, 1.0))
+    color = "red" if score < minimum else "orange" if score < target else "green"
+
+    fig, ax = plt.subplots(figsize=(8, 3))
+    ax.barh(["Quality\nScore"], [score], color=color, alpha=0.7)
+    ax.axvline(x=target, color="green", linestyle="--", linewidth=2, label="Target (0.7)")
+    ax.axvline(
+        x=minimum, color="orange", linestyle="--", linewidth=2, label="Minimum (0.5)"
+    )
+    ax.set_xlim(0, 1)
+    ax.set_xlabel("Score")
+    ax.set_title(title)
+    ax.legend()
+    ax.text(score, 0, f"  {score:.3f}", va="center", fontsize=12, fontweight="bold")
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
 
 
 def plot_nonlog_feature(
@@ -424,13 +721,16 @@ def plot_all_charts(
     metrics_input: Dict[str, float],
     metrics_synth: Dict[str, float],
     validation_metrics: Dict[str, float],
+    historical_returns: np.ndarray,
+    synthetic_returns: np.ndarray,
+    controls: ControlValues,
     input_feats: np.ndarray,
     pred_feats: np.ndarray,
     path: Path,
     *,
     metrics_title_suffix: str = "",
 ) -> None:
-    fig, axes = plt.subplots(4, 2, figsize=(14, 13))
+    fig, axes = plt.subplots(6, 2, figsize=(16, 22))
 
     ax = axes[0, 0]
     ax.plot(np.arange(len(input_df)), input_df["Close"].values, label="Input Close")
@@ -474,6 +774,16 @@ def plot_all_charts(
     ax = axes[2, 0]
     plot_validation_bars(ax, validation_metrics)
     ax = axes[2, 1]
+    plot_return_distribution(ax, historical_returns, synthetic_returns)
+
+    ax = axes[3, 0]
+    plot_rolling_volatility(ax, historical_returns, synthetic_returns)
+    ax = axes[3, 1]
+    plot_distribution_metrics(ax, historical_returns, synthetic_returns)
+
+    ax = axes[4, 0]
+    plot_user_knobs(ax, controls)
+    ax = axes[4, 1]
     plot_nonlog_feature(
         input_feats,
         pred_feats,
@@ -483,7 +793,7 @@ def plot_all_charts(
         y_label="Return",
     )
 
-    ax = axes[3, 0]
+    ax = axes[5, 0]
     plot_nonlog_feature(
         input_feats,
         pred_feats,
@@ -492,7 +802,7 @@ def plot_all_charts(
         title="Raw (Non-Log) Range Ratio",
         y_label="High/Low Ratio",
     )
-    ax = axes[3, 1]
+    ax = axes[5, 1]
     plot_nonlog_feature(
         input_feats,
         pred_feats,
@@ -510,6 +820,7 @@ def plot_all_charts(
 def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     CHART_DIR.mkdir(parents=True, exist_ok=True)
+    QUALITY_CHART_DIR.mkdir(parents=True, exist_ok=True)
 
     default_dir = Path(__file__).resolve().parents[1] / "outputs" / "ttm_controlled"
     config_path = default_dir / "ttm_controlled_config.json"
@@ -649,6 +960,12 @@ def main() -> None:
     print(f"Saved metrics CSV: {METRICS_CSV}")
 
     validation = ValidationService(input_for_metrics)
+    historical_returns = (
+        pd.to_numeric(input_for_metrics["Close"], errors="coerce")
+        .pct_change()
+        .dropna()
+        .values
+    )
     synthetic_returns = (
         pd.to_numeric(synth_for_metrics["Close"], errors="coerce")
         .pct_change()
@@ -656,10 +973,28 @@ def main() -> None:
         .values
     )
     validation_metrics = validation.validate(synthetic_returns)
+    desired_metrics = validation.validate_against_desired(
+        synthetic_returns,
+        user_knobs={
+            "desired_volatility": CONTROLS.volatility_mult,
+            "desired_trend": CONTROLS.trend,
+            "desired_fat_tails": CONTROLS.fat_tails,
+            "desired_momentum": CONTROLS.momentum,
+        },
+    )
+    validation_metrics["overall_match"] = desired_metrics.get("overall_match")
+    for key, value in desired_metrics.items():
+        validation_metrics[f"desired_{key}"] = value
     pd.DataFrame([validation_metrics]).to_csv(VALIDATION_CSV, index=False)
     print(f"Saved validation CSV: {VALIDATION_CSV}")
-    plot_validation(validation_metrics, VALIDATION_CHART)
-    print(f"Saved validation chart: {VALIDATION_CHART}")
+
+    quality_scores = compute_quality_scores(
+        historical_returns, synthetic_returns, CONTROLS
+    )
+    plot_quality_score(quality_scores, QUALITY_SCORE_CHART)
+    print(f"Saved quality score chart: {QUALITY_SCORE_CHART}")
+    plot_end_to_end_quality(quality_scores.get("total_score", 0.0), E2E_QUALITY_CHART)
+    print(f"Saved end-to-end quality chart: {E2E_QUALITY_CHART}")
 
     plot_all_charts(
         input_df,
@@ -667,21 +1002,14 @@ def main() -> None:
         metrics_input,
         metrics_synth,
         validation_metrics,
+        historical_returns,
+        synthetic_returns,
+        CONTROLS,
         input_feats,
         pred_features,
         COMBINED_CHART,
         metrics_title_suffix=metrics_title_suffix,
     )
-    if SAVE_INDIVIDUAL_CHARTS:
-        plot_close_compare(input_df, synth_df, CHART_DIR / "close_compare.png")
-        plot_volume_compare(input_df, synth_df, CHART_DIR / "volume_compare.png")
-        plot_ohlcv_synth(synth_df, CHART_DIR / "ohlcv_synthetic.png")
-        plot_metrics(
-            metrics_input,
-            metrics_synth,
-            CHART_DIR / "metrics_compare.png",
-            title_suffix=metrics_title_suffix,
-        )
     print(f"Charts saved to: {CHART_DIR}")
 
 

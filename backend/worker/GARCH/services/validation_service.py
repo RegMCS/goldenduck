@@ -75,12 +75,12 @@ class ValidationService:
         hist_skew = stats.skew(hist_returns)
         synth_skew = stats.skew(synth_returns)
 
-        # Autocorrelation
-        hist_acf_returns = acf(hist_returns, nlags=10, fft=False)[1]
-        synth_acf_returns = acf(synth_returns, nlags=10, fft=False)[1]
+        # Autocorrelation (lag-1)
+        hist_acf_returns = self._acf_lag1(hist_returns)
+        synth_acf_returns = self._acf_lag1(synth_returns)
 
-        hist_acf_vol = acf(hist_returns**2, nlags=10, fft=False)[1]
-        synth_acf_vol = acf(synth_returns**2, nlags=10, fft=False)[1]
+        hist_acf_vol = self._acf_lag1(hist_returns**2)
+        synth_acf_vol = self._acf_lag1(synth_returns**2)
 
         return {
             "ks_statistic": self._to_scalar(ks_stat),
@@ -109,7 +109,7 @@ class ValidationService:
         synth_volatility = self._to_scalar(np.std(synth_returns))
         synth_kurtosis = self._to_scalar(stats.kurtosis(synth_returns))
         synth_skewness = self._to_scalar(stats.skew(synth_returns))
-        synth_acf = self._to_scalar(acf(synth_returns, nlags=10, fft=False)[1])
+        synth_acf = self._to_scalar(self._acf_lag1(synth_returns))
 
         # Extract user knobs
         desired_volatility = float(user_knobs.get("desired_volatility", 1.0))
