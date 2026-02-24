@@ -1,73 +1,19 @@
-export type AssetClass = "equities" | "fx" | "derivatives" | "commodities" | "crypto"
-
-export type TrendType = "bullish" | "bearish" | "sideways" | "volatile"
-
-export type MarketRegime = "normal" | "crisis" | "high-volatility" | "low-volatility" | "recovery"
-
-export type VolatilityLevel = "low" | "medium" | "high" | "extreme"
-
-export type GenerationModel = "garch" | "gan" | "ddpm"
-
 export interface MarketParameters {
-  assetClass: AssetClass
-  trendType: TrendType
-  marketRegime: MarketRegime
-  volatilityLevel: VolatilityLevel
-  generationModel: GenerationModel
-  timeHorizon: number // in days
-  dataPoints: number
-  correlationStrength: number // -1 to 1
-  meanReversion: boolean
-  fatTails: boolean
-  jumpDiffusion: boolean
+  volatility: number // 0.0 to 1.0
+  trend: number // -1 to +1
+  fatTails: number // 0.0 to 1.0
+  momentum: number // 0 to 1
+  timeHorizon: number // 60 to 500 days
+  inputFile: File | null // CSV with OHLCV headers
 }
 
 export const defaultParameters: MarketParameters = {
-  assetClass: "equities",
-  trendType: "sideways",
-  marketRegime: "normal",
-  volatilityLevel: "medium",
-  generationModel: "garch",
+  volatility: 1.0,
+  trend: 0,
+  fatTails: 1.0,
+  momentum: 0.5,
   timeHorizon: 252,
-  dataPoints: 1000,
-  correlationStrength: 0,
-  meanReversion: false,
-  fatTails: true,
-  jumpDiffusion: false,
+  inputFile: null,
 }
 
-export const assetClassOptions: { value: AssetClass; label: string; description: string }[] = [
-  { value: "equities", label: "Equities", description: "Stock market indices and individual securities" },
-  { value: "fx", label: "FX", description: "Foreign exchange currency pairs" },
-  { value: "derivatives", label: "Derivatives", description: "Options, futures, and other derivatives" },
-  { value: "commodities", label: "Commodities", description: "Precious metals, energy, agriculture" },
-  { value: "crypto", label: "Crypto", description: "Cryptocurrency assets" },
-]
-
-export const trendTypeOptions: { value: TrendType; label: string; description: string }[] = [
-  { value: "bullish", label: "Bullish", description: "Upward trending market" },
-  { value: "bearish", label: "Bearish", description: "Downward trending market" },
-  { value: "sideways", label: "Sideways", description: "Range-bound market" },
-  { value: "volatile", label: "Volatile", description: "High volatility with no clear direction" },
-]
-
-export const marketRegimeOptions: { value: MarketRegime; label: string; description: string }[] = [
-  { value: "normal", label: "Normal", description: "Typical market conditions" },
-  { value: "crisis", label: "Crisis", description: "2008-level market stress" },
-  { value: "high-volatility", label: "High Volatility", description: "VIX > 30 environment" },
-  { value: "low-volatility", label: "Low Volatility", description: "Compressed volatility regime" },
-  { value: "recovery", label: "Recovery", description: "Post-crisis recovery phase" },
-]
-
-export const volatilityLevelOptions: { value: VolatilityLevel; label: string; description: string }[] = [
-  { value: "low", label: "Low", description: "Annualized vol < 10%" },
-  { value: "medium", label: "Medium", description: "Annualized vol 10-20%" },
-  { value: "high", label: "High", description: "Annualized vol 20-40%" },
-  { value: "extreme", label: "Extreme", description: "Annualized vol > 40%" },
-]
-
-export const generationModelOptions: { value: GenerationModel; label: string; description: string }[] = [
-  { value: "garch", label: "GARCH", description: "Traditional volatility clustering model" },
-  { value: "gan", label: "Conditional GAN", description: "Deep generative adversarial network" },
-  { value: "ddpm", label: "DDPM", description: "Denoising diffusion probabilistic model" },
-]
+export const REQUIRED_CSV_HEADERS = ["open", "high", "low", "close", "volume"]
