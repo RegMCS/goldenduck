@@ -11,6 +11,14 @@ jobs:
     defaults:
       run:
         working-directory: ./backend
+    env:
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_password
+      POSTGRES_DB: test_db
+      AWS_ACCESS_KEY_ID: test_key
+      AWS_SECRET_ACCESS_KEY: test_secret
+      AWS_DEFAULT_REGION: us-east-1
+      S3_BUCKET_NAME: test_bucket
 
     steps:
       - name: Checkout code
@@ -22,7 +30,7 @@ jobs:
       - name: Run Linting (Black)
         run: docker compose run --rm api black --check .
 
-      # - name: Run Tests
-      #   run: docker compose run --rm api python -m pytest
+      - name: Run Tests
+        run: docker compose run --rm api python -m pytest
 
 

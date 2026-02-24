@@ -6,3 +6,9 @@ class JobStatus(str, Enum):
     running = "running"
     completed = "completed"
     failed = "failed"
+
+
+class JobType(str, Enum):
+    garch = "garch"
+    gan = "gan"
+    ddpm = "ddpm"

@@ -1,35 +1,54 @@
-import uuid
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from job_scheduler.db.session import get_db
+from job_scheduler.models.user import User
+from fastapi.responses import FileResponse, RedirectResponse
+import boto3
+import os
 
-from job_scheduler.schemas.jobs import GenerateRequest, GenerateResponse
+from job_scheduler.services.job_service import create_job
 from job_scheduler.models.enums import JobStatus
 from job_scheduler.services.job_store import job_store
+from job_scheduler.schemas.jobs import GenerateRequest, GenerateResponse
 
 router = APIRouter(prefix="/api", tags=["jobs"])
 
-# Define OUTPUT_DIR as a module-level constant
-OUTPUT_DIR = Path("output").resolve()
-
 
 @router.post("/generate/user/{user_id}", response_model=GenerateResponse)
-async def generate_job(user_id: str, request: GenerateRequest):
-    job_id = str(uuid.uuid4())
+async def generate_job(
+    user_id: str,
+    request: GenerateRequest,
+    db: Session = Depends(get_db),
+):
+    user = db.query(User).filter_by(id=user_id).first()
+    if not user:
+        user = User(id=user_id)
+        db.add(user)
+        db.commit()
+
+    # Create job in DB
+    job = create_job(
+        db=db,
+        user_id=user_id,
+        job_type=request.job_type,
+    )
 
     job_store.create_job(
-        job_id=job_id,
+        job_id=str(job.id),
         user_id=user_id,
-        parameters=request.dict(),
+        parameters=request.model_dump(),
         status=JobStatus.queued,
     )
-    job_store.enqueue(job_id)
+
+    # Enqueue job
+    job_store.enqueue(str(job.id))
 
     return GenerateResponse(
-        job_id=job_id,
+        job_id=str(job.id),
         status=JobStatus.queued,
-        message=f"Job submitted. Poll /api/status/user/{user_id}/{job_id}",
+        message=f"Job submitted. Poll /api/status/user/{user_id}/{job.id}",
     )
 
 
@@ -74,18 +93,30 @@ async def download_results(user_id: str, job_id: str):
     if not output_file:
         raise HTTPException(status_code=404, detail="File not ready")
 
-    # Prevent path traversal
+    # Handle S3 URLs
+    if not output_file.startswith("s3://"):
+        raise HTTPException(
+            status_code=500, detail="Invalid S3 URL format stored in DB"
+        )
+
+    # Expected format: s3://bucket/key
+    parts = output_file.replace("s3://", "").split("/", 1)
+    if len(parts) != 2:
+        raise HTTPException(
+            status_code=500, detail="Invalid S3 URL format stored in DB"
+        )
+
+    bucket_name, key = parts
+
+    # Use env vars for creds
+    s3_client = boto3.client("s3")
     try:
-        output_file_path = Path(output_file).resolve()
-        output_file_path.relative_to(OUTPUT_DIR)
-    except (ValueError, OSError):
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    if not output_file_path.exists():
-        raise HTTPException(status_code=404, detail="File not ready")
-
-    return FileResponse(
-        path=output_file_path,
-        media_type="text/csv",
-        filename=f"synthetic_garch_{job_id}.csv",
-    )
+        url = s3_client.generate_presigned_url(
+            "get_object", Params={"Bucket": bucket_name, "Key": key}, ExpiresIn=3600
+        )
+        return RedirectResponse(url=url)
+    except Exception as e:
+        # logger.error/print would be better but keeping it simple
+        raise HTTPException(
+            status_code=500, detail=f"Failed to generate download URL: {str(e)}"
+        )

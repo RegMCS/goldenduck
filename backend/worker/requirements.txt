@@ -12,3 +12,11 @@ scipy>=1.10.0
 yfinance>=0.2.0          # For fetching historical data
 python-multipart          # For file uploads
 redis
+boto3
+joblib
+scikit-learn
+dotenv
+pycatch22
+matplotlib>=3.5.0        # For plotting
+seaborn>=0.12.0          # For statistical plots
+statsmodels>=0.14.0      # For ACF calculations

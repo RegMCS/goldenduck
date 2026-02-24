@@ -13,9 +13,9 @@ if PROJECT_ROOT not in sys.path:
 import pprint
 import yfinance as yf
 
-from GARCH.services.evaluation_runner import EvaluationRunner
-from GARCH.config.tickers import SUPPORTED_TICKERS
-from GARCH.scripts.generate_report import generate_markdown_report
+from worker.GARCH.services.evaluation_runner import EvaluationRunner
+from worker.GARCH.config.tickers import SUPPORTED_TICKERS
+from worker.GARCH.scripts.generate_report import generate_markdown_report
 
 pp = pprint.PrettyPrinter(indent=2)
 

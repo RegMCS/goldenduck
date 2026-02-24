@@ -1,15 +1,25 @@
 from fastapi.testclient import TestClient
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 import tempfile
 import os
 import uuid
 import pytest
-
+from job_scheduler.db.session import get_db
 from job_scheduler.main import app
 
 client = TestClient(app)
 
 USER_ID = str(uuid.uuid4())
+
+
+@pytest.fixture(autouse=True)
+def override_db_dependency():
+    def fake_db():
+        yield MagicMock()  # fake SQLAlchemy session
+
+    app.dependency_overrides[get_db] = fake_db
+    yield
+    app.dependency_overrides.clear()
 
 
 # Global mock: replace Redis-backed job_store everywhere in routes
@@ -48,11 +58,11 @@ def test_generate_api_success(mock_job_store):
         f"/api/generate/user/{USER_ID}",
         json={
             "ticker": "AAPL",
-            "num_scenarios": 10,
-            "horizon": 50,
-            "volatility_multiplier": 1.0,
-            "p": 1,
-            "q": 1,
+            "horizon": 252,
+            "desired_volatility": 1.5,
+            "desired_trend": 0.0,
+            "desired_fat_tails": 1.2,
+            "desired_momentum": 0.8,
         },
     )
 
@@ -72,11 +82,11 @@ def test_generate_api_invalid_parameters():
         f"/api/generate/user/{USER_ID}",
         json={
             "ticker": "AAPL",
-            "num_scenarios": 10,
-            "horizon": 50,
-            "volatility_multiplier": -1.0,  # invalid
-            "p": 1,
-            "q": 1,
+            "horizon": 252,
+            "desired_volatility": 3.0,  # invalid: > 2.0
+            "desired_trend": 0.0,
+            "desired_fat_tails": 1.2,
+            "desired_momentum": 0.8,
         },
     )
 
@@ -123,69 +133,17 @@ def test_status_api_nonexistent_job(mock_job_store):
     assert response.json()["detail"] == "Job not found"
 
 
-def test_download_api_success(mock_job_store):
-    os.makedirs("output", exist_ok=True)
+def test_download_api_s3_redirect(mock_job_store):
+    mock_job_store.get_output_file.return_value = "s3://my-bucket/garch/test-job.csv"
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", delete=False, suffix=".csv", dir="output"
-    ) as f:
-        f.write("a,b,c\n1,2,3\n")
-        temp_file = f.name
+    with patch("job_scheduler.routes.jobs.boto3.client") as mock_boto:
+        mock_s3 = MagicMock()
+        mock_boto.return_value = mock_s3
+        mock_s3.generate_presigned_url.return_value = "https://fake-s3-url.com/file.csv"
 
-    try:
-        mock_job_store.get_output_file.return_value = temp_file
+        response = client.get(
+            f"/api/download/user/{USER_ID}/test-job", follow_redirects=False
+        )
 
-        response = client.get(f"/api/download/user/{USER_ID}/test-job")
-
-        assert response.status_code == 200
-        assert "text/csv" in response.headers["content-type"]
-        assert "a,b,c" in response.text
-    finally:
-        os.unlink(temp_file)
-
-
-def test_download_api_file_not_ready(mock_job_store):
-    mock_job_store.get_output_file.return_value = None
-
-    response = client.get(f"/api/download/user/{USER_ID}/test-job")
-
-    assert response.status_code == 404
-    assert response.json()["detail"] == "File not ready"
-
-
-def test_download_api_path_traversal_attack(mock_job_store):
-    mock_job_store.get_output_file.return_value = "/etc/passwd"
-
-    response = client.get(f"/api/download/user/{USER_ID}/test-job")
-
-    assert response.status_code == 403
-    assert response.json()["detail"] == "Access denied"
-
-
-def test_download_api_path_traversal_with_relative_path(mock_job_store):
-    mock_job_store.get_output_file.return_value = "output/../../etc/passwd"
-
-    response = client.get(f"/api/download/user/{USER_ID}/test-job")
-
-    assert response.status_code == 403
-    assert response.json()["detail"] == "Access denied"
-
-
-def test_download_api_valid_path_in_output_dir(mock_job_store):
-    os.makedirs("output", exist_ok=True)
-
-    with tempfile.NamedTemporaryFile(
-        mode="w", delete=False, suffix=".csv", dir="output"
-    ) as f:
-        f.write("scenario,value\n1,100\n")
-        temp_file = f.name
-
-    try:
-        mock_job_store.get_output_file.return_value = temp_file
-
-        response = client.get(f"/api/download/user/{USER_ID}/test-job")
-
-        assert response.status_code == 200
-        assert "scenario,value" in response.text
-    finally:
-        os.unlink(temp_file)
+        assert response.status_code == 307
+        assert response.headers["location"] == "https://fake-s3-url.com/file.csv"

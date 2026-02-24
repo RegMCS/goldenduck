@@ -1,7 +1,7 @@
 import logging
 from typing import Dict, List
 
-from GARCH.services.garch_service import GARCHService
+from .garch_service import GARCHService
 
 logger = logging.getLogger(__name__)
 

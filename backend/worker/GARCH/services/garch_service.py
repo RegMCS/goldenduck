@@ -163,8 +163,10 @@ class GARCHService:
         regime_states: Optional[np.ndarray] = None,
         regimes: Optional[List[float]] = None,
         seed_start: int = 42,
+        user_knobs: Optional[Dict] = None,
     ) -> List[pd.DataFrame]:
         """Generate synthetic scenarios using GARCH-FX framework"""
+
         if self.fitted_model is None or self.garch_params is None:
             raise ValueError("Must fit model first! Call fit_with_retry()")
 
@@ -173,7 +175,7 @@ class GARCHService:
             f"θ={theta}, scenario={scenario_type}"
         )
 
-        from GARCH.services.garchfx_engine import GARCHFXEngine
+        from .garchfx_engine import GARCHFXEngine
 
         engine = GARCHFXEngine(
             volatility=self.last_conditional_volatility,
@@ -182,17 +184,25 @@ class GARCHService:
         )
 
         if scenario_type and delta_sequence is None:
-            from GARCH.services.scenarios import generate_scenario
+            from .scenarios import generate_scenario
 
             delta_sequence, _ = generate_scenario(scenario_type, horizon)
             logger.info(f"Using scenario: {scenario_type}")
 
-        initial_price = float(self.historical_data["Close"].iloc[-1])
+        initial_price = float(self.historical_data["Close"].iloc[-1].item())
+
+        # ============================================================
+        # NEW: Extract historical returns for baseline mean
+        # ============================================================
+        close_prices = self.historical_data["Close"].values
+        historical_returns = np.log(close_prices[1:] / close_prices[:-1])
+
         scenarios = []
 
         for scenario_idx in range(num_scenarios):
             np.random.seed(seed_start + scenario_idx)
 
+            # Generate volatility path
             volatility_forecast = engine.forecast(
                 horizon=horizon,
                 theta=theta,
@@ -200,17 +210,26 @@ class GARCHService:
                 regime_switching=regime_switching,
                 regime_states=regime_states,
                 regimes=regimes,
+                user_knobs=user_knobs,
             )
 
-            # FIX: Use self.distribution instead of self.fitted_model.distribution
+            # ============================================================
+            # FIXED: Pass user_knobs and historical_returns
+            # (Removed skewness_lambda - that was wrong!)
+            # ============================================================
             returns = engine.generate_returns_from_volatility(
-                volatility_forecast, self.distribution  # CHANGED THIS LINE
+                volatility_forecast,
+                distribution=self.distribution,
+                user_knobs=user_knobs,  # ← For trend and momentum
+                historical_returns=historical_returns,  # ← For baseline mean
             )
 
             cumulative_returns = np.cumsum(returns)
-            close_prices = initial_price * np.exp(cumulative_returns)
+            close_prices_scenario = initial_price * np.exp(cumulative_returns)
 
-            ohlcv = self._generate_ohlcv_from_close(close_prices, volatility_forecast)
+            ohlcv = self._generate_ohlcv_from_close(
+                close_prices_scenario, volatility_forecast
+            )
             scenarios.append(ohlcv)
 
             if (scenario_idx + 1) % 100 == 0:
@@ -219,7 +238,7 @@ class GARCHService:
         logger.info(f"Successfully generated {num_scenarios} GARCH-FX scenarios")
         return scenarios
 
-    # ========== ORIGINAL METHOD (PRESERVED) ==========
+        # ========== ORIGINAL METHOD (PRESERVED) ==========
 
     def generate_scenarios(
         self,
@@ -341,14 +360,15 @@ class GARCHService:
 
         return df
 
-    def validate_scenarios(self, scenarios: List[pd.DataFrame]) -> Dict:
+    def validate_scenarios(
+        self, scenarios: List[pd.DataFrame], user_knobs: Optional[Dict] = None
+    ) -> Dict:
         """
-        Validate synthetic data quality
+        Validate synthetic data quality against desired characteristics (from user knobs)
+        instead of historical data. This checks if synthetic data matches what user asked for.
         """
         try:
-            from GARCH.services.validation_service import ValidationService
-
-            validator = ValidationService(self.historical_data)
+            from .validation_service import ValidationService
 
             # Sample first 100 scenarios and collect returns
             sample_size = min(100, len(scenarios))
@@ -359,7 +379,17 @@ class GARCHService:
                 all_synthetic_returns.extend(returns)
 
             synthetic_returns_array = np.array(all_synthetic_returns)
-            metrics = validator.validate(synthetic_returns_array)
+
+            # If user_knobs provided, validate against desired characteristics
+            if user_knobs is not None:
+                validator = ValidationService(self.historical_data)
+                metrics = validator.validate_against_desired(
+                    synthetic_returns_array, user_knobs
+                )
+            else:
+                # Fallback: compare to historical data
+                validator = ValidationService(self.historical_data)
+                metrics = validator.validate(synthetic_returns_array)
 
             logger.info(f"Validation complete: {metrics}")
             return metrics
@@ -369,9 +399,7 @@ class GARCHService:
             return {
                 "ks_statistic": 0.0,
                 "ks_pvalue": 0.0,
-                "kurtosis_historical": 0.0,
-                "kurtosis_synthetic": 0.0,
-                "acf_lag1_historical": 0.0,
-                "acf_lag1_synthetic": 0.0,
+                "volatility_match": 0.0,
+                "kurtosis_match": 0.0,
                 "error": str(e),
             }
