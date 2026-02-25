@@ -1,7 +1,14 @@
+"use client"
+
+import { useState } from "react"
 import { Header } from "@/components/header"
 import { ParameterizationForm } from "@/components/parameterization-form"
+import { VisualizationResults } from "@/components/graphs-results"
+import { type GeneratedData } from "@/lib/types"
 
 export default function Home() {
+  const [generatedData, setGeneratedData] = useState<GeneratedData | null>(null)
+
   return (
     <div className="min-h-screen bg-background">
       <Header />
@@ -14,7 +21,15 @@ export default function Home() {
             Set your model parameters and upload a time series CSV to generate synthetic data.
           </p>
         </div>
-        <ParameterizationForm />
+        <ParameterizationForm onDataReady={setGeneratedData} />
+        {generatedData && (
+          <div className="mt-10">
+            <h2 className="mb-6 text-xl font-bold tracking-tight text-foreground sm:text-2xl">
+              Results
+            </h2>
+            <VisualizationResults data={generatedData} />
+          </div>
+        )}
       </main>
     </div>
   )
