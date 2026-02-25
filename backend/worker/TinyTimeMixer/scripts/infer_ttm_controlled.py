@@ -258,7 +258,9 @@ def main() -> None:
         )
 
     raw = download_daily_ohlcv(args.ticker, start=start, end=end)
-    past_values, last_close, last_date, past_sigma = build_context(raw, cfg, scaler, controls)
+    past_values, last_close, last_date, past_sigma = build_context(
+        raw, cfg, scaler, controls
+    )
 
     try:
         from tsfm_public.toolkit.get_model import get_model

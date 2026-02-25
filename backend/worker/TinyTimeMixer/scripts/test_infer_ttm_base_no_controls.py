@@ -66,7 +66,9 @@ PREDICTION_LENGTH = 120
 ROLL_STEP = 1
 ANCHOR_BLEND = 0.25  # 0 = no anchoring, 1 = full match to first input close
 
-OUTPUT_DIR = Path(__file__).resolve().parents[1] / "outputs" / "ttm_base_version_no_controls"
+OUTPUT_DIR = (
+    Path(__file__).resolve().parents[1] / "outputs" / "ttm_base_version_no_controls"
+)
 OUTPUT_CSV = OUTPUT_DIR / f"{TICKER.lower()}_synthetic.csv"
 CHART_DIR = OUTPUT_DIR / "charts"
 METRICS_CSV = OUTPUT_DIR / f"{TICKER.lower()}_metrics.csv"
@@ -192,9 +194,7 @@ def rollout_forecast(
         step = min(roll_step, remaining)
         returns_series = pd.Series(current_raw[:, 0])
         vol_window = int(cfg.realized_vol_window)
-        realized_vol = (
-            returns_series.rolling(vol_window, min_periods=2).std().shift(1)
-        )
+        realized_vol = returns_series.rolling(vol_window, min_periods=2).std().shift(1)
         realized_vol = realized_vol.bfill().fillna(0.0).values.astype(np.float32)
         past_exog_scaled = exog_scaler.transform(realized_vol.reshape(-1, 1))
 
@@ -407,7 +407,9 @@ def plot_all_charts(
 
     ax = axes[0, 1]
     ax.plot(np.arange(len(input_df)), input_df["Volume"].values, label="Input Volume")
-    ax.plot(np.arange(len(synth_df)), synth_df["Volume"].values, label="Synthetic Volume")
+    ax.plot(
+        np.arange(len(synth_df)), synth_df["Volume"].values, label="Synthetic Volume"
+    )
     ax.set_title("Volume (Input vs Synthetic, aligned by index)")
     ax.legend()
 
@@ -451,7 +453,9 @@ def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     CHART_DIR.mkdir(parents=True, exist_ok=True)
 
-    default_dir = Path(__file__).resolve().parents[1] / "outputs" / "ttm_base_version_no_controls"
+    default_dir = (
+        Path(__file__).resolve().parents[1] / "outputs" / "ttm_base_version_no_controls"
+    )
     config_path = default_dir / "ttm_base_config.json"
     weights_path = default_dir / "ttm_base_weights.pt"
     scaler_path = default_dir / "ttm_base_scaler.pt"

@@ -305,7 +305,9 @@ def sample_controls(ranges: ControlRanges, rng: np.random.Generator) -> ControlV
     )
 
 
-def _fat_tail_df(fat_tails: float, ranges: ControlRanges, df_min: float, df_max: float) -> float:
+def _fat_tail_df(
+    fat_tails: float, ranges: ControlRanges, df_min: float, df_max: float
+) -> float:
     lo, hi = ranges.fat_tails
     if hi <= lo:
         return df_max

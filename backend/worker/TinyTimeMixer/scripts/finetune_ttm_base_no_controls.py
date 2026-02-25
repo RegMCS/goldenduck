@@ -95,7 +95,9 @@ UNFREEZE_KEYWORDS = [
     "lm_head",
 ]
 
-OUTPUT_DIR = Path(__file__).resolve().parents[1] / "outputs" / "ttm_base_version_no_controls"
+OUTPUT_DIR = (
+    Path(__file__).resolve().parents[1] / "outputs" / "ttm_base_version_no_controls"
+)
 WEIGHTS_PATH = OUTPUT_DIR / "ttm_base_weights.pt"
 SCALER_PATH = OUTPUT_DIR / "ttm_base_scaler.pt"
 CONFIG_PATH = OUTPUT_DIR / "ttm_base_config.json"

@@ -1,0 +1,47 @@
+{
+  "model_id": "ibm-granite/granite-timeseries-ttm-r2",
+  "freq": "D",
+  "context_length": 180,
+  "prediction_length": 60,
+  "channels": [
+    "log_return",
+    "log_range",
+    "log_volume",
+    "realized_vol",
+    "volatility",
+    "trend",
+    "fat_tails",
+    "momentum"
+  ],
+  "target_features": [
+    "log_return",
+    "log_range",
+    "log_volume"
+  ],
+  "exogenous_features": [
+    "realized_vol"
+  ],
+  "controls": [
+    "volatility",
+    "trend",
+    "fat_tails",
+    "momentum"
+  ],
+  "detrend_returns": false,
+  "detrend_window": 20,
+  "detrend_mode": "rolling",
+  "realized_vol_window": 20,
+  "train_end_year": 2023,
+  "val_year": 2024,
+  "test_year": 2025,
+  "label_scaler": "C:\\Users\\guiqu\\OneDrive\\Documents\\GitHub\\goldenduck\\backend\\worker\\TinyTimeMixerNew\\outputs\\ttm_label\\ttm_label_label_scaler.json",
+  "sampler": {
+    "beta": 1.0,
+    "min_weight": 0.5,
+    "max_weight": 4.0
+  },
+  "aux_loss": {
+    "lambda_max": 0.1,
+    "warmup_epochs": 2
+  }
+}

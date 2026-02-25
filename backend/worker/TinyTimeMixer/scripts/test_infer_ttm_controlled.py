@@ -72,8 +72,8 @@ ROLL_STEP = 1
 ANCHOR_BLEND = 0.25  # 0 = no anchoring, 1 = full match to first input close
 
 CONTROLS = ControlValues(
-    volatility_mult=1.0, 
-    trend= 0.0, 
+    volatility_mult=1.0,
+    trend=0.0,
     fat_tails=1.0,
     momentum=0.0,
     horizon=float(PREDICTION_LENGTH),
@@ -173,7 +173,9 @@ def build_context(
         )
     feats = feats.iloc[-cfg.context_length :].copy()
 
-    past_raw = feats[["log_return", "log_range", "log_volume"]].values.astype(np.float32)
+    past_raw = feats[["log_return", "log_range", "log_volume"]].values.astype(
+        np.float32
+    )
     past_exog = feats[EXOG_FEATURES].values.astype(np.float32)
     past_sigma = float(np.std(past_raw[:, 0]) + 1e-8)
     past_scaled = target_scaler.transform(past_raw)
@@ -215,9 +217,7 @@ def rollout_forecast(
         # Compute realized vol from current raw returns (no leakage)
         returns_series = pd.Series(current_raw[:, 0])
         vol_window = int(cfg.realized_vol_window)
-        realized_vol = (
-            returns_series.rolling(vol_window, min_periods=2).std().shift(1)
-        )
+        realized_vol = returns_series.rolling(vol_window, min_periods=2).std().shift(1)
         realized_vol = realized_vol.bfill().fillna(0.0).values.astype(np.float32)
         past_exog = realized_vol.reshape(-1, 1)
         past_exog_scaled = exog_scaler.transform(past_exog)
@@ -285,7 +285,7 @@ def compute_metrics(
         r1 = ret[1:]
         if np.std(r0) < 1e-12 or np.std(r1) < 1e-12:
             ac1 = 0.0
-        else: 
+        else:
             ac1 = float(np.corrcoef(r0, r1)[0, 1])
     else:
         ac1 = 0.0
@@ -692,7 +692,9 @@ def plot_end_to_end_quality(
 
     fig, ax = plt.subplots(figsize=(8, 3))
     ax.barh(["Quality\nScore"], [score], color=color, alpha=0.7)
-    ax.axvline(x=target, color="green", linestyle="--", linewidth=2, label="Target (0.7)")
+    ax.axvline(
+        x=target, color="green", linestyle="--", linewidth=2, label="Target (0.7)"
+    )
     ax.axvline(
         x=minimum, color="orange", linestyle="--", linewidth=2, label="Minimum (0.5)"
     )
@@ -718,7 +720,9 @@ def plot_end_to_end_quality_ax(
     color = "red" if score < minimum else "orange" if score < target else "green"
 
     ax.barh(["Quality\nScore"], [score], color=color, alpha=0.7)
-    ax.axvline(x=target, color="green", linestyle="--", linewidth=2, label="Target (0.7)")
+    ax.axvline(
+        x=target, color="green", linestyle="--", linewidth=2, label="Target (0.7)"
+    )
     ax.axvline(
         x=minimum, color="orange", linestyle="--", linewidth=2, label="Minimum (0.5)"
     )
@@ -789,13 +793,13 @@ def plot_all_charts(
     ax.legend()
 
     ax = axes[0, 1]
-    plot_end_to_end_quality_ax(
-        ax, quality_scores.get("total_score", 0.0)
-    )
+    plot_end_to_end_quality_ax(ax, quality_scores.get("total_score", 0.0))
 
     ax = axes[1, 0]
     ax.plot(np.arange(len(input_df)), input_df["Volume"].values, label="Input Volume")
-    ax.plot(np.arange(len(synth_df)), synth_df["Volume"].values, label="Synthetic Volume")
+    ax.plot(
+        np.arange(len(synth_df)), synth_df["Volume"].values, label="Synthetic Volume"
+    )
     ax.set_title("Volume (Input vs Synthetic, aligned by index)")
     ax.legend()
 
@@ -851,7 +855,11 @@ def main() -> None:
     )
 
     scaler_state = torch.load(scaler_path, weights_only=False)
-    if isinstance(scaler_state, dict) and "targets" in scaler_state and "exog" in scaler_state:
+    if (
+        isinstance(scaler_state, dict)
+        and "targets" in scaler_state
+        and "exog" in scaler_state
+    ):
         target_scaler = StandardScaler.from_state_dict(scaler_state["targets"])
         exog_scaler = StandardScaler.from_state_dict(scaler_state["exog"])
     else:

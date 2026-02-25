@@ -58,9 +58,7 @@ except Exception:
 # Editable defaults
 # ----------------------------
 DEFAULT_TICKER = "AAPL"
-DEFAULT_OUTPUT_CSV_TEMPLATE = (
-    "backend/worker/TinyTimeMixer/outputs/ttm_base_version_no_controls/{ticker}_synthetic.csv"
-)
+DEFAULT_OUTPUT_CSV_TEMPLATE = "backend/worker/TinyTimeMixer/outputs/ttm_base_version_no_controls/{ticker}_synthetic.csv"
 ANNUALIZE_METRICS = True
 TRADING_DAYS = 252
 
@@ -185,9 +183,7 @@ def rollout_forecast(
         step = min(roll_step, remaining)
         returns_series = pd.Series(current_raw[:, 0])
         vol_window = int(cfg.realized_vol_window)
-        realized_vol = (
-            returns_series.rolling(vol_window, min_periods=2).std().shift(1)
-        )
+        realized_vol = returns_series.rolling(vol_window, min_periods=2).std().shift(1)
         realized_vol = realized_vol.bfill().fillna(0.0).values.astype(np.float32)
         past_exog_scaled = exog_scaler.transform(realized_vol.reshape(-1, 1))
 
@@ -347,7 +343,9 @@ def plot_all_charts(
 
     ax = axes[0, 1]
     ax.plot(np.arange(len(input_df)), input_df["Volume"].values, label="Input Volume")
-    ax.plot(np.arange(len(synth_df)), synth_df["Volume"].values, label="Synthetic Volume")
+    ax.plot(
+        np.arange(len(synth_df)), synth_df["Volume"].values, label="Synthetic Volume"
+    )
     ax.set_title("Volume (Input vs Synthetic, aligned by index)")
     ax.legend()
 
@@ -417,7 +415,9 @@ def plot_all_charts(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Base TTM inference (daily).")
     parser.add_argument("--ticker", default=None, help="Ticker symbol (e.g., AAPL).")
-    parser.add_argument("--start", default=None, help="Start date (YYYY-MM-DD). Optional.")
+    parser.add_argument(
+        "--start", default=None, help="Start date (YYYY-MM-DD). Optional."
+    )
     parser.add_argument("--end", default=None, help="End date (YYYY-MM-DD). Optional.")
     parser.add_argument(
         "--lookback-days", type=int, default=365, help="Lookback days if start not set."
@@ -472,10 +472,18 @@ def main() -> None:
             ticker=str(args.ticker).lower()
         )
 
-    default_dir = Path(__file__).resolve().parents[1] / "outputs" / "ttm_base_version_no_controls"
-    config_path = Path(args.config) if args.config else (default_dir / "ttm_base_config.json")
-    weights_path = Path(args.weights) if args.weights else (default_dir / "ttm_base_weights.pt")
-    scaler_path = Path(args.scaler) if args.scaler else (default_dir / "ttm_base_scaler.pt")
+    default_dir = (
+        Path(__file__).resolve().parents[1] / "outputs" / "ttm_base_version_no_controls"
+    )
+    config_path = (
+        Path(args.config) if args.config else (default_dir / "ttm_base_config.json")
+    )
+    weights_path = (
+        Path(args.weights) if args.weights else (default_dir / "ttm_base_weights.pt")
+    )
+    scaler_path = (
+        Path(args.scaler) if args.scaler else (default_dir / "ttm_base_scaler.pt")
+    )
 
     config = load_config(config_path)
     cfg = TTMBaseConfig(
@@ -580,9 +588,7 @@ def main() -> None:
         return
 
     charts_dir = (
-        Path(args.charts_dir)
-        if args.charts_dir
-        else out_path.parent / "charts"
+        Path(args.charts_dir) if args.charts_dir else out_path.parent / "charts"
     )
     charts_dir.mkdir(parents=True, exist_ok=True)
 
@@ -619,10 +625,7 @@ def main() -> None:
 
     validation = ValidationService(input_df)
     synthetic_returns = (
-        pd.to_numeric(synth_df["Close"], errors="coerce")
-        .pct_change()
-        .dropna()
-        .values
+        pd.to_numeric(synth_df["Close"], errors="coerce").pct_change().dropna().values
     )
     validation_metrics = validation.validate(synthetic_returns)
     validation_csv = out_path.parent / f"{args.ticker.lower()}_validation.csv"

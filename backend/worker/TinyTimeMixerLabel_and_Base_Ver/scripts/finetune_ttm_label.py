@@ -1,13 +1,14 @@
 """
-Fine-tune TTM (daily) with controllable synthetic parameters for OHLCV generation.
+Fine-tune TTM with label conditioning (future stats as controls).
 
 Outputs:
-  - weights: outputs/ttm_controlled/ttm_controlled_weights.pt
-  - scaler:  outputs/ttm_controlled/ttm_controlled_scaler.pt
-  - config:  outputs/ttm_controlled/ttm_controlled_config.json
+  - weights: outputs/ttm_label/ttm_label_weights.pt
+  - scaler:  outputs/ttm_label/ttm_label_scaler.pt
+  - label:   outputs/ttm_label/ttm_label_label_scaler.json
+  - config:  outputs/ttm_label/ttm_label_config.json
 
 Run:
-  python finetune_ttm_controlled.py
+  python finetune_ttm_label.py
 """
 
 from __future__ import annotations
@@ -15,13 +16,11 @@ from __future__ import annotations
 from dataclasses import asdict
 from pathlib import Path
 from typing import Dict, Optional, Tuple
-
 import json
+
 import numpy as np
-import pandas as pd
 import torch
-from torch.utils.data import DataLoader
-import matplotlib.pyplot as plt
+from torch.utils.data import DataLoader, WeightedRandomSampler
 
 # optional: map frequency string to token id for prefix tuning
 try:
@@ -49,17 +48,18 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))
 
 from backend.worker.GARCH.config.tickers import US_TICKERS, INDEX_TICKERS
-from backend.worker.TinyTimeMixer.services.ttm_controlled_dataset import (
+from backend.worker.TinyTimeMixerNew.services.ttm_label_dataset import (
     CONTROL_NAMES,
     TARGET_FEATURES,
     EXOG_FEATURES,
-    ControlValues,
-    TTMControlledConfig,
+    LabelWindowDataset,
+    LabelScaler,
+    StandardScaler,
+    TTMLabelConfig,
     TimeSeriesBundle,
     build_base_features,
     download_daily_ohlcv,
     fit_feature_scalers,
-    ControlledWindowDataset,
 )
 
 # ----------------------------
@@ -89,11 +89,18 @@ WEIGHT_DECAY = 1e-2
 GRAD_CLIP_NORM = 1.0
 LOG_EVERY_N_BATCHES = 200
 
-# Loss config (Student-t NLL for all channels)
+# Loss config (Student-t NLL)
 RETURN_DF = 5.0
 RETURN_SCALE = 1.0
-RETURN_LOSS_WEIGHT = 1.0
-OTHER_LOSS_WEIGHT = 1.0
+
+# Aux loss
+LAMBDA_AUX_MAX = 0.1
+LAMBDA_WARMUP_EPOCHS = 2
+
+# Weighted sampler
+SAMPLE_BETA = 1.0
+SAMPLE_MIN = 0.5
+SAMPLE_MAX = 4.0
 
 # Full finetune disabled: only head/decoder/prediction layers are trainable.
 FULL_FINETUNE = False
@@ -107,10 +114,11 @@ UNFREEZE_KEYWORDS = [
     "lm_head",
 ]
 
-OUTPUT_DIR = Path(__file__).resolve().parents[1] / "outputs" / "ttm_controlled"
-WEIGHTS_PATH = OUTPUT_DIR / "ttm_controlled_weights.pt"
-SCALER_PATH = OUTPUT_DIR / "ttm_controlled_scaler.pt"
-CONFIG_PATH = OUTPUT_DIR / "ttm_controlled_config.json"
+OUTPUT_DIR = Path(__file__).resolve().parents[1] / "outputs" / "ttm_label"
+WEIGHTS_PATH = OUTPUT_DIR / "ttm_label_weights.pt"
+SCALER_PATH = OUTPUT_DIR / "ttm_label_scaler.pt"
+LABEL_SCALER_PATH = OUTPUT_DIR / "ttm_label_label_scaler.json"
+CONFIG_PATH = OUTPUT_DIR / "ttm_label_config.json"
 
 
 def set_seed(seed: int) -> None:
@@ -179,7 +187,6 @@ def student_t_nll(
     df: float,
     scale: float,
 ) -> torch.Tensor:
-    # Negative log-likelihood up to a constant; robust to extremes.
     if df <= 2.0:
         raise ValueError("RETURN_DF must be > 2 for stable Student-t variance.")
     scale = float(scale)
@@ -187,32 +194,6 @@ def student_t_nll(
     return 0.5 * (df + 1.0) * torch.log1p((err**2) / (df * scale * scale)) + np.log(
         scale
     )
-
-
-class CombinedLoss:
-    def __init__(
-        self,
-        *,
-        df: float,
-        scale: float,
-        return_weight: float,
-        other_weight: float,
-    ) -> None:
-        self.df = float(df)
-        self.scale = float(scale)
-        self.return_weight = float(return_weight)
-        self.other_weight = float(other_weight)
-        self.huber = torch.nn.HuberLoss(delta=1.0, reduction="mean")
-
-    def __call__(self, y_hat: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
-        # Return channel (index 0) -> Student-t NLL
-        err_ret = y_hat[..., 0] - y_true[..., 0]
-        loss_ret = student_t_nll(err_ret, df=self.df, scale=self.scale).mean()
-
-        # Range + volume channels -> Huber
-        loss_other = self.huber(y_hat[..., 1:], y_true[..., 1:])
-
-        return self.return_weight * loss_ret + self.other_weight * loss_other
 
 
 class StudentTLoss:
@@ -250,6 +231,41 @@ def _grad_norm(params) -> float:
     return float(torch.norm(torch.stack(grads), 2).cpu().item())
 
 
+def _compute_pred_stats(
+    pred_raw: torch.Tensor,
+    label_mean: torch.Tensor,
+    label_std: torch.Tensor,
+    *,
+    eps: float = 1e-12,
+) -> torch.Tensor:
+    returns = pred_raw[..., 0]
+
+    vol = torch.std(returns, dim=1, unbiased=False)
+    trend = torch.mean(returns, dim=1)
+
+    centered = returns - trend.unsqueeze(1)
+    std = torch.std(centered, dim=1, unbiased=False) + eps
+    kurt = torch.mean((centered / std.unsqueeze(1)) ** 4, dim=1) - 3.0
+
+    if returns.shape[1] >= 2:
+        r0 = returns[:, :-1]
+        r1 = returns[:, 1:]
+        r0m = r0 - r0.mean(dim=1, keepdim=True)
+        r1m = r1 - r1.mean(dim=1, keepdim=True)
+        cov = torch.mean(r0m * r1m, dim=1)
+        std0 = torch.std(r0, dim=1, unbiased=False) + eps
+        std1 = torch.std(r1, dim=1, unbiased=False) + eps
+        ac1 = cov / (std0 * std1)
+    else:
+        ac1 = torch.zeros_like(vol)
+    momentum = torch.clamp(ac1, 0.0, 1.0)
+
+    stats = torch.stack([vol, trend, kurt, momentum], dim=1)
+    z = (stats - label_mean) / (label_std + 1e-6)
+    z = torch.clamp(z, -2.0, 2.0)
+    return z / 2.0
+
+
 def train_one_epoch(
     model: torch.nn.Module,
     loader: DataLoader,
@@ -258,15 +274,23 @@ def train_one_epoch(
     *,
     device: str,
     pred_len: int,
-    freq_token_value: Optional[int] = None,
+    freq_token_value: Optional[int],
+    label_mean: torch.Tensor,
+    label_std: torch.Tensor,
+    target_mean: torch.Tensor,
+    target_std: torch.Tensor,
+    lambda_aux: float,
     log_every: int = 0,
-) -> Tuple[float, float]:
+) -> Tuple[float, float, float]:
     model.train()
     total_loss = 0.0
+    total_aux = 0.0
     n_batches = 0
     total_grad_norm = 0.0
     total_batches = len(loader)
     trainable_params = [p for p in model.parameters() if p.requires_grad]
+    mse = torch.nn.MSELoss()
+
     for batch_idx, (past, future_tgt) in enumerate(loader, start=1):
         past = past.to(device)
         future_tgt = future_tgt.to(device)
@@ -287,7 +311,15 @@ def train_one_epoch(
             y_hat = y_hat[:, :pred_len, :]
 
         y_hat_tgt = y_hat[:, :, : future_tgt.shape[-1]]
-        loss = loss_fn(y_hat_tgt, future_tgt)
+        loss_pred = loss_fn(y_hat_tgt, future_tgt)
+
+        # Auxiliary loss (labels are in input controls)
+        ctrl = past[:, 0, -len(CONTROL_NAMES) :]
+        pred_raw = y_hat_tgt * (target_std + 1e-6) + target_mean
+        pred_stats = _compute_pred_stats(pred_raw, label_mean, label_std)
+        loss_aux = mse(pred_stats, ctrl)
+
+        loss = loss_pred + float(lambda_aux) * loss_aux
 
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
@@ -302,14 +334,20 @@ def train_one_epoch(
         optimizer.step()
 
         total_loss += float(loss.detach().cpu().item())
+        total_aux += float(loss_aux.detach().cpu().item())
         n_batches += 1
 
         if log_every and (batch_idx % log_every == 0 or batch_idx == total_batches):
             avg_loss = total_loss / max(n_batches, 1)
-            print(f"  batch {batch_idx:04d}/{total_batches} | avg_loss={avg_loss:.6f}")
+            avg_aux = total_aux / max(n_batches, 1)
+            print(
+                f"  batch {batch_idx:04d}/{total_batches} | avg_loss={avg_loss:.6f} | avg_aux={avg_aux:.6f}"
+            )
+
     avg_loss = total_loss / max(n_batches, 1)
+    avg_aux = total_aux / max(n_batches, 1)
     avg_grad_norm = total_grad_norm / max(n_batches, 1)
-    return avg_loss, avg_grad_norm
+    return avg_loss, avg_aux, avg_grad_norm
 
 
 @torch.no_grad()
@@ -320,7 +358,7 @@ def eval_one_epoch(
     *,
     device: str,
     pred_len: int,
-    freq_token_value: Optional[int] = None,
+    freq_token_value: Optional[int],
 ) -> float:
     model.eval()
     total_loss = 0.0
@@ -358,7 +396,7 @@ def main() -> None:
 
     tickers = list(US_TICKERS) + list(INDEX_TICKERS)
 
-    cfg = TTMControlledConfig(context_length=CONTEXT_LEN, prediction_length=PRED_LEN)
+    cfg = TTMLabelConfig(context_length=CONTEXT_LEN, prediction_length=PRED_LEN)
     cfg.detrend_returns = DETREND_RETURNS
 
     all_series = []
@@ -386,14 +424,6 @@ def main() -> None:
     }
     torch.save(scaler_state, SCALER_PATH)
 
-    fixed_controls = ControlValues(
-        volatility_mult=1.0,
-        trend=0.0,
-        fat_tails=1.0,
-        momentum=0.0,
-        horizon=float(PRED_LEN),
-    )
-
     train_range = (
         np.datetime64("2000-01-01"),
         np.datetime64(f"{TRAIN_END_YEAR}-12-31"),
@@ -404,38 +434,47 @@ def main() -> None:
         np.datetime64(f"{TEST_YEAR}-12-31"),
     )
 
-    train_ds = ControlledWindowDataset(
+    train_ds = LabelWindowDataset(
         all_series,
         cfg,
         target_scaler,
         exog_scaler,
-        control_mode="random",
         target_date_range=train_range,
-        seed=SEED,
+        compute_weights=True,
+        weight_beta=SAMPLE_BETA,
+        weight_min=SAMPLE_MIN,
+        weight_max=SAMPLE_MAX,
     )
-    val_ds = ControlledWindowDataset(
+    label_scaler = train_ds.label_scaler
+
+    val_ds = LabelWindowDataset(
         all_series,
         cfg,
         target_scaler,
         exog_scaler,
-        control_mode="fixed",
-        fixed_controls=fixed_controls,
+        label_scaler=label_scaler,
         target_date_range=val_range,
-        seed=SEED,
     )
-    test_ds = ControlledWindowDataset(
+    test_ds = LabelWindowDataset(
         all_series,
         cfg,
         target_scaler,
         exog_scaler,
-        control_mode="fixed",
-        fixed_controls=fixed_controls,
+        label_scaler=label_scaler,
         target_date_range=test_range,
-        seed=SEED,
+    )
+
+    weights = train_ds.sampling_weights()
+    if weights is None:
+        raise RuntimeError("Sampling weights not computed.")
+    sampler = WeightedRandomSampler(
+        weights=torch.tensor(weights, dtype=torch.float32),
+        num_samples=len(weights),
+        replacement=True,
     )
 
     train_loader = DataLoader(
-        train_ds, batch_size=BATCH_SIZE, shuffle=True, drop_last=True
+        train_ds, batch_size=BATCH_SIZE, sampler=sampler, drop_last=True
     )
     val_loader = DataLoader(
         val_ds, batch_size=BATCH_SIZE, shuffle=False, drop_last=False
@@ -470,8 +509,8 @@ def main() -> None:
 
     model = model.to(DEVICE)
 
-    # Always freeze for few-shot training (no full-parameter finetuning)
-    freeze_for_fewshot(model)
+    if not FULL_FINETUNE:
+        freeze_for_fewshot(model)
 
     trainable, total = count_trainable_params(model)
     print(
@@ -495,13 +534,17 @@ def main() -> None:
     if use_freq_token and freq_token_value is None:
         raise ValueError(f"Frequency token not found for freq={FREQ}.")
 
-    train_losses = []
-    val_losses = []
-    grad_norms = []
+    label_mean = torch.tensor(label_scaler.mean, dtype=torch.float32, device=DEVICE)
+    label_std = torch.tensor(label_scaler.std, dtype=torch.float32, device=DEVICE)
+    target_mean = torch.tensor(target_scaler.mean, dtype=torch.float32, device=DEVICE)
+    target_std = torch.tensor(target_scaler.std, dtype=torch.float32, device=DEVICE)
 
     for epoch in range(1, EPOCHS + 1):
         print(f"Epoch {epoch:02d} starting...")
-        tr_loss, tr_grad_norm = train_one_epoch(
+        warm = min(1.0, epoch / float(LAMBDA_WARMUP_EPOCHS))
+        lambda_aux = LAMBDA_AUX_MAX * warm
+
+        tr_loss, tr_aux, tr_grad_norm = train_one_epoch(
             model,
             train_loader,
             optimizer,
@@ -509,6 +552,11 @@ def main() -> None:
             device=DEVICE,
             pred_len=PRED_LEN,
             freq_token_value=freq_token_value,
+            label_mean=label_mean,
+            label_std=label_std,
+            target_mean=target_mean,
+            target_std=target_std,
+            lambda_aux=lambda_aux,
             log_every=LOG_EVERY_N_BATCHES,
         )
         va_loss = eval_one_epoch(
@@ -519,11 +567,8 @@ def main() -> None:
             pred_len=PRED_LEN,
             freq_token_value=freq_token_value,
         )
-        train_losses.append(float(tr_loss))
-        val_losses.append(float(va_loss))
-        grad_norms.append(float(tr_grad_norm))
         print(
-            f"Epoch {epoch:02d} | train_loss={tr_loss:.6f} | val_loss={va_loss:.6f} | grad_norm={tr_grad_norm:.6f}"
+            f"Epoch {epoch:02d} | train_loss={tr_loss:.6f} | aux_loss={tr_aux:.6f} | val_loss={va_loss:.6f} | grad_norm={tr_grad_norm:.6f} | lambda_aux={lambda_aux:.4f}"
         )
 
         if va_loss < best_val:
@@ -547,37 +592,12 @@ def main() -> None:
     )
     print(f"Test loss: {te_loss:.6f}")
 
-    # Save loss curve + grad norms
-    loss_csv = OUTPUT_DIR / "loss_curve.csv"
-    loss_payload = {
-        "epoch": list(range(1, EPOCHS + 1)),
-        "train_loss": train_losses,
-        "val_loss": val_losses,
-        "grad_norm": grad_norms,
+    label_payload = {
+        "mean": label_scaler.mean.tolist(),
+        "std": label_scaler.std.tolist(),
+        "eps": float(label_scaler.eps),
     }
-    pd.DataFrame(loss_payload).to_csv(loss_csv, index=False)
-    print(f"Saved loss curve CSV: {loss_csv}")
-
-    loss_png = OUTPUT_DIR / "loss_curve.png"
-    fig, axes = plt.subplots(2, 1, figsize=(8, 8), sharex=True)
-    axes[0].plot(loss_payload["epoch"], train_losses, label="train")
-    axes[0].plot(loss_payload["epoch"], val_losses, label="val")
-    axes[0].set_title("Loss Curve")
-    axes[0].set_ylabel("Loss")
-    axes[0].legend()
-
-    axes[1].plot(
-        loss_payload["epoch"], grad_norms, label="grad_norm", color="tab:orange"
-    )
-    axes[1].set_title("Gradient Norm (avg per epoch)")
-    axes[1].set_xlabel("Epoch")
-    axes[1].set_ylabel("Grad Norm")
-    axes[1].legend()
-
-    fig.tight_layout()
-    fig.savefig(loss_png, dpi=150)
-    plt.close(fig)
-    print(f"Saved loss curve PNG: {loss_png}")
+    LABEL_SCALER_PATH.write_text(json.dumps(label_payload, indent=2))
 
     config_payload = {
         "model_id": MODEL_ID,
@@ -588,21 +608,6 @@ def main() -> None:
         "target_features": TARGET_FEATURES,
         "exogenous_features": EXOG_FEATURES,
         "controls": CONTROL_NAMES,
-        "control_ranges": asdict(cfg.control_ranges),
-        "trend_sigma_scale": cfg.trend_sigma_scale,
-        "tail_clip_z": cfg.tail_clip_z,
-        "tail_range_coef": cfg.tail_range_coef,
-        "vol_volume_coef": cfg.vol_volume_coef,
-        "train_noise_enabled": cfg.train_noise_enabled,
-        "infer_noise_enabled": cfg.infer_noise_enabled,
-        "noise_df_min": cfg.noise_df_min,
-        "noise_df_max": cfg.noise_df_max,
-        "train_return_noise_scale": cfg.train_return_noise_scale,
-        "train_range_noise_scale": cfg.train_range_noise_scale,
-        "train_volume_noise_scale": cfg.train_volume_noise_scale,
-        "infer_return_noise_scale": cfg.infer_return_noise_scale,
-        "infer_range_noise_scale": cfg.infer_range_noise_scale,
-        "infer_volume_noise_scale": cfg.infer_volume_noise_scale,
         "detrend_returns": cfg.detrend_returns,
         "detrend_window": cfg.detrend_window,
         "detrend_mode": cfg.detrend_mode,
@@ -610,6 +615,16 @@ def main() -> None:
         "train_end_year": TRAIN_END_YEAR,
         "val_year": VAL_YEAR,
         "test_year": TEST_YEAR,
+        "label_scaler": str(LABEL_SCALER_PATH),
+        "sampler": {
+            "beta": SAMPLE_BETA,
+            "min_weight": SAMPLE_MIN,
+            "max_weight": SAMPLE_MAX,
+        },
+        "aux_loss": {
+            "lambda_max": LAMBDA_AUX_MAX,
+            "warmup_epochs": LAMBDA_WARMUP_EPOCHS,
+        },
     }
     CONFIG_PATH.write_text(json.dumps(config_payload, indent=2))
     print(f"Saved config: {CONFIG_PATH}")
