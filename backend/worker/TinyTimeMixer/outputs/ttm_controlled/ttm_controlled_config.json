@@ -7,6 +7,7 @@
     "log_return",
     "log_range",
     "log_volume",
+    "realized_vol",
     "volatility_mult",
     "trend",
     "fat_tails",
@@ -17,6 +18,9 @@
     "log_return",
     "log_range",
     "log_volume"
+  ],
+  "exogenous_features": [
+    "realized_vol"
   ],
   "controls": [
     "volatility_mult",
@@ -64,6 +68,7 @@
   "detrend_returns": false,
   "detrend_window": 20,
   "detrend_mode": "rolling",
+  "realized_vol_window": 20,
   "train_end_year": 2023,
   "val_year": 2024,
   "test_year": 2025

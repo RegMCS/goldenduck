@@ -3,6 +3,7 @@ Base TinyTimeMixer dataset for daily OHLCV without control channels.
 
 Builds:
   - Base features: log_return, log_range, log_volume
+  - Exogenous input: realized_vol
   - Sliding windows of past -> future targets (no synthetic control edits)
 """
 
@@ -18,6 +19,7 @@ from torch.utils.data import Dataset
 
 from backend.worker.TinyTimeMixer.services.ttm_controlled_dataset import (
     TARGET_FEATURES,
+    EXOG_FEATURES,
     build_base_features,
     download_daily_ohlcv,
 )
@@ -30,14 +32,19 @@ class TTMBaseConfig:
     detrend_returns: bool = True
     detrend_window: int = 20
     detrend_mode: str = "rolling"
+    realized_vol_window: int = 20
 
     @property
     def num_target_features(self) -> int:
         return len(TARGET_FEATURES)
 
     @property
+    def num_exogenous(self) -> int:
+        return len(EXOG_FEATURES)
+
+    @property
     def num_input_channels(self) -> int:
-        return self.num_target_features
+        return self.num_target_features + self.num_exogenous
 
     @property
     def prediction_channel_indices(self) -> List[int]:
@@ -45,11 +52,12 @@ class TTMBaseConfig:
 
     @property
     def exogenous_channel_indices(self) -> List[int]:
-        return []
+        start = self.num_target_features
+        return list(range(start, start + self.num_exogenous))
 
     @property
     def channel_names(self) -> List[str]:
-        return list(TARGET_FEATURES)
+        return list(TARGET_FEATURES) + list(EXOG_FEATURES)
 
 
 @dataclass
@@ -80,7 +88,8 @@ class StandardScaler:
 class TimeSeriesBundle:
     ticker: str
     dates: np.ndarray
-    features: np.ndarray  # [N, 3] for TARGET_FEATURES
+    features: np.ndarray  # [N, num_target_features]
+    exog_features: np.ndarray  # [N, num_exogenous]
     close: np.ndarray
 
 
@@ -94,18 +103,42 @@ def fit_feature_scaler(series_list: Sequence[TimeSeriesBundle]) -> StandardScale
     return StandardScaler(mean=mean, std=std, eps=1e-6)
 
 
+def fit_feature_scalers(
+    series_list: Sequence[TimeSeriesBundle],
+) -> Tuple[StandardScaler, StandardScaler]:
+    if not series_list:
+        raise ValueError("No series to fit scalers.")
+    all_targets = np.concatenate([s.features for s in series_list], axis=0)
+    all_exog = np.concatenate([s.exog_features for s in series_list], axis=0)
+
+    targ_mean = all_targets.mean(axis=0)
+    targ_std = all_targets.std(axis=0)
+    targ_std = np.where(targ_std < 1e-8, 1.0, targ_std)
+
+    exog_mean = all_exog.mean(axis=0)
+    exog_std = all_exog.std(axis=0)
+    exog_std = np.where(exog_std < 1e-8, 1.0, exog_std)
+
+    return (
+        StandardScaler(mean=targ_mean, std=targ_std, eps=1e-6),
+        StandardScaler(mean=exog_mean, std=exog_std, eps=1e-6),
+    )
+
+
 class BaseWindowDataset(Dataset):
     def __init__(
         self,
         series_list: Sequence[TimeSeriesBundle],
         cfg: TTMBaseConfig,
-        scaler: StandardScaler,
+        target_scaler: StandardScaler,
+        exog_scaler: StandardScaler,
         *,
         target_date_range: Optional[Tuple[pd.Timestamp, pd.Timestamp]] = None,
     ) -> None:
         self.series_list = list(series_list)
         self.cfg = cfg
-        self.scaler = scaler
+        self.target_scaler = target_scaler
+        self.exog_scaler = exog_scaler
         self.target_date_range = target_date_range
 
         self._index: List[Tuple[int, int]] = []
@@ -142,11 +175,15 @@ class BaseWindowDataset(Dataset):
 
         past_raw = series.features[start:mid].copy()
         future_raw = series.features[mid:end].copy()
+        past_exog = series.exog_features[start:mid].copy()
 
-        past_scaled = self.scaler.transform(past_raw)
-        future_scaled = self.scaler.transform(future_raw)
+        past_scaled = self.target_scaler.transform(past_raw)
+        future_scaled = self.target_scaler.transform(future_raw)
+        past_exog_scaled = self.exog_scaler.transform(past_exog)
 
-        past_values = past_scaled.astype(np.float32)
+        past_values = np.concatenate([past_scaled, past_exog_scaled], axis=1).astype(
+            np.float32
+        )
         future_targets = future_scaled.astype(np.float32)
 
         return torch.tensor(past_values, dtype=torch.float32), torch.tensor(

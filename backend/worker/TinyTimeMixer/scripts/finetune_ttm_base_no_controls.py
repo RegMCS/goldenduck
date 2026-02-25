@@ -49,12 +49,13 @@ if str(ROOT) not in sys.path:
 from backend.worker.GARCH.config.tickers import US_TICKERS, INDEX_TICKERS
 from backend.worker.TinyTimeMixer.services.ttm_base_dataset import (
     TARGET_FEATURES,
+    EXOG_FEATURES,
     BaseWindowDataset,
     TTMBaseConfig,
     TimeSeriesBundle,
     build_base_features,
     download_daily_ohlcv,
-    fit_feature_scaler,
+    fit_feature_scalers,
 )
 
 # ----------------------------
@@ -162,9 +163,16 @@ def count_trainable_params(model: torch.nn.Module) -> Tuple[int, int]:
 
 def to_bundle(ticker: str, df) -> TimeSeriesBundle:
     features = df[TARGET_FEATURES].values.astype(np.float32)
+    exog_features = df[EXOG_FEATURES].values.astype(np.float32)
     dates = df["date"].values
     close = df["Close"].values.astype(np.float32)
-    return TimeSeriesBundle(ticker=ticker, dates=dates, features=features, close=close)
+    return TimeSeriesBundle(
+        ticker=ticker,
+        dates=dates,
+        features=features,
+        exog_features=exog_features,
+        close=close,
+    )
 
 
 def train_one_epoch(
@@ -287,8 +295,13 @@ def main() -> None:
     if not all_series:
         raise RuntimeError("No training series available after filtering.")
 
-    scaler = fit_feature_scaler(all_series)
-    torch.save(scaler.state_dict(), SCALER_PATH)
+    target_scaler, exog_scaler = fit_feature_scalers(all_series)
+    scaler_state = {
+        "targets": target_scaler.state_dict(),
+        "exog": exog_scaler.state_dict(),
+        "type": "target_exog_v1",
+    }
+    torch.save(scaler_state, SCALER_PATH)
 
     train_range = (
         np.datetime64("2000-01-01"),
@@ -303,19 +316,22 @@ def main() -> None:
     train_ds = BaseWindowDataset(
         all_series,
         cfg,
-        scaler,
+        target_scaler,
+        exog_scaler,
         target_date_range=train_range,
     )
     val_ds = BaseWindowDataset(
         all_series,
         cfg,
-        scaler,
+        target_scaler,
+        exog_scaler,
         target_date_range=val_range,
     )
     test_ds = BaseWindowDataset(
         all_series,
         cfg,
-        scaler,
+        target_scaler,
+        exog_scaler,
         target_date_range=test_range,
     )
 
@@ -430,10 +446,12 @@ def main() -> None:
         "prediction_length": PRED_LEN,
         "channels": cfg.channel_names,
         "target_features": TARGET_FEATURES,
+        "exogenous_features": EXOG_FEATURES,
         "controls": [],
         "detrend_returns": cfg.detrend_returns,
         "detrend_window": cfg.detrend_window,
         "detrend_mode": cfg.detrend_mode,
+        "realized_vol_window": cfg.realized_vol_window,
         "train_end_year": TRAIN_END_YEAR,
         "val_year": VAL_YEAR,
         "test_year": TEST_YEAR,

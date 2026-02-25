@@ -52,12 +52,13 @@ from backend.worker.GARCH.config.tickers import US_TICKERS, INDEX_TICKERS
 from backend.worker.TinyTimeMixer.services.ttm_controlled_dataset import (
     CONTROL_NAMES,
     TARGET_FEATURES,
+    EXOG_FEATURES,
     ControlValues,
     TTMControlledConfig,
     TimeSeriesBundle,
     build_base_features,
     download_daily_ohlcv,
-    fit_feature_scaler,
+    fit_feature_scalers,
     ControlledWindowDataset,
 )
 
@@ -94,7 +95,8 @@ RETURN_SCALE = 1.0
 RETURN_LOSS_WEIGHT = 1.0
 OTHER_LOSS_WEIGHT = 1.0
 
-FULL_FINETUNE = False  # set False to train only head/decoder (see UNFREEZE_KEYWORDS)
+# Full finetune disabled: only head/decoder/prediction layers are trainable.
+FULL_FINETUNE = False
 UNFREEZE_KEYWORDS = [
     "head",
     "decoder",
@@ -224,10 +226,17 @@ class StudentTLoss:
 
 
 def to_bundle(ticker: str, df) -> TimeSeriesBundle:
-    features = df[["log_return", "log_range", "log_volume"]].values.astype(np.float32)
+    features = df[TARGET_FEATURES].values.astype(np.float32)
+    exog_features = df[EXOG_FEATURES].values.astype(np.float32)
     dates = df["date"].values
     close = df["Close"].values.astype(np.float32)
-    return TimeSeriesBundle(ticker=ticker, dates=dates, features=features, close=close)
+    return TimeSeriesBundle(
+        ticker=ticker,
+        dates=dates,
+        features=features,
+        exog_features=exog_features,
+        close=close,
+    )
 
 
 def _grad_norm(params) -> float:
@@ -369,8 +378,13 @@ def main() -> None:
     if not all_series:
         raise RuntimeError("No training series available after filtering.")
 
-    scaler = fit_feature_scaler(all_series)
-    torch.save(scaler.state_dict(), SCALER_PATH)
+    target_scaler, exog_scaler = fit_feature_scalers(all_series)
+    scaler_state = {
+        "targets": target_scaler.state_dict(),
+        "exog": exog_scaler.state_dict(),
+        "type": "target_exog_v1",
+    }
+    torch.save(scaler_state, SCALER_PATH)
 
     fixed_controls = ControlValues(
         volatility_mult=1.0,
@@ -393,7 +407,8 @@ def main() -> None:
     train_ds = ControlledWindowDataset(
         all_series,
         cfg,
-        scaler,
+        target_scaler,
+        exog_scaler,
         control_mode="random",
         target_date_range=train_range,
         seed=SEED,
@@ -401,7 +416,8 @@ def main() -> None:
     val_ds = ControlledWindowDataset(
         all_series,
         cfg,
-        scaler,
+        target_scaler,
+        exog_scaler,
         control_mode="fixed",
         fixed_controls=fixed_controls,
         target_date_range=val_range,
@@ -410,7 +426,8 @@ def main() -> None:
     test_ds = ControlledWindowDataset(
         all_series,
         cfg,
-        scaler,
+        target_scaler,
+        exog_scaler,
         control_mode="fixed",
         fixed_controls=fixed_controls,
         target_date_range=test_range,
@@ -453,8 +470,8 @@ def main() -> None:
 
     model = model.to(DEVICE)
 
-    if not FULL_FINETUNE:
-        freeze_for_fewshot(model)
+    # Always freeze for few-shot training (no full-parameter finetuning)
+    freeze_for_fewshot(model)
 
     trainable, total = count_trainable_params(model)
     print(
@@ -567,6 +584,7 @@ def main() -> None:
         "prediction_length": PRED_LEN,
         "channels": cfg.channel_names,
         "target_features": TARGET_FEATURES,
+        "exogenous_features": EXOG_FEATURES,
         "controls": CONTROL_NAMES,
         "control_ranges": asdict(cfg.control_ranges),
         "trend_sigma_scale": cfg.trend_sigma_scale,
@@ -586,6 +604,7 @@ def main() -> None:
         "detrend_returns": cfg.detrend_returns,
         "detrend_window": cfg.detrend_window,
         "detrend_mode": cfg.detrend_mode,
+        "realized_vol_window": cfg.realized_vol_window,
         "train_end_year": TRAIN_END_YEAR,
         "val_year": VAL_YEAR,
         "test_year": TEST_YEAR,

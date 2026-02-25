@@ -26,6 +26,7 @@ from torch.utils.data import Dataset
 import yfinance as yf
 
 TARGET_FEATURES = ["log_return", "log_range", "log_volume"]
+EXOG_FEATURES = ["realized_vol"]
 CONTROL_NAMES = [
     "volatility_mult",
     "trend",
@@ -84,10 +85,15 @@ class TTMControlledConfig:
     detrend_returns: bool = True
     detrend_window: int = 20
     detrend_mode: str = "rolling"
+    realized_vol_window: int = 20
 
     @property
     def num_target_features(self) -> int:
         return len(TARGET_FEATURES)
+
+    @property
+    def num_exogenous(self) -> int:
+        return len(EXOG_FEATURES)
 
     @property
     def num_controls(self) -> int:
@@ -95,7 +101,7 @@ class TTMControlledConfig:
 
     @property
     def num_input_channels(self) -> int:
-        return self.num_target_features + self.num_controls
+        return self.num_target_features + self.num_exogenous + self.num_controls
 
     @property
     def prediction_channel_indices(self) -> List[int]:
@@ -104,11 +110,11 @@ class TTMControlledConfig:
     @property
     def exogenous_channel_indices(self) -> List[int]:
         start = self.num_target_features
-        return list(range(start, start + self.num_controls))
+        return list(range(start, start + self.num_exogenous + self.num_controls))
 
     @property
     def channel_names(self) -> List[str]:
-        return TARGET_FEATURES + CONTROL_NAMES
+        return TARGET_FEATURES + EXOG_FEATURES + CONTROL_NAMES
 
 
 @dataclass
@@ -139,7 +145,8 @@ class StandardScaler:
 class TimeSeriesBundle:
     ticker: str
     dates: np.ndarray
-    features: np.ndarray  # [N, 3] for TARGET_FEATURES
+    features: np.ndarray  # [N, num_target_features]
+    exog_features: np.ndarray  # [N, num_exogenous]
     close: np.ndarray
 
 
@@ -205,8 +212,16 @@ def build_base_features(
             raise ValueError(
                 f"Invalid detrend_mode={cfg.detrend_mode}. Use 'rolling' or 'mean'."
             )
+
+    # Realized volatility (exogenous) computed from returns only (no leakage)
+    vol_window = cfg.realized_vol_window if cfg is not None else 20
+    vol_window = int(vol_window) if vol_window and vol_window > 0 else 20
+    out["realized_vol"] = (
+        out["log_return"].rolling(vol_window, min_periods=2).std().shift(1)
+    )
+
     out = out.dropna().reset_index(drop=True)
-    return out[["date", "Close"] + TARGET_FEATURES]
+    return out[["date", "Close"] + TARGET_FEATURES + EXOG_FEATURES]
 
 
 def split_by_year(
@@ -224,6 +239,9 @@ def split_by_year(
 
 
 def fit_feature_scaler(series_list: Sequence[TimeSeriesBundle]) -> StandardScaler:
+    """
+    Backward-compatible: fits scaler on target features only.
+    """
     if not series_list:
         raise ValueError("No series to fit scaler.")
     all_feats = np.concatenate([s.features for s in series_list], axis=0)
@@ -231,6 +249,31 @@ def fit_feature_scaler(series_list: Sequence[TimeSeriesBundle]) -> StandardScale
     std = all_feats.std(axis=0)
     std = np.where(std < 1e-8, 1.0, std)
     return StandardScaler(mean=mean, std=std, eps=1e-6)
+
+
+def fit_feature_scalers(
+    series_list: Sequence[TimeSeriesBundle],
+) -> Tuple[StandardScaler, StandardScaler]:
+    """
+    Fit separate scalers for target and exogenous features.
+    """
+    if not series_list:
+        raise ValueError("No series to fit scalers.")
+    all_targets = np.concatenate([s.features for s in series_list], axis=0)
+    all_exog = np.concatenate([s.exog_features for s in series_list], axis=0)
+
+    targ_mean = all_targets.mean(axis=0)
+    targ_std = all_targets.std(axis=0)
+    targ_std = np.where(targ_std < 1e-8, 1.0, targ_std)
+
+    exog_mean = all_exog.mean(axis=0)
+    exog_std = all_exog.std(axis=0)
+    exog_std = np.where(exog_std < 1e-8, 1.0, exog_std)
+
+    return (
+        StandardScaler(mean=targ_mean, std=targ_std, eps=1e-6),
+        StandardScaler(mean=exog_mean, std=exog_std, eps=1e-6),
+    )
 
 
 def _scale_control(value: float, minv: float, maxv: float) -> float:
@@ -381,7 +424,8 @@ class ControlledWindowDataset(Dataset):
         self,
         series_list: Sequence[TimeSeriesBundle],
         cfg: TTMControlledConfig,
-        scaler: StandardScaler,
+        target_scaler: StandardScaler,
+        exog_scaler: StandardScaler,
         *,
         control_mode: str = "random",
         fixed_controls: Optional[ControlValues] = None,
@@ -390,7 +434,8 @@ class ControlledWindowDataset(Dataset):
     ) -> None:
         self.series_list = list(series_list)
         self.cfg = cfg
-        self.scaler = scaler
+        self.target_scaler = target_scaler
+        self.exog_scaler = exog_scaler
         self.control_mode = control_mode
         self.fixed_controls = fixed_controls
         self.target_date_range = target_date_range
@@ -435,6 +480,7 @@ class ControlledWindowDataset(Dataset):
 
         past_raw = series.features[start:mid].copy()
         future_raw = series.features[mid:end].copy()
+        past_exog = series.exog_features[start:mid].copy()
 
         controls = self._get_controls()
         future_raw = apply_controls_to_future(
@@ -445,8 +491,9 @@ class ControlledWindowDataset(Dataset):
             rng=self.rng,
         )
 
-        past_scaled = self.scaler.transform(past_raw)
-        future_scaled = self.scaler.transform(future_raw)
+        past_scaled = self.target_scaler.transform(past_raw)
+        future_scaled = self.target_scaler.transform(future_raw)
+        past_exog_scaled = self.exog_scaler.transform(past_exog)
 
         ctrl_scaled = scale_controls(controls, self.cfg.control_ranges)
         past_ctrl = np.repeat(ctrl_scaled[None, :], self.cfg.context_length, axis=0)
@@ -454,7 +501,7 @@ class ControlledWindowDataset(Dataset):
             ctrl_scaled[None, :], self.cfg.prediction_length, axis=0
         )
 
-        past_values = np.concatenate([past_scaled, past_ctrl], axis=1)
+        past_values = np.concatenate([past_scaled, past_exog_scaled, past_ctrl], axis=1)
         future_targets = future_scaled.astype(np.float32)
 
         return torch.tensor(past_values, dtype=torch.float32), torch.tensor(

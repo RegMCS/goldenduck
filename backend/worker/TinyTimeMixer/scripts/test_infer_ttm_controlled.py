@@ -30,6 +30,7 @@ if str(ROOT) not in sys.path:
 from backend.worker.TinyTimeMixer.services.ttm_controlled_dataset import (
     ControlRanges,
     ControlValues,
+    EXOG_FEATURES,
     StandardScaler,
     TTMControlledConfig,
     apply_inference_noise,
@@ -61,7 +62,7 @@ except Exception:
 # ----------------------------
 # User-configurable section
 # ----------------------------
-TICKER = "IBM"
+TICKER = "AAPL"
 INPUT_START = "2025-01-01"
 INPUT_END = "2025-12-29"
 INPUT_CSV = None  # Optional Path to OHLCV CSV used for inference
@@ -160,9 +161,10 @@ def load_input_ohlcv(
 def build_context(
     df: pd.DataFrame,
     cfg: TTMControlledConfig,
-    scaler: StandardScaler,
+    target_scaler: StandardScaler,
+    exog_scaler: StandardScaler,
     controls: ControlValues,
-) -> Tuple[np.ndarray, float, pd.Timestamp, float]:
+) -> Tuple[np.ndarray, np.ndarray, float, pd.Timestamp, float]:
     feats = build_base_features(df, cfg)
     if len(feats) < cfg.context_length:
         raise ValueError(
@@ -171,27 +173,29 @@ def build_context(
         )
     feats = feats.iloc[-cfg.context_length :].copy()
 
-    past_raw = feats[["log_return", "log_range", "log_volume"]].values.astype(
-        np.float32
-    )
+    past_raw = feats[["log_return", "log_range", "log_volume"]].values.astype(np.float32)
+    past_exog = feats[EXOG_FEATURES].values.astype(np.float32)
     past_sigma = float(np.std(past_raw[:, 0]) + 1e-8)
-    past_scaled = scaler.transform(past_raw)
+    past_scaled = target_scaler.transform(past_raw)
+    past_exog_scaled = exog_scaler.transform(past_exog)
 
     ctrl_scaled = scale_controls(controls, cfg.control_ranges)
     past_ctrl = np.repeat(ctrl_scaled[None, :], cfg.context_length, axis=0)
-    past_values = np.concatenate([past_scaled, past_ctrl], axis=1)
+    past_values = np.concatenate([past_scaled, past_exog_scaled, past_ctrl], axis=1)
 
     last_close = float(feats["Close"].iloc[-1])
     last_date = pd.to_datetime(feats["date"].iloc[-1])
-    return past_values, last_close, last_date, past_sigma
+    return past_values, past_raw, last_close, last_date, past_sigma
 
 
 @torch.no_grad()
 def rollout_forecast(
     model: torch.nn.Module,
     past_scaled: np.ndarray,
+    past_raw: np.ndarray,
     cfg: TTMControlledConfig,
-    scaler: StandardScaler,
+    target_scaler: StandardScaler,
+    exog_scaler: StandardScaler,
     controls: ControlValues,
     *,
     horizon: int,
@@ -202,12 +206,23 @@ def rollout_forecast(
     ctrl_scaled = scale_controls(controls, cfg.control_ranges)
     remaining = int(horizon)
     current = past_scaled.copy()
+    current_raw = past_raw.copy()
     outputs_scaled = []
 
     while remaining > 0:
         step = min(roll_step, remaining)
         past_ctrl = np.repeat(ctrl_scaled[None, :], cfg.context_length, axis=0)
-        past_values = np.concatenate([current, past_ctrl], axis=1)
+        # Compute realized vol from current raw returns (no leakage)
+        returns_series = pd.Series(current_raw[:, 0])
+        vol_window = int(cfg.realized_vol_window)
+        realized_vol = (
+            returns_series.rolling(vol_window, min_periods=2).std().shift(1)
+        )
+        realized_vol = realized_vol.bfill().fillna(0.0).values.astype(np.float32)
+        past_exog = realized_vol.reshape(-1, 1)
+        past_exog_scaled = exog_scaler.transform(past_exog)
+
+        past_values = np.concatenate([current, past_exog_scaled, past_ctrl], axis=1)
 
         x = torch.tensor(past_values, dtype=torch.float32, device=device).unsqueeze(0)
         if freq_token_value is not None:
@@ -226,11 +241,16 @@ def rollout_forecast(
         pred_scaled = y_hat.squeeze(0).detach().cpu().numpy()
         outputs_scaled.append(pred_scaled)
 
+        pred_raw = target_scaler.inverse_transform(pred_scaled)
+
         current = np.concatenate([current, pred_scaled], axis=0)[-cfg.context_length :]
+        current_raw = np.concatenate([current_raw, pred_raw], axis=0)[
+            -cfg.context_length :
+        ]
         remaining -= step
 
     pred_scaled_all = np.concatenate(outputs_scaled, axis=0)
-    pred_raw = scaler.inverse_transform(pred_scaled_all)
+    pred_raw = target_scaler.inverse_transform(pred_scaled_all)
     return pred_raw
 
 
@@ -686,6 +706,29 @@ def plot_end_to_end_quality(
     plt.close(fig)
 
 
+def plot_end_to_end_quality_ax(
+    ax: plt.Axes,
+    total_score: float,
+    *,
+    title: str = "End-to-End Synthetic Data Quality",
+    target: float = 0.7,
+    minimum: float = 0.5,
+) -> None:
+    score = float(np.clip(total_score, 0.0, 1.0))
+    color = "red" if score < minimum else "orange" if score < target else "green"
+
+    ax.barh(["Quality\nScore"], [score], color=color, alpha=0.7)
+    ax.axvline(x=target, color="green", linestyle="--", linewidth=2, label="Target (0.7)")
+    ax.axvline(
+        x=minimum, color="orange", linestyle="--", linewidth=2, label="Minimum (0.5)"
+    )
+    ax.set_xlim(0, 1)
+    ax.set_xlabel("Score")
+    ax.set_title(title)
+    ax.legend()
+    ax.text(score, 0, f"  {score:.3f}", va="center", fontsize=12, fontweight="bold")
+
+
 def plot_nonlog_feature(
     input_feats: np.ndarray,
     pred_feats: np.ndarray,
@@ -724,27 +767,16 @@ def plot_all_charts(
     historical_returns: np.ndarray,
     synthetic_returns: np.ndarray,
     controls: ControlValues,
+    quality_scores: Dict[str, float],
     input_feats: np.ndarray,
     pred_feats: np.ndarray,
     path: Path,
     *,
     metrics_title_suffix: str = "",
 ) -> None:
-    fig, axes = plt.subplots(6, 2, figsize=(16, 22))
+    fig, axes = plt.subplots(3, 2, figsize=(14, 12))
 
     ax = axes[0, 0]
-    ax.plot(np.arange(len(input_df)), input_df["Close"].values, label="Input Close")
-    ax.plot(np.arange(len(synth_df)), synth_df["Close"].values, label="Synthetic Close")
-    ax.set_title("Close (Input vs Synthetic, aligned by index)")
-    ax.legend()
-
-    ax = axes[0, 1]
-    ax.plot(np.arange(len(input_df)), input_df["Volume"].values, label="Input Volume")
-    ax.plot(np.arange(len(synth_df)), synth_df["Volume"].values, label="Synthetic Volume")
-    ax.set_title("Volume (Input vs Synthetic, aligned by index)")
-    ax.legend()
-
-    ax = axes[1, 0]
     ax.plot(synth_df["Date"], synth_df["Close"], label="Close", linewidth=1.5)
     ax.fill_between(
         synth_df["Date"],
@@ -753,64 +785,42 @@ def plot_all_charts(
         alpha=0.2,
         label="High-Low Range",
     )
-    ax.set_title("Synthetic OHLC (Close + Range)")
+    ax.set_title("Synthetic OHLCV (Close + Range)")
+    ax.legend()
+
+    ax = axes[0, 1]
+    plot_end_to_end_quality_ax(
+        ax, quality_scores.get("total_score", 0.0)
+    )
+
+    ax = axes[1, 0]
+    ax.plot(np.arange(len(input_df)), input_df["Volume"].values, label="Input Volume")
+    ax.plot(np.arange(len(synth_df)), synth_df["Volume"].values, label="Synthetic Volume")
+    ax.set_title("Volume (Input vs Synthetic, aligned by index)")
     ax.legend()
 
     ax = axes[1, 1]
-    labels = ["volatility", "trend", "fat_tails", "momentum"]
-    x = np.arange(len(labels))
-    inp = [metrics_input[k] for k in labels]
-    syn = [metrics_synth[k] for k in labels]
-    ax.bar(x - 0.2, inp, width=0.4, label="Input")
-    ax.bar(x + 0.2, syn, width=0.4, label="Synthetic")
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=15)
-    title = "Metrics Comparison"
-    if metrics_title_suffix:
-        title = f"{title} ({metrics_title_suffix})"
-    ax.set_title(title)
-    ax.legend()
-
-    ax = axes[2, 0]
-    plot_validation_bars(ax, validation_metrics)
-    ax = axes[2, 1]
-    plot_return_distribution(ax, historical_returns, synthetic_returns)
-
-    ax = axes[3, 0]
-    plot_rolling_volatility(ax, historical_returns, synthetic_returns)
-    ax = axes[3, 1]
-    plot_distribution_metrics(ax, historical_returns, synthetic_returns)
-
-    ax = axes[4, 0]
-    plot_user_knobs(ax, controls)
-    ax = axes[4, 1]
     plot_nonlog_feature(
         input_feats,
         pred_feats,
         ax=ax,
         idx=0,
-        title="Raw (Non-Log) Return",
+        title="Returns (Input vs Synthetic)",
         y_label="Return",
     )
 
-    ax = axes[5, 0]
+    ax = axes[2, 0]
     plot_nonlog_feature(
         input_feats,
         pred_feats,
         ax=ax,
         idx=1,
-        title="Raw (Non-Log) Range Ratio",
+        title="Range (Input vs Synthetic)",
         y_label="High/Low Ratio",
     )
-    ax = axes[5, 1]
-    plot_nonlog_feature(
-        input_feats,
-        pred_feats,
-        ax=ax,
-        idx=2,
-        title="Raw (Non-Log) Volume",
-        y_label="Volume",
-    )
+
+    ax = axes[2, 1]
+    plot_return_distribution(ax, historical_returns, synthetic_returns)
 
     fig.tight_layout()
     fig.savefig(path, dpi=150)
@@ -836,9 +846,22 @@ def main() -> None:
     cfg.detrend_returns = bool(config.get("detrend_returns", cfg.detrend_returns))
     cfg.detrend_window = int(config.get("detrend_window", cfg.detrend_window))
     cfg.detrend_mode = str(config.get("detrend_mode", cfg.detrend_mode))
+    cfg.realized_vol_window = int(
+        config.get("realized_vol_window", cfg.realized_vol_window)
+    )
 
     scaler_state = torch.load(scaler_path, weights_only=False)
-    scaler = StandardScaler.from_state_dict(scaler_state)
+    if isinstance(scaler_state, dict) and "targets" in scaler_state and "exog" in scaler_state:
+        target_scaler = StandardScaler.from_state_dict(scaler_state["targets"])
+        exog_scaler = StandardScaler.from_state_dict(scaler_state["exog"])
+    else:
+        # Fallback for older checkpoints (no exog scaler)
+        target_scaler = StandardScaler.from_state_dict(scaler_state)
+        exog_scaler = StandardScaler(
+            mean=np.array([0.0], dtype=np.float32),
+            std=np.array([1.0], dtype=np.float32),
+            eps=1e-6,
+        )
 
     raw = load_input_ohlcv(
         TICKER,
@@ -850,8 +873,8 @@ def main() -> None:
     if len(input_df) > PREDICTION_LENGTH:
         input_df = input_df.tail(PREDICTION_LENGTH).reset_index(drop=True)
 
-    past_values, last_close, last_date, past_sigma = build_context(
-        raw, cfg, scaler, CONTROLS
+    past_values, past_raw, last_close, last_date, past_sigma = build_context(
+        raw, cfg, target_scaler, exog_scaler, CONTROLS
     )
 
     try:
@@ -887,8 +910,10 @@ def main() -> None:
     pred_features = rollout_forecast(
         model,
         past_values[:, : cfg.num_target_features],
+        past_raw,
         cfg,
-        scaler,
+        target_scaler,
+        exog_scaler,
         CONTROLS,
         horizon=int(PREDICTION_LENGTH),
         roll_step=int(ROLL_STEP),
@@ -1005,6 +1030,7 @@ def main() -> None:
         historical_returns,
         synthetic_returns,
         CONTROLS,
+        quality_scores,
         input_feats,
         pred_features,
         COMBINED_CHART,

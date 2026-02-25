@@ -147,8 +147,9 @@ def load_input_ohlcv(
 def build_context(
     df: pd.DataFrame,
     cfg: TTMBaseConfig,
-    scaler: StandardScaler,
-) -> Tuple[np.ndarray, float, pd.Timestamp, float]:
+    target_scaler: StandardScaler,
+    exog_scaler: StandardScaler,
+) -> Tuple[np.ndarray, np.ndarray, float, pd.Timestamp, float]:
     feats = build_base_features(df, cfg)
     if len(feats) < cfg.context_length:
         raise ValueError(
@@ -161,19 +162,21 @@ def build_context(
         np.float32
     )
     past_sigma = float(np.std(past_raw[:, 0]) + 1e-8)
-    past_scaled = scaler.transform(past_raw)
+    past_scaled = target_scaler.transform(past_raw)
 
     last_close = float(feats["Close"].iloc[-1])
     last_date = pd.to_datetime(feats["date"].iloc[-1])
-    return past_scaled, last_close, last_date, past_sigma
+    return past_scaled, past_raw, last_close, last_date, past_sigma
 
 
 @torch.no_grad()
 def rollout_forecast(
     model: torch.nn.Module,
     past_scaled: np.ndarray,
+    past_raw: np.ndarray,
     cfg: TTMBaseConfig,
-    scaler: StandardScaler,
+    target_scaler: StandardScaler,
+    exog_scaler: StandardScaler,
     *,
     horizon: int,
     roll_step: int,
@@ -182,11 +185,21 @@ def rollout_forecast(
 ) -> np.ndarray:
     remaining = int(horizon)
     current = past_scaled.copy()
+    current_raw = past_raw.copy()
     outputs_scaled = []
 
     while remaining > 0:
         step = min(roll_step, remaining)
-        x = torch.tensor(current, dtype=torch.float32, device=device).unsqueeze(0)
+        returns_series = pd.Series(current_raw[:, 0])
+        vol_window = int(cfg.realized_vol_window)
+        realized_vol = (
+            returns_series.rolling(vol_window, min_periods=2).std().shift(1)
+        )
+        realized_vol = realized_vol.bfill().fillna(0.0).values.astype(np.float32)
+        past_exog_scaled = exog_scaler.transform(realized_vol.reshape(-1, 1))
+
+        past_values = np.concatenate([current, past_exog_scaled], axis=1)
+        x = torch.tensor(past_values, dtype=torch.float32, device=device).unsqueeze(0)
         if freq_token_value is not None:
             freq_token = torch.full(
                 (x.shape[0],), int(freq_token_value), device=device, dtype=torch.long
@@ -195,7 +208,7 @@ def rollout_forecast(
         else:
             out = model(past_values=x)
         y_hat = extract_predictions(out)
-        y_hat = maybe_fix_pred_shape(y_hat, num_channels=current.shape[-1])
+        y_hat = maybe_fix_pred_shape(y_hat, num_channels=past_values.shape[-1])
         if y_hat.shape[1] != cfg.prediction_length:
             y_hat = y_hat[:, : cfg.prediction_length, :]
 
@@ -203,11 +216,16 @@ def rollout_forecast(
         pred_scaled = y_hat.squeeze(0).detach().cpu().numpy()
         outputs_scaled.append(pred_scaled)
 
+        pred_raw = target_scaler.inverse_transform(pred_scaled)
+
         current = np.concatenate([current, pred_scaled], axis=0)[-cfg.context_length :]
+        current_raw = np.concatenate([current_raw, pred_raw], axis=0)[
+            -cfg.context_length :
+        ]
         remaining -= step
 
     pred_scaled_all = np.concatenate(outputs_scaled, axis=0)
-    pred_raw = scaler.inverse_transform(pred_scaled_all)
+    pred_raw = target_scaler.inverse_transform(pred_scaled_all)
     return pred_raw
 
 
@@ -446,9 +464,25 @@ def main() -> None:
     cfg.detrend_returns = bool(config.get("detrend_returns", cfg.detrend_returns))
     cfg.detrend_window = int(config.get("detrend_window", cfg.detrend_window))
     cfg.detrend_mode = str(config.get("detrend_mode", cfg.detrend_mode))
+    cfg.realized_vol_window = int(
+        config.get("realized_vol_window", cfg.realized_vol_window)
+    )
 
     scaler_state = torch.load(scaler_path, weights_only=False)
-    scaler = StandardScaler.from_state_dict(scaler_state)
+    if (
+        isinstance(scaler_state, dict)
+        and "targets" in scaler_state
+        and "exog" in scaler_state
+    ):
+        target_scaler = StandardScaler.from_state_dict(scaler_state["targets"])
+        exog_scaler = StandardScaler.from_state_dict(scaler_state["exog"])
+    else:
+        target_scaler = StandardScaler.from_state_dict(scaler_state)
+        exog_scaler = StandardScaler(
+            mean=np.array([0.0], dtype=np.float32),
+            std=np.array([1.0], dtype=np.float32),
+            eps=1e-6,
+        )
 
     raw = load_input_ohlcv(
         TICKER,
@@ -460,7 +494,9 @@ def main() -> None:
     if len(input_df) > PREDICTION_LENGTH:
         input_df = input_df.tail(PREDICTION_LENGTH).reset_index(drop=True)
 
-    past_values, last_close, last_date, past_sigma = build_context(raw, cfg, scaler)
+    past_values, past_raw, last_close, last_date, past_sigma = build_context(
+        raw, cfg, target_scaler, exog_scaler
+    )
 
     try:
         from tsfm_public.toolkit.get_model import get_model
@@ -495,8 +531,10 @@ def main() -> None:
     pred_features = rollout_forecast(
         model,
         past_values,
+        past_raw,
         cfg,
-        scaler,
+        target_scaler,
+        exog_scaler,
         horizon=int(PREDICTION_LENGTH),
         roll_step=int(ROLL_STEP),
         device=device,
