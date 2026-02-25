@@ -16,7 +16,6 @@ export const defaultParameters: MarketParameters = {
   inputFile: null,
 }
 
-<<<<<<< HEAD
 export interface OHLCVDataPoint {
   date: string
   open: number
@@ -75,6 +74,5 @@ export interface GeneratedData {
   drawdowns: DrawdownPoint[]
   stats: DataStatistics
 }
-=======
+
 export const REQUIRED_CSV_HEADERS = ["open", "high", "low", "close", "volume"]
->>>>>>> d394cc3 (Integrating FE and BE)
