@@ -70,19 +70,8 @@ services:
     depends_on:
       - db
 
-  api-gateway:
-    build: ./api-gateway
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./api-gateway/certs:/etc/nginx/certs:ro
-
-    restart: always
-    depends_on:
-      - api
-
 volumes:
   postgres_data:
   redis_data:
+
 
