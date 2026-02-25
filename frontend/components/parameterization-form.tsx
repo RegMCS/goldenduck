@@ -129,6 +129,12 @@ export function ParameterizationForm() {
   }
 
   const handleGenerate = async () => {
+    if (!parameters.inputFile) {
+      setGenerateError("Please upload a CSV file before generating.")
+      return
+    }
+    setGenerateError(null)
+
     setIsGenerating(true)
     setJobStatus(null)
     setDownloadUrl(null)
@@ -311,7 +317,10 @@ export function ParameterizationForm() {
               )}
 
               {fileError && (
-                <p className="text-sm text-destructive">{fileError}</p>
+                <div className="flex items-start gap-2 text-sm text-destructive">
+                  <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                  <span>{fileError}</span>
+                </div>
               )}
             </div>
           </CardContent>
