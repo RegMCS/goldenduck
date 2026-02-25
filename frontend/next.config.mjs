@@ -14,6 +14,7 @@ const nextConfig = {
   turbopack: {
     root: __dirname,
   },
+  devIndicators: false,
 }
 
 export default nextConfig
