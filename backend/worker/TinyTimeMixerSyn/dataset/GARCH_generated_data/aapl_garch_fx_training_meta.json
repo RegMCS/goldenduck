@@ -1,0 +1,26 @@
+{
+  "ticker": "AAPL",
+  "num_scenarios": 200,
+  "horizon": 2520,
+  "p": 1,
+  "q": 1,
+  "delta_predicted": 1.9568899395360269,
+  "theta_predicted": 0.01,
+  "delta_confidence": "high",
+  "fit_params": {
+    "omega": 0.08977543209463622,
+    "alpha": 0.10410821072105743,
+    "beta": 0.8784929064135013,
+    "converged": true,
+    "aic": 9357.664686517723,
+    "bic": 9380.981616667897,
+    "distribution": "t",
+    "nu": 4.17220204283823
+  },
+  "user_knobs": {
+    "desired_volatility": 2.0,
+    "desired_trend": -0.8,
+    "desired_fat_tails": 1.0,
+    "desired_momentum": 0.5
+  }
+}

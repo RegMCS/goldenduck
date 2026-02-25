@@ -1,0 +1,88 @@
+{
+  "model_id": "ibm-granite/granite-timeseries-ttm-r2",
+  "freq": "D",
+  "context_length": 180,
+  "prediction_length": 60,
+  "channels": [
+    "log_return",
+    "log_range",
+    "log_volume",
+    "realized_vol",
+    "volatility_mult",
+    "trend",
+    "fat_tails",
+    "momentum",
+    "horizon"
+  ],
+  "target_features": [
+    "log_return",
+    "log_range",
+    "log_volume"
+  ],
+  "exogenous_features": [
+    "realized_vol"
+  ],
+  "controls": [
+    "volatility_mult",
+    "trend",
+    "fat_tails",
+    "momentum",
+    "horizon"
+  ],
+  "control_ranges": {
+    "volatility_mult": [
+      0.5,
+      2.0
+    ],
+    "trend": [
+      -0.5,
+      0.5
+    ],
+    "fat_tails": [
+      0.5,
+      2.0
+    ],
+    "momentum": [
+      0.0,
+      1.0
+    ],
+    "horizon": [
+      60.0,
+      60.0
+    ]
+  },
+  "trend_sigma_scale": 0.1,
+  "tail_clip_z": 3.0,
+  "tail_range_coef": 0.25,
+  "vol_volume_coef": 0.3,
+  "train_noise_enabled": true,
+  "infer_noise_enabled": true,
+  "noise_df_min": 3.0,
+  "noise_df_max": 30.0,
+  "train_return_noise_scale": 0.15,
+  "train_range_noise_scale": 0.05,
+  "train_volume_noise_scale": 0.05,
+  "infer_return_noise_scale": 0.15,
+  "infer_range_noise_scale": 0.05,
+  "infer_volume_noise_scale": 0.05,
+  "detrend_returns": false,
+  "detrend_window": 20,
+  "detrend_mode": "rolling",
+  "realized_vol_window": 20,
+  "center_targets": false,
+  "center_exog": true,
+  "train_control_mode": "fixed",
+  "disable_horizon_control": true,
+  "train_years": [
+    2026,
+    2029,
+    2030,
+    2031,
+    2032,
+    2033,
+    2034,
+    2035
+  ],
+  "val_year": 2028,
+  "test_year": 2027
+}

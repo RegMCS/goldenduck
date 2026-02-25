@@ -1,0 +1,26 @@
+{
+  "ticker": "AMZN",
+  "num_scenarios": 200,
+  "horizon": 2520,
+  "p": 1,
+  "q": 1,
+  "delta_predicted": 1.8745043293066639,
+  "theta_predicted": 0.01,
+  "delta_confidence": "high",
+  "fit_params": {
+    "omega": 0.09871384235953683,
+    "alpha": 0.10435527343591261,
+    "beta": 0.878849760154683,
+    "converged": true,
+    "aic": 10029.242911846799,
+    "bic": 10052.559841996974,
+    "distribution": "t",
+    "nu": 4.801775341908275
+  },
+  "user_knobs": {
+    "desired_volatility": 2.0,
+    "desired_trend": -0.8,
+    "desired_fat_tails": 1.0,
+    "desired_momentum": 0.5
+  }
+}

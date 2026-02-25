@@ -1,0 +1,26 @@
+{
+  "ticker": "MA",
+  "num_scenarios": 200,
+  "horizon": 2520,
+  "p": 1,
+  "q": 1,
+  "delta_predicted": 1.918116897446383,
+  "theta_predicted": 0.01,
+  "delta_confidence": "high",
+  "fit_params": {
+    "omega": 0.07371523244667239,
+    "alpha": 0.12577904531600478,
+    "beta": 0.854348076532902,
+    "converged": true,
+    "aic": 8700.526506971246,
+    "bic": 8723.84343712142,
+    "distribution": "t",
+    "nu": 4.734511048806301
+  },
+  "user_knobs": {
+    "desired_volatility": 2.0,
+    "desired_trend": -0.8,
+    "desired_fat_tails": 1.0,
+    "desired_momentum": 0.5
+  }
+}

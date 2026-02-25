@@ -1,0 +1,26 @@
+{
+  "ticker": "NVDA",
+  "num_scenarios": 200,
+  "horizon": 2520,
+  "p": 1,
+  "q": 1,
+  "delta_predicted": 1.9289501804525022,
+  "theta_predicted": 0.01,
+  "delta_confidence": "high",
+  "fit_params": {
+    "omega": 0.23620626985035656,
+    "alpha": 0.078967065997541,
+    "beta": 0.9003667920882151,
+    "converged": true,
+    "aic": 12237.740528732273,
+    "bic": 12261.057458882447,
+    "distribution": "t",
+    "nu": 4.68949854085204
+  },
+  "user_knobs": {
+    "desired_volatility": 2.0,
+    "desired_trend": -0.8,
+    "desired_fat_tails": 1.0,
+    "desired_momentum": 0.5
+  }
+}

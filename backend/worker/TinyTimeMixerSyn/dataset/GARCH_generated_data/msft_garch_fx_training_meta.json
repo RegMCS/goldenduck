@@ -1,0 +1,26 @@
+{
+  "ticker": "MSFT",
+  "num_scenarios": 200,
+  "horizon": 2520,
+  "p": 1,
+  "q": 1,
+  "delta_predicted": 1.9439945089306518,
+  "theta_predicted": 0.01,
+  "delta_confidence": "high",
+  "fit_params": {
+    "omega": 0.0677904188145591,
+    "alpha": 0.11680781247411787,
+    "beta": 0.8686045788467671,
+    "converged": true,
+    "aic": 8963.635107360582,
+    "bic": 8986.952037510757,
+    "distribution": "t",
+    "nu": 4.693716573833304
+  },
+  "user_knobs": {
+    "desired_volatility": 2.0,
+    "desired_trend": -0.8,
+    "desired_fat_tails": 1.0,
+    "desired_momentum": 0.5
+  }
+}

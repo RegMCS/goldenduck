@@ -1,0 +1,26 @@
+{
+  "ticker": "CAT",
+  "num_scenarios": 200,
+  "horizon": 2520,
+  "p": 1,
+  "q": 1,
+  "delta_predicted": 1.940203677322573,
+  "theta_predicted": 0.01,
+  "delta_confidence": "high",
+  "fit_params": {
+    "omega": 0.18631019784051475,
+    "alpha": 0.07431377738451427,
+    "beta": 0.8786815978488237,
+    "converged": true,
+    "aic": 9877.812097255959,
+    "bic": 9901.129027406134,
+    "distribution": "t",
+    "nu": 4.258628686153237
+  },
+  "user_knobs": {
+    "desired_volatility": 2.0,
+    "desired_trend": -0.8,
+    "desired_fat_tails": 1.0,
+    "desired_momentum": 0.5
+  }
+}

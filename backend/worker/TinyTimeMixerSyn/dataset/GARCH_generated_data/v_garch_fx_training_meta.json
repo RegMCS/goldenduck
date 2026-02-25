@@ -1,0 +1,26 @@
+{
+  "ticker": "V",
+  "num_scenarios": 200,
+  "horizon": 2520,
+  "p": 1,
+  "q": 1,
+  "delta_predicted": 1.9462259091598864,
+  "theta_predicted": 0.01,
+  "delta_confidence": "high",
+  "fit_params": {
+    "omega": 0.06559636455154087,
+    "alpha": 0.1034210937158004,
+    "beta": 0.870593583949776,
+    "converged": true,
+    "aic": 8285.15846290688,
+    "bic": 8308.475393057055,
+    "distribution": "t",
+    "nu": 4.605812861461908
+  },
+  "user_knobs": {
+    "desired_volatility": 2.0,
+    "desired_trend": -0.8,
+    "desired_fat_tails": 1.0,
+    "desired_momentum": 0.5
+  }
+}

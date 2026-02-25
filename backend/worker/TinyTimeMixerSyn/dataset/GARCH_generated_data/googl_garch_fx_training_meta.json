@@ -1,0 +1,26 @@
+{
+  "ticker": "GOOGL",
+  "num_scenarios": 200,
+  "horizon": 2520,
+  "p": 1,
+  "q": 1,
+  "delta_predicted": 1.9206202338192468,
+  "theta_predicted": 0.01,
+  "delta_confidence": "high",
+  "fit_params": {
+    "omega": 0.026919139770203382,
+    "alpha": 0.062018736595662954,
+    "beta": 0.936196526726757,
+    "converged": true,
+    "aic": 9462.830194029244,
+    "bic": 9486.147124179419,
+    "distribution": "t",
+    "nu": 4.038591195308385
+  },
+  "user_knobs": {
+    "desired_volatility": 2.0,
+    "desired_trend": -0.8,
+    "desired_fat_tails": 1.0,
+    "desired_momentum": 0.5
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "ticker": "WMT",
+  "num_scenarios": 200,
+  "horizon": 2520,
+  "p": 1,
+  "q": 1,
+  "delta_predicted": 1.9169495301590964,
+  "theta_predicted": 0.01,
+  "delta_confidence": "high",
+  "fit_params": {
+    "omega": 0.2378825660926853,
+    "alpha": 0.15027739523574735,
+    "beta": 0.7122567084389602,
+    "converged": true,
+    "aic": 7666.658640941352,
+    "bic": 7689.975571091527,
+    "distribution": "t",
+    "nu": 3.850889415816395
+  },
+  "user_knobs": {
+    "desired_volatility": 2.0,
+    "desired_trend": -0.8,
+    "desired_fat_tails": 1.0,
+    "desired_momentum": 0.5
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "ticker": "JNJ",
+  "num_scenarios": 200,
+  "horizon": 2520,
+  "p": 1,
+  "q": 1,
+  "delta_predicted": 1.9251425029648712,
+  "theta_predicted": 0.01,
+  "delta_confidence": "high",
+  "fit_params": {
+    "omega": 0.06934432344787368,
+    "alpha": 0.07659662474773123,
+    "beta": 0.8677594859039057,
+    "converged": true,
+    "aic": 6993.0399871036325,
+    "bic": 7016.356917253807,
+    "distribution": "t",
+    "nu": 4.130750173066635
+  },
+  "user_knobs": {
+    "desired_volatility": 2.0,
+    "desired_trend": -0.8,
+    "desired_fat_tails": 1.0,
+    "desired_momentum": 0.5
+  }
+}

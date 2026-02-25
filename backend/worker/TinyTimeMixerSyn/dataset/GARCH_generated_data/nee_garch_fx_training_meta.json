@@ -1,0 +1,26 @@
+{
+  "ticker": "NEE",
+  "num_scenarios": 200,
+  "horizon": 2520,
+  "p": 1,
+  "q": 1,
+  "delta_predicted": 1.831286100341774,
+  "theta_predicted": 0.01,
+  "delta_confidence": "high",
+  "fit_params": {
+    "omega": 0.0396133859855115,
+    "alpha": 0.07717462803227981,
+    "beta": 0.9085311171527766,
+    "converged": true,
+    "aic": 8492.70898965573,
+    "bic": 8516.025919805905,
+    "distribution": "t",
+    "nu": 4.706156534691295
+  },
+  "user_knobs": {
+    "desired_volatility": 2.0,
+    "desired_trend": -0.8,
+    "desired_fat_tails": 1.0,
+    "desired_momentum": 0.5
+  }
+}

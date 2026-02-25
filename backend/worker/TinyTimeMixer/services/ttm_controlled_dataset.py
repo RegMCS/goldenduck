@@ -253,9 +253,13 @@ def fit_feature_scaler(series_list: Sequence[TimeSeriesBundle]) -> StandardScale
 
 def fit_feature_scalers(
     series_list: Sequence[TimeSeriesBundle],
+    *,
+    center_targets: bool = True,
+    center_exog: bool = True,
 ) -> Tuple[StandardScaler, StandardScaler]:
     """
     Fit separate scalers for target and exogenous features.
+    Set center_targets=False to preserve return drift (no mean subtraction).
     """
     if not series_list:
         raise ValueError("No series to fit scalers.")
@@ -269,6 +273,11 @@ def fit_feature_scalers(
     exog_mean = all_exog.mean(axis=0)
     exog_std = all_exog.std(axis=0)
     exog_std = np.where(exog_std < 1e-8, 1.0, exog_std)
+
+    if not center_targets:
+        targ_mean = np.zeros_like(targ_mean)
+    if not center_exog:
+        exog_mean = np.zeros_like(exog_mean)
 
     return (
         StandardScaler(mean=targ_mean, std=targ_std, eps=1e-6),
@@ -432,6 +441,8 @@ class ControlledWindowDataset(Dataset):
         control_mode: str = "random",
         fixed_controls: Optional[ControlValues] = None,
         target_date_range: Optional[Tuple[pd.Timestamp, pd.Timestamp]] = None,
+        allowed_years: Optional[Sequence[int]] = None,
+        excluded_years: Optional[Sequence[int]] = None,
         seed: int = 42,
     ) -> None:
         self.series_list = list(series_list)
@@ -441,6 +452,12 @@ class ControlledWindowDataset(Dataset):
         self.control_mode = control_mode
         self.fixed_controls = fixed_controls
         self.target_date_range = target_date_range
+        self.allowed_years = (
+            set(int(y) for y in allowed_years) if allowed_years is not None else None
+        )
+        self.excluded_years = (
+            set(int(y) for y in excluded_years) if excluded_years is not None else None
+        )
         self.rng = np.random.default_rng(seed)
 
         self._index: List[Tuple[int, int]] = []
@@ -450,15 +467,39 @@ class ControlledWindowDataset(Dataset):
             if max_start <= 0:
                 continue
             for start in range(max_start + 1):
-                if self.target_date_range is not None:
-                    mid = start + cfg.context_length
-                    end = mid + cfg.prediction_length
+                mid = start + cfg.context_length
+                end = mid + cfg.prediction_length
+
+                end_date = None
+                if (
+                    self.target_date_range is not None
+                    or self.allowed_years is not None
+                    or self.excluded_years is not None
+                ):
                     end_date = pd.to_datetime(series.dates[end - 1])
+
+                if self.target_date_range is not None:
                     if (
                         end_date < self.target_date_range[0]
                         or end_date > self.target_date_range[1]
                     ):
                         continue
+
+                if self.allowed_years is not None or self.excluded_years is not None:
+                    start_year = int(pd.to_datetime(series.dates[start]).year)
+                    end_year = int(end_date.year)
+                    min_year = min(start_year, end_year)
+                    max_year = max(start_year, end_year)
+
+                    if self.allowed_years is not None:
+                        allowed = self.allowed_years
+                        if any(y not in allowed for y in range(min_year, max_year + 1)):
+                            continue
+
+                    if self.excluded_years is not None:
+                        excluded = self.excluded_years
+                        if any(y in excluded for y in range(min_year, max_year + 1)):
+                            continue
                 self._index.append((s_idx, start))
 
         if not self._index:

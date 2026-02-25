@@ -1,0 +1,26 @@
+{
+  "ticker": "JPM",
+  "num_scenarios": 200,
+  "horizon": 2520,
+  "p": 1,
+  "q": 1,
+  "delta_predicted": 1.9315612297656621,
+  "theta_predicted": 0.01,
+  "delta_confidence": "high",
+  "fit_params": {
+    "omega": 0.1600922077578199,
+    "alpha": 0.14227297127892294,
+    "beta": 0.8045122289609696,
+    "converged": true,
+    "aic": 8796.887853992564,
+    "bic": 8820.20478414274,
+    "distribution": "t",
+    "nu": 4.392968905016335
+  },
+  "user_knobs": {
+    "desired_volatility": 2.0,
+    "desired_trend": -0.8,
+    "desired_fat_tails": 1.0,
+    "desired_momentum": 0.5
+  }
+}

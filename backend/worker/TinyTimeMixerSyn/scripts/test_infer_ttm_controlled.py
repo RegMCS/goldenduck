@@ -66,6 +66,7 @@ TICKER = "AAPL"
 INPUT_START = "2025-01-01"
 INPUT_END = "2025-12-29"
 INPUT_CSV = None  # Optional Path to OHLCV CSV used for inference
+SCENARIO_ID = 1  # Only used if INPUT_CSV has scenario_id; set to None to disable
 
 PREDICTION_LENGTH = 120
 ROLL_STEP = 1
@@ -85,11 +86,11 @@ SYN_BASE_DIR = (
 )
 OUTPUT_DIR = SYN_BASE_DIR / "outputs" / "ttm_controlled_test"
 OUTPUT_CSV = OUTPUT_DIR / f"{TICKER.lower()}_synthetic.csv"
-CHART_DIR = OUTPUT_DIR / "charts"
+CHART_DIR = SYN_BASE_DIR / "outputs" / "charts"
 METRICS_CSV = OUTPUT_DIR / f"{TICKER.lower()}_metrics.csv"
 VALIDATION_CSV = OUTPUT_DIR / f"{TICKER.lower()}_validation.csv"
 COMBINED_CHART = CHART_DIR / "all_charts.png"
-QUALITY_CHART_DIR = SYN_BASE_DIR / "outputs" / "charts"
+QUALITY_CHART_DIR = CHART_DIR
 QUALITY_SCORE_CHART = QUALITY_CHART_DIR / "synthetic_quality_score.png"
 E2E_QUALITY_CHART = QUALITY_CHART_DIR / "end_to_end_quality.png"
 ANNUALIZE_METRICS = True
@@ -157,6 +158,8 @@ def load_input_ohlcv(
         raise ValueError(f"Input CSV missing columns {missing}.")
 
     df["date"] = pd.to_datetime(df["date"])
+    if "scenario_id" in df.columns and SCENARIO_ID is not None:
+        df = df[df["scenario_id"] == SCENARIO_ID].reset_index(drop=True)
     df = df.sort_values("date").reset_index(drop=True)
     df = df.dropna(subset=required)
     return df
@@ -840,7 +843,7 @@ def main() -> None:
     CHART_DIR.mkdir(parents=True, exist_ok=True)
     QUALITY_CHART_DIR.mkdir(parents=True, exist_ok=True)
 
-    default_dir = Path(__file__).resolve().parents[1] / "outputs" / "ttm_controlled"
+    default_dir = BASE_DIR / "model" / "ttm_controlled"
     config_path = default_dir / "ttm_controlled_config.json"
     weights_path = default_dir / "ttm_controlled_weights.pt"
     scaler_path = default_dir / "ttm_controlled_scaler.pt"
@@ -851,7 +854,7 @@ def main() -> None:
         prediction_length=int(config["prediction_length"]),
     )
     cfg.control_ranges = ControlRanges(**config["control_ranges"])
-    cfg.detrend_returns = bool(config.get("detrend_returns", cfg.detrend_returns))
+    cfg.detrend_returns = False
     cfg.detrend_window = int(config.get("detrend_window", cfg.detrend_window))
     cfg.detrend_mode = str(config.get("detrend_mode", cfg.detrend_mode))
     cfg.realized_vol_window = int(

@@ -1,0 +1,26 @@
+{
+  "ticker": "META",
+  "num_scenarios": 200,
+  "horizon": 2520,
+  "p": 1,
+  "q": 1,
+  "delta_predicted": 1.779871667204485,
+  "theta_predicted": 0.01,
+  "delta_confidence": "high",
+  "fit_params": {
+    "omega": 0.04322768056053557,
+    "alpha": 0.037502323105170474,
+    "beta": 0.955546726825176,
+    "converged": true,
+    "aic": 10430.940687767059,
+    "bic": 10454.257617917234,
+    "distribution": "t",
+    "nu": 3.5789347024724933
+  },
+  "user_knobs": {
+    "desired_volatility": 2.0,
+    "desired_trend": -0.8,
+    "desired_fat_tails": 1.0,
+    "desired_momentum": 0.5
+  }
+}

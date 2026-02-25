@@ -1,0 +1,26 @@
+{
+  "ticker": "XOM",
+  "num_scenarios": 200,
+  "horizon": 2520,
+  "p": 1,
+  "q": 1,
+  "delta_predicted": 1.9584988546088085,
+  "theta_predicted": 0.01,
+  "delta_confidence": "high",
+  "fit_params": {
+    "omega": 0.009373741768893412,
+    "alpha": 0.06286115470279201,
+    "beta": 0.9369435048043845,
+    "converged": true,
+    "aic": 8992.780131296557,
+    "bic": 9016.097061446731,
+    "distribution": "t",
+    "nu": 7.508825959604184
+  },
+  "user_knobs": {
+    "desired_volatility": 2.0,
+    "desired_trend": -0.8,
+    "desired_fat_tails": 1.0,
+    "desired_momentum": 0.5
+  }
+}
