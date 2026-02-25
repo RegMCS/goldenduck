@@ -93,3 +93,4 @@ volumes:
 networks:
   goldenduck-network:
     name: goldenduck-network
+

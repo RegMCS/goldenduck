@@ -12,6 +12,9 @@ venv/
 
 # Docker
 .docker/
+*.prod.*
+*.prod
+*.sh
 
 # IDEs
 .vscode/
