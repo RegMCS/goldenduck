@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useState, useRef } from "react"
+import { useRouter } from "next/navigation"
 import { Upload, X, FileText, Sparkles, RotateCcw, Download, AlertCircle, CheckCircle2, Loader2 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -8,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   type MarketParameters,
+  type GeneratedData,
   defaultParameters,
   REQUIRED_CSV_HEADERS,
 } from "@/lib/types"
@@ -64,7 +66,8 @@ function ParameterField({ label, description, value, onChange, min, max, step }:
   )
 }
 
-export function ParameterizationForm() {
+export function ParameterizationForm({ onDataReady }: { onDataReady?: (data: GeneratedData) => void }) {
+  const router = useRouter()
   const [parameters, setParameters] = useState<MarketParameters>(defaultParameters)
   const [isGenerating, setIsGenerating] = useState(false)
   const [fileError, setFileError] = useState<string | null>(null)
@@ -175,6 +178,9 @@ export function ParameterizationForm() {
             clearInterval(pollIntervalRef.current!)
             setDownloadUrl(`${API_BASE}/api/download/user/${userId}/${data.job_id}`)
             setIsGenerating(false)
+            if (statusData.chart_data && onDataReady) {
+              onDataReady(statusData.chart_data as GeneratedData)
+            }
           } else if (statusData.status === "failed") {
             clearInterval(pollIntervalRef.current!)
             setGenerateError(statusData.error || "Job failed")

@@ -16,4 +16,63 @@ export const defaultParameters: MarketParameters = {
   inputFile: null,
 }
 
+export interface OHLCVDataPoint {
+  date: string
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+}
+
+export interface ReturnPoint {
+  date: string
+  timestamp: number
+  historicalReturn: number
+  syntheticReturn: number
+  historicalCumReturn: number
+  syntheticCumReturn: number
+}
+
+export interface DrawdownPoint {
+  date: string
+  timestamp: number
+  historicalDrawdown: number
+  syntheticDrawdown: number
+}
+
+export interface TimeSeriesPoint {
+  date: string
+  timestamp: number
+  historical: number
+  synthetic: number
+}
+
+export interface DataStatistics {
+  historical: SeriesStats
+  synthetic: SeriesStats
+}
+
+export interface SeriesStats {
+  mean: number
+  std: number
+  skewness: number
+  kurtosis: number
+  maxDrawdown: number
+  sharpe: number
+  annualizedReturn: number
+  annualizedVol: number
+  totalReturn: number
+  numDataPoints: number
+}
+
+export interface GeneratedData {
+  historical: OHLCVDataPoint[]
+  synthetic: OHLCVDataPoint[]
+  timeSeries: TimeSeriesPoint[]
+  returns: ReturnPoint[]
+  drawdowns: DrawdownPoint[]
+  stats: DataStatistics
+}
+
 export const REQUIRED_CSV_HEADERS = ["open", "high", "low", "close", "volume"]
