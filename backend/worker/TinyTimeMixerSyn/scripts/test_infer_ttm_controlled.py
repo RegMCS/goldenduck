@@ -31,6 +31,7 @@ from backend.worker.TinyTimeMixer.services.ttm_controlled_dataset import (
     ControlRanges,
     ControlValues,
     EXOG_FEATURES,
+    TARGET_FEATURES,
     StandardScaler,
     TTMControlledConfig,
     apply_inference_noise,
@@ -180,11 +181,13 @@ def build_context(
         )
     feats = feats.iloc[-cfg.context_length :].copy()
 
-    past_raw = feats[["log_return", "log_range", "log_volume"]].values.astype(
-        np.float32
-    )
+    past_raw = feats[TARGET_FEATURES].values.astype(np.float32)
     past_exog = feats[EXOG_FEATURES].values.astype(np.float32)
-    past_sigma = float(np.std(past_raw[:, 0]) + 1e-8)
+    if TARGET_FEATURES == ["log_price"]:
+        past_returns = np.diff(past_raw[:, 0])
+        past_sigma = float(np.std(past_returns) + 1e-8)
+    else:
+        past_sigma = float(np.std(past_raw[:, 0]) + 1e-8)
     past_scaled = target_scaler.transform(past_raw)
     past_exog_scaled = exog_scaler.transform(past_exog)
 
@@ -222,7 +225,11 @@ def rollout_forecast(
         step = min(roll_step, remaining)
         past_ctrl = np.repeat(ctrl_scaled[None, :], cfg.context_length, axis=0)
         # Compute realized vol from current raw returns (no leakage)
-        returns_series = pd.Series(current_raw[:, 0])
+        if current_raw.shape[1] == 1 and TARGET_FEATURES == ["log_price"]:
+            lp = current_raw[:, 0]
+            returns_series = pd.Series(np.diff(np.concatenate([[lp[0]], lp])))
+        else:
+            returns_series = pd.Series(current_raw[:, 0])
         vol_window = int(cfg.realized_vol_window)
         realized_vol = returns_series.rolling(vol_window, min_periods=2).std().shift(1)
         realized_vol = realized_vol.bfill().fillna(0.0).values.astype(np.float32)
@@ -749,6 +756,16 @@ def plot_nonlog_feature(
     title: str,
     y_label: str,
 ) -> None:
+    if input_feats.shape[1] == 1:
+        input_series = input_feats[:, 0]
+        pred_series = pred_feats[:, 0]
+        ax.plot(np.arange(len(input_series)), input_series, label="Input")
+        ax.plot(np.arange(len(pred_series)), pred_series, label="Pred")
+        ax.set_title(title)
+        ax.set_ylabel(y_label)
+        ax.legend(fontsize=8)
+        return
+
     x_in = np.arange(len(input_feats))
     x_pred = np.arange(len(pred_feats))
 
@@ -811,24 +828,40 @@ def plot_all_charts(
     ax.legend()
 
     ax = axes[1, 1]
-    plot_nonlog_feature(
-        input_feats,
-        pred_feats,
-        ax=ax,
-        idx=0,
-        title="Returns (Input vs Synthetic)",
-        y_label="Return",
-    )
+    if input_feats.shape[1] == 1:
+        input_returns = np.diff(np.concatenate([[input_feats[0, 0]], input_feats[:, 0]]))
+        pred_returns = np.diff(np.concatenate([[pred_feats[0, 0]], pred_feats[:, 0]]))
+        ax.plot(np.arange(len(input_returns)), input_returns, label="Input")
+        ax.plot(np.arange(len(pred_returns)), pred_returns, label="Pred")
+        ax.set_title("Returns (Input vs Synthetic)")
+        ax.set_ylabel("Return")
+        ax.legend(fontsize=8)
+    else:
+        plot_nonlog_feature(
+            input_feats,
+            pred_feats,
+            ax=ax,
+            idx=0,
+            title="Returns (Input vs Synthetic)",
+            y_label="Return",
+        )
 
     ax = axes[2, 0]
-    plot_nonlog_feature(
-        input_feats,
-        pred_feats,
-        ax=ax,
-        idx=1,
-        title="Range (Input vs Synthetic)",
-        y_label="High/Low Ratio",
-    )
+    if input_feats.shape[1] == 1:
+        ax.plot(np.arange(len(input_feats)), input_feats[:, 0], label="Input")
+        ax.plot(np.arange(len(pred_feats)), pred_feats[:, 0], label="Pred")
+        ax.set_title("Log Price (Input vs Synthetic)")
+        ax.set_ylabel("Log Price")
+        ax.legend(fontsize=8)
+    else:
+        plot_nonlog_feature(
+            input_feats,
+            pred_feats,
+            ax=ax,
+            idx=1,
+            title="Range (Input vs Synthetic)",
+            y_label="High/Low Ratio",
+        )
 
     ax = axes[2, 1]
     plot_return_distribution(ax, historical_returns, synthetic_returns)
@@ -944,11 +977,18 @@ def main() -> None:
     )
 
     feats_for_compare = build_base_features(raw, cfg)
-    input_feats = (
-        feats_for_compare[["log_return", "log_range", "log_volume"]]
-        .tail(len(pred_features))
-        .values.astype(np.float32)
-    )
+    if TARGET_FEATURES == ["log_price"]:
+        input_feats = (
+            feats_for_compare[["log_price"]]
+            .tail(len(pred_features))
+            .values.astype(np.float32)
+        )
+    else:
+        input_feats = (
+            feats_for_compare[["log_return", "log_range", "log_volume"]]
+            .tail(len(pred_features))
+            .values.astype(np.float32)
+        )
 
     synth_df = reconstruct_ohlcv_from_features(last_close, pred_features, last_date)
     if not input_df.empty and not synth_df.empty:

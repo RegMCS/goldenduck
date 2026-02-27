@@ -4,9 +4,7 @@
   "context_length": 180,
   "prediction_length": 60,
   "channels": [
-    "log_return",
-    "log_range",
-    "log_volume",
+    "log_price",
     "realized_vol",
     "volatility_mult",
     "trend",
@@ -15,9 +13,7 @@
     "horizon"
   ],
   "target_features": [
-    "log_return",
-    "log_range",
-    "log_volume"
+    "log_price"
   ],
   "exogenous_features": [
     "realized_vol"

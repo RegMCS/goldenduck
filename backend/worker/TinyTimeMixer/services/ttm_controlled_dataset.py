@@ -25,7 +25,7 @@ import torch
 from torch.utils.data import Dataset
 import yfinance as yf
 
-TARGET_FEATURES = ["log_return", "log_range", "log_volume"]
+TARGET_FEATURES = ["log_price"]
 EXOG_FEATURES = ["realized_vol"]
 CONTROL_NAMES = [
     "volatility_mult",
@@ -199,8 +199,7 @@ def build_base_features(
 ) -> pd.DataFrame:
     out = df.copy()
     out["log_return"] = np.log(out["Close"] / out["Close"].shift(1))
-    out["log_range"] = np.log(out["High"] / out["Low"])
-    out["log_volume"] = np.log1p(out["Volume"].astype(float))
+    out["log_price"] = np.log(out["Close"])
 
     if cfg is not None and cfg.detrend_returns:
         if cfg.detrend_mode == "rolling":
@@ -334,6 +333,20 @@ def _apply_feature_noise(
     rng: np.random.Generator,
     mode: str,
 ) -> np.ndarray:
+    if features.shape[1] == 1:
+        df = _fat_tail_df(
+            fat_tails, cfg.control_ranges, cfg.noise_df_min, cfg.noise_df_max
+        )
+        eps = rng.standard_t(df, size=(features.shape[0], 1)).astype(np.float32)
+        r_scale = (
+            cfg.train_return_noise_scale * sigma
+            if mode == "train"
+            else cfg.infer_return_noise_scale * sigma
+        )
+        out = features.copy()
+        out[:, 0] = out[:, 0] + eps[:, 0] * r_scale
+        return out
+
     df = _fat_tail_df(fat_tails, cfg.control_ranges, cfg.noise_df_min, cfg.noise_df_max)
     eps = rng.standard_t(df, size=(features.shape[0], 3)).astype(np.float32)
 
@@ -359,15 +372,56 @@ def apply_controls_to_future(
     controls: ControlValues,
     cfg: TTMControlledConfig,
     rng: Optional[np.random.Generator] = None,
+    past_last_log_price: Optional[float] = None,
 ) -> np.ndarray:
     out = future_features.copy()
+    if rng is None:
+        rng = np.random.default_rng()
+
+    if future_features.shape[1] == 1:
+        if past_last_log_price is None:
+            raise ValueError("past_last_log_price is required for log_price targets.")
+        last_log_price = float(past_last_log_price)
+        raw_returns = np.diff(
+            np.concatenate([[last_log_price], future_features[:, 0]])
+        )
+        sigma = float(np.std(past_returns) + 1e-8)
+
+        r = raw_returns * controls.volatility_mult
+        r = r + controls.trend * cfg.trend_sigma_scale * sigma
+
+        if controls.momentum > 0.0 and len(r) > 0:
+            r_mom = r.copy()
+            prev = float(past_returns[-1]) if len(past_returns) > 0 else 0.0
+            for i in range(len(r_mom)):
+                r_mom[i] = (1.0 - controls.momentum) * r[i] + controls.momentum * prev
+                prev = r_mom[i]
+            r = r_mom
+
+        tail_strength = controls.fat_tails - 1.0
+        if abs(tail_strength) > 1e-6 and sigma > 0:
+            z = r / sigma
+            r = r * (1.0 + tail_strength * np.clip(np.abs(z), 0.0, cfg.tail_clip_z))
+
+        if cfg.train_noise_enabled:
+            r = _apply_feature_noise(
+                r.reshape(-1, 1),
+                sigma=sigma,
+                fat_tails=controls.fat_tails,
+                cfg=cfg,
+                rng=rng,
+                mode="train",
+            ).reshape(-1)
+
+        log_price = last_log_price + np.cumsum(r)
+        out[:, 0] = log_price
+        return out
+
     r = out[:, 0]
     log_range = out[:, 1]
     log_volume = out[:, 2]
 
     sigma = float(np.std(past_returns) + 1e-8)
-    if rng is None:
-        rng = np.random.default_rng()
 
     r = r * controls.volatility_mult
     r = r + controls.trend * cfg.trend_sigma_scale * sigma
@@ -526,13 +580,24 @@ class ControlledWindowDataset(Dataset):
         past_exog = series.exog_features[start:mid].copy()
 
         controls = self._get_controls()
-        future_raw = apply_controls_to_future(
-            future_raw,
-            past_raw[:, 0],
-            controls,
-            self.cfg,
-            rng=self.rng,
-        )
+        if future_raw.shape[1] == 1:
+            past_returns = np.diff(past_raw[:, 0])
+            future_raw = apply_controls_to_future(
+                future_raw,
+                past_returns,
+                controls,
+                self.cfg,
+                rng=self.rng,
+                past_last_log_price=float(past_raw[-1, 0]),
+            )
+        else:
+            future_raw = apply_controls_to_future(
+                future_raw,
+                past_raw[:, 0],
+                controls,
+                self.cfg,
+                rng=self.rng,
+            )
 
         past_scaled = self.target_scaler.transform(past_raw)
         future_scaled = self.target_scaler.transform(future_raw)
@@ -557,6 +622,29 @@ def reconstruct_ohlcv_from_features(
     pred_features: np.ndarray,
     start_date: datetime,
 ) -> pd.DataFrame:
+    if pred_features.shape[1] == 1:
+        dates = pd.bdate_range(start=pd.Timestamp(start_date) + pd.offsets.BDay(1), periods=len(pred_features))
+        log_price = pred_features[:, 0].astype(float)
+        close = np.exp(log_price)
+        rows = []
+        prev_close = float(last_close)
+        for i, c in enumerate(close):
+            open_ = prev_close
+            high = max(open_, float(c))
+            low = min(open_, float(c))
+            rows.append(
+                {
+                    "Date": dates[i],
+                    "Open": open_,
+                    "High": high,
+                    "Low": low,
+                    "Close": float(c),
+                    "Volume": 0.0,
+                }
+            )
+            prev_close = float(c)
+        return pd.DataFrame(rows)
+
     start = pd.Timestamp(start_date) + pd.offsets.BDay(1)
     dates = pd.bdate_range(start=start, periods=len(pred_features))
 

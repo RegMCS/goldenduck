@@ -99,7 +99,7 @@ WEIGHT_DECAY = 1e-2
 GRAD_CLIP_NORM = 1.0
 LOG_EVERY_N_BATCHES = 200
 
-# Loss config (Student-t NLL for all channels)
+# Loss config (Student-t NLL for returns; MSE for log_price)
 RETURN_DF = 5.0
 RETURN_SCALE = 1.0
 RETURN_LOSS_WEIGHT = 1.0
@@ -650,7 +650,10 @@ def main() -> None:
         lr=LR,
         weight_decay=WEIGHT_DECAY,
     )
-    loss_fn = StudentTLoss(df=RETURN_DF, scale=RETURN_SCALE)
+    if TARGET_FEATURES == ["log_price"]:
+        loss_fn = torch.nn.MSELoss(reduction="mean")
+    else:
+        loss_fn = StudentTLoss(df=RETURN_DF, scale=RETURN_SCALE)
 
     best_val = float("inf")
     best_state: Optional[Dict[str, torch.Tensor]] = None

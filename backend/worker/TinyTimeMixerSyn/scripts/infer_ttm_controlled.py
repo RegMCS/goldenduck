@@ -142,7 +142,11 @@ def build_context(
 
     past_raw = feats[TARGET_FEATURES].values.astype(np.float32)
     past_exog = feats[EXOG_FEATURES].values.astype(np.float32)
-    past_sigma = float(np.std(past_raw[:, 0]) + 1e-8)
+    if TARGET_FEATURES == ["log_price"]:
+        past_returns = np.diff(past_raw[:, 0])
+        past_sigma = float(np.std(past_returns) + 1e-8)
+    else:
+        past_sigma = float(np.std(past_raw[:, 0]) + 1e-8)
     past_scaled = target_scaler.transform(past_raw)
     past_exog_scaled = exog_scaler.transform(past_exog)
 
@@ -182,7 +186,11 @@ def rollout_forecast(
     while remaining > 0:
         step = min(roll_step, remaining)
         past_ctrl = np.repeat(ctrl_scaled[None, :], cfg.context_length, axis=0)
-        returns_series = pd.Series(current_raw[:, 0])
+        if current_raw.shape[1] == 1 and TARGET_FEATURES == ["log_price"]:
+            lp = current_raw[:, 0]
+            returns_series = pd.Series(np.diff(np.concatenate([[lp[0]], lp])))
+        else:
+            returns_series = pd.Series(current_raw[:, 0])
         vol_window = int(cfg.realized_vol_window)
         realized_vol = returns_series.rolling(vol_window, min_periods=2).std().shift(1)
         realized_vol = realized_vol.bfill().fillna(0.0).values.astype(np.float32)
