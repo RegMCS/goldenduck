@@ -50,7 +50,9 @@ def _generate_payload():
 def test_generate_creates_db_job_and_redis_queue_entry():
     user_id = str(uuid.uuid4())
     with patch.object(job_store, "enqueue", wraps=job_store.enqueue) as enqueue_spy:
-        response = client.post(f"/api/generate/user/{user_id}", json=_generate_payload())
+        response = client.post(
+            f"/api/generate/user/{user_id}", json=_generate_payload()
+        )
 
     assert response.status_code == 200
     body = response.json()
