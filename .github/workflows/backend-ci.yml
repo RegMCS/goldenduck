@@ -4,6 +4,9 @@ on:
   push:
     paths:
       - 'backend/**'
+  pull_request:
+    paths:
+      - 'backend/**'
 
 jobs:
   build-and-test:
@@ -19,7 +22,7 @@ jobs:
       AWS_SECRET_ACCESS_KEY: test_secret
       AWS_DEFAULT_REGION: us-east-1
       S3_BUCKET_NAME: test_bucket
-      COVERAGE_FAIL_UNDER: "25"
+      COVERAGE_FAIL_UNDER: "70"
 
     steps:
       - name: Checkout code
