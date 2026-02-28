@@ -196,7 +196,8 @@ while True:
 
         params = job["parameters"]
 
-        ticker = params["ticker"]
+        ticker = params.get("ticker")
+        csv_data = params.get("csv_data")
         horizon = int(params.get("horizon", 252))
 
         # Use fixed defaults for GARCH fitting (not exposed to user)
@@ -213,23 +214,61 @@ while True:
             "desired_momentum": float(params.get("desired_momentum", 0.5)),
         }
 
-        logger.info(
-            "Running GARCH for %s (p=%s, q=%s, scenarios=%s, horizon=%s)",
-            ticker,
-            p,
-            q,
-            num_scenarios,
-            horizon,
-        )
-        data = yf.download(
-            ticker,
-            period="2y",
-            progress=False,
-            threads=False,
-        )
+        # Load data from CSV or Yahoo Finance
+        if csv_data:
+            logger.info(
+                "Running GARCH with uploaded CSV (p=%s, q=%s, scenarios=%s, horizon=%s)",
+                p,
+                q,
+                num_scenarios,
+                horizon,
+            )
+            # Parse CSV data
+            from io import StringIO
+            csv_buffer = StringIO(csv_data)
+            data = pd.read_csv(csv_buffer)
+            
+            # Validate required columns (case-insensitive)
+            required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+            
+            # Normalize column names to title case
+            data.columns = [col.strip().title() for col in data.columns]
+            
+            # Check for required columns
+            missing_cols = [col for col in required_cols if col not in data.columns]
+            if missing_cols:
+                raise ValueError(f"CSV missing required columns: {missing_cols}. Found columns: {list(data.columns)}")
+            
+            # Keep only the required OHLCV columns
+            data = data[required_cols]
+            
+            # Create a date index if not present (for uploaded CSV without dates)
+            # Use recent dates working backwards from today
+            end_date = pd.Timestamp.today()
+            date_range = pd.date_range(end=end_date, periods=len(data), freq='D')
+            data.index = date_range
+            
+            logger.info(f"Loaded {len(data)} rows from uploaded CSV with synthetic date range")
+        elif ticker:
+            logger.info(
+                "Running GARCH for %s (p=%s, q=%s, scenarios=%s, horizon=%s)",
+                ticker,
+                p,
+                q,
+                num_scenarios,
+                horizon,
+            )
+            data = yf.download(
+                ticker,
+                period="2y",
+                progress=False,
+                threads=False,
+            )
 
-        if data.empty:
-            raise ValueError(f"No market data returned for ticker {ticker}")
+            if data.empty:
+                raise ValueError(f"No market data returned for ticker {ticker}")
+        else:
+            raise ValueError("Either ticker or csv_data must be provided")
 
         garch = GARCHService()
 

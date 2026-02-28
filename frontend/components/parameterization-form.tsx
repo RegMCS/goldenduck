@@ -145,11 +145,19 @@ export function ParameterizationForm({ onDataReady }: { onDataReady?: (data: Gen
     const userId = getUserId()
 
     try {
+      // Read CSV file content
+      const csvContent = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = (e) => resolve(e.target?.result as string)
+        reader.onerror = (e) => reject(e)
+        reader.readAsText(parameters.inputFile!)
+      })
+
       const res = await fetch(`${API_BASE}/api/generate/user/${userId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ticker: DEFAULT_TICKER,
+          csv_data: csvContent,
           horizon: parameters.timeHorizon,
           desired_volatility: parameters.volatility,
           desired_trend: parameters.trend,
