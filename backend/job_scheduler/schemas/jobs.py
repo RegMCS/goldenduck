@@ -14,14 +14,14 @@ class GenerateRequest(BaseModel):
     desired_trend: float = Field(0.0, ge=-1.0, le=1.0)
     desired_fat_tails: float = Field(1.0, ge=0.5, le=2.0)
     desired_momentum: float = Field(0.5, ge=0.0, le=1.0)
-    
-    @model_validator(mode='after')
+
+    @model_validator(mode="after")
     def check_data_source(self):
         # Ensure either ticker or csv_data is provided (but not both or neither)
         if not self.ticker and not self.csv_data:
-            raise ValueError('Either ticker or csv_data must be provided')
+            raise ValueError("Either ticker or csv_data must be provided")
         if self.ticker and self.csv_data:
-            raise ValueError('Provide either ticker or csv_data, not both')
+            raise ValueError("Provide either ticker or csv_data, not both")
         return self
 
 

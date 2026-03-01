@@ -251,8 +251,8 @@ export function ParameterizationForm({ onDataReady }: { onDataReady?: (data: Gen
               description="Probability of extreme price movements"
               value={parameters.fatTails}
               onChange={(v) => updateParameter("fatTails", v)}
-              min={0.8}
-              max={1.5}
+              min={0.5}
+              max={2.0}
               step={0.01}
             />
             <ParameterField
@@ -260,7 +260,7 @@ export function ParameterizationForm({ onDataReady }: { onDataReady?: (data: Gen
               description="Volatility momentum / persistence"
               value={parameters.momentum}
               onChange={(v) => updateParameter("momentum", v)}
-              min={0.2}
+              min={0.0}
               max={1.0}
               step={0.01}
             />

@@ -1,8 +1,8 @@
 export interface MarketParameters {
-  volatility: number // 0.0 to 1.0
-  trend: number // -1 to +1
-  fatTails: number // 0.0 to 1.0
-  momentum: number // 0 to 1
+  volatility: number // 0.5 to 2.0 (multiplier)
+  trend: number // -1.0 to +1.0 (directional)
+  fatTails: number // 0.5 to 2.0 (multiplier)
+  momentum: number // 0.0 to 1.0 (probability-like)
   timeHorizon: number // 60 to 500 days
   inputFile: File | null // CSV with OHLCV headers
 }

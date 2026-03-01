@@ -36,21 +36,57 @@ logging.basicConfig(
 )
 logger = logging.getLogger("garch-worker")
 
+# Cache the risk-free rate so we only fetch it once per worker process
+_cached_rf_rate: float | None = None
+
+
+def _get_risk_free_rate() -> float:
+    """
+    Fetch the annualised risk-free rate from the 13-week US T-bill yield (^IRX).
+    Falls back to 4% if the fetch fails. Result is cached for the process lifetime.
+    """
+    global _cached_rf_rate
+    if _cached_rf_rate is not None:
+        return _cached_rf_rate
+    try:
+        tbill = yf.download("^IRX", period="5d", progress=False, threads=False)
+        if not tbill.empty:
+            rf = float(tbill["Close"].iloc[-1]) / 100  # ^IRX is quoted in percent
+            _cached_rf_rate = rf
+            logger.info(f"Risk-free rate fetched from ^IRX: {rf:.4%}")
+            return rf
+    except Exception as e:
+        logger.warning(
+            f"Could not fetch risk-free rate from ^IRX: {e}. Using 4% fallback."
+        )
+    _cached_rf_rate = 0.04
+    return _cached_rf_rate
+
 
 def _series_stats(prices: list, returns_arr: np.ndarray) -> dict:
     from scipy import stats as scipy_stats
 
     n = len(returns_arr)
     if n == 0:
-        return {"mean": 0.0, "std": 0.0, "skewness": 0.0, "kurtosis": 0.0,
-                "maxDrawdown": 0.0, "sharpe": 0.0, "annualizedReturn": 0.0,
-                "annualizedVol": 0.0, "totalReturn": 0.0, "numDataPoints": 0}
+        return {
+            "mean": 0.0,
+            "std": 0.0,
+            "skewness": 0.0,
+            "kurtosis": 0.0,
+            "maxDrawdown": 0.0,
+            "sharpe": 0.0,
+            "annualizedReturn": 0.0,
+            "annualizedVol": 0.0,
+            "totalReturn": 0.0,
+            "numDataPoints": 0,
+        }
 
     mean_r = float(np.mean(returns_arr))
     std_r = float(np.std(returns_arr, ddof=1)) if n > 1 else 0.0
     ann_return = float((1 + mean_r) ** 252 - 1)
     ann_vol = float(std_r * np.sqrt(252))
-    sharpe = ann_return / ann_vol if ann_vol > 0 else 0.0
+    rf = _get_risk_free_rate()
+    sharpe = (ann_return - rf) / ann_vol if ann_vol > 0 else 0.0
 
     peak = prices[0]
     max_dd = 0.0
@@ -85,14 +121,16 @@ def compute_chart_data(historical_df: pd.DataFrame, scenario: pd.DataFrame) -> d
 
     historical = []
     for _, row in df.iterrows():
-        historical.append({
-            "date": str(row[date_col])[:10],
-            "open": round(float(row.get("Open", 0)), 4),
-            "high": round(float(row.get("High", 0)), 4),
-            "low": round(float(row.get("Low", 0)), 4),
-            "close": round(float(row.get("Close", 0)), 4),
-            "volume": int(row.get("Volume", 0)),
-        })
+        historical.append(
+            {
+                "date": str(row[date_col])[:10],
+                "open": round(float(row.get("Open", 0)), 4),
+                "high": round(float(row.get("High", 0)), 4),
+                "low": round(float(row.get("Low", 0)), 4),
+                "close": round(float(row.get("Close", 0)), 4),
+                "volume": int(row.get("Volume", 0)),
+            }
+        )
 
     last_date = pd.Timestamp(historical[-1]["date"])
     synth_dates = pd.bdate_range(last_date + pd.offsets.BDay(1), periods=len(scenario))
@@ -101,14 +139,16 @@ def compute_chart_data(historical_df: pd.DataFrame, scenario: pd.DataFrame) -> d
     synthetic = []
     for i, date in enumerate(synth_dates):
         row = synth_df.iloc[i]
-        synthetic.append({
-            "date": str(date)[:10],
-            "open": round(float(row.get("Open", row.get("open", 0))), 4),
-            "high": round(float(row.get("High", row.get("high", 0))), 4),
-            "low": round(float(row.get("Low", row.get("low", 0))), 4),
-            "close": round(float(row.get("Close", row.get("close", 0))), 4),
-            "volume": int(row.get("Volume", row.get("volume", 0))),
-        })
+        synthetic.append(
+            {
+                "date": str(date)[:10],
+                "open": round(float(row.get("Open", row.get("open", 0))), 4),
+                "high": round(float(row.get("High", row.get("high", 0))), 4),
+                "low": round(float(row.get("Low", row.get("low", 0))), 4),
+                "close": round(float(row.get("Close", row.get("close", 0))), 4),
+                "volume": int(row.get("Volume", row.get("volume", 0))),
+            }
+        )
 
     hist_closes = [h["close"] for h in historical]
     synth_closes = [s["close"] for s in synthetic]
@@ -120,32 +160,44 @@ def compute_chart_data(historical_df: pd.DataFrame, scenario: pd.DataFrame) -> d
     time_series = []
     for i in range(min_len):
         ts = int(pd.Timestamp(historical[i]["date"]).timestamp() * 1000)
-        time_series.append({
-            "date": historical[i]["date"],
-            "timestamp": ts,
-            "historical": round(hist_closes[i] / h_start * 100, 4),
-            "synthetic": round(synth_closes[i] / s_start * 100, 4),
-        })
+        time_series.append(
+            {
+                "date": historical[i]["date"],
+                "timestamp": ts,
+                "historical": round(hist_closes[i] / h_start * 100, 4),
+                "synthetic": round(synth_closes[i] / s_start * 100, 4),
+            }
+        )
 
     returns_data = []
     h_ret_list, s_ret_list = [], []
     h_cum, s_cum = 1.0, 1.0
     for i in range(1, min_len):
-        h_ret = (hist_closes[i] - hist_closes[i - 1]) / hist_closes[i - 1] if hist_closes[i - 1] else 0.0
-        s_ret = (synth_closes[i] - synth_closes[i - 1]) / synth_closes[i - 1] if synth_closes[i - 1] else 0.0
-        h_cum *= (1 + h_ret)
-        s_cum *= (1 + s_ret)
+        h_ret = (
+            (hist_closes[i] - hist_closes[i - 1]) / hist_closes[i - 1]
+            if hist_closes[i - 1]
+            else 0.0
+        )
+        s_ret = (
+            (synth_closes[i] - synth_closes[i - 1]) / synth_closes[i - 1]
+            if synth_closes[i - 1]
+            else 0.0
+        )
+        h_cum *= 1 + h_ret
+        s_cum *= 1 + s_ret
         h_ret_list.append(h_ret)
         s_ret_list.append(s_ret)
         ts = int(pd.Timestamp(historical[i]["date"]).timestamp() * 1000)
-        returns_data.append({
-            "date": historical[i]["date"],
-            "timestamp": ts,
-            "historicalReturn": round(h_ret, 6),
-            "syntheticReturn": round(s_ret, 6),
-            "historicalCumReturn": round(h_cum - 1, 6),
-            "syntheticCumReturn": round(s_cum - 1, 6),
-        })
+        returns_data.append(
+            {
+                "date": historical[i]["date"],
+                "timestamp": ts,
+                "historicalReturn": round(h_ret, 6),
+                "syntheticReturn": round(s_ret, 6),
+                "historicalCumReturn": round(h_cum - 1, 6),
+                "syntheticCumReturn": round(s_cum - 1, 6),
+            }
+        )
 
     h_peak, s_peak = hist_closes[0], synth_closes[0]
     drawdowns = []
@@ -153,12 +205,14 @@ def compute_chart_data(historical_df: pd.DataFrame, scenario: pd.DataFrame) -> d
         h_peak = max(h_peak, hist_closes[i])
         s_peak = max(s_peak, synth_closes[i])
         ts = int(pd.Timestamp(historical[i]["date"]).timestamp() * 1000)
-        drawdowns.append({
-            "date": historical[i]["date"],
-            "timestamp": ts,
-            "historicalDrawdown": round((hist_closes[i] - h_peak) / h_peak, 6),
-            "syntheticDrawdown": round((synth_closes[i] - s_peak) / s_peak, 6),
-        })
+        drawdowns.append(
+            {
+                "date": historical[i]["date"],
+                "timestamp": ts,
+                "historicalDrawdown": round((hist_closes[i] - h_peak) / h_peak, 6),
+                "syntheticDrawdown": round((synth_closes[i] - s_peak) / s_peak, 6),
+            }
+        )
 
     stats = {
         "historical": _series_stats(hist_closes[:min_len], np.array(h_ret_list)),
@@ -225,30 +279,35 @@ while True:
             )
             # Parse CSV data
             from io import StringIO
+
             csv_buffer = StringIO(csv_data)
             data = pd.read_csv(csv_buffer)
-            
+
             # Validate required columns (case-insensitive)
-            required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
-            
+            required_cols = ["Open", "High", "Low", "Close", "Volume"]
+
             # Normalize column names to title case
             data.columns = [col.strip().title() for col in data.columns]
-            
+
             # Check for required columns
             missing_cols = [col for col in required_cols if col not in data.columns]
             if missing_cols:
-                raise ValueError(f"CSV missing required columns: {missing_cols}. Found columns: {list(data.columns)}")
-            
+                raise ValueError(
+                    f"CSV missing required columns: {missing_cols}. Found columns: {list(data.columns)}"
+                )
+
             # Keep only the required OHLCV columns
             data = data[required_cols]
-            
+
             # Create a date index if not present (for uploaded CSV without dates)
             # Use recent dates working backwards from today
             end_date = pd.Timestamp.today()
-            date_range = pd.date_range(end=end_date, periods=len(data), freq='D')
+            date_range = pd.date_range(end=end_date, periods=len(data), freq="D")
             data.index = date_range
-            
-            logger.info(f"Loaded {len(data)} rows from uploaded CSV with synthetic date range")
+
+            logger.info(
+                f"Loaded {len(data)} rows from uploaded CSV with synthetic date range"
+            )
         elif ticker:
             logger.info(
                 "Running GARCH for %s (p=%s, q=%s, scenarios=%s, horizon=%s)",
