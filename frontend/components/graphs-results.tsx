@@ -1,5 +1,6 @@
 "use client"
 
+import { useMemo } from "react"
 import { type GeneratedData } from "@/lib/types"
 import { CandlestickChart } from "@/components/charts/candlestick-chart"
 import { PriceOverlayChart } from "@/components/charts/price-overlay-chart"
@@ -12,8 +13,6 @@ interface VisualizationResultsProps {
   data: GeneratedData
 }
 
-<<<<<<< Updated upstream
-=======
 function FidelityGauge({ score }: { score: number }) {
   const r = 28
   const circ = 2 * Math.PI * r
@@ -58,7 +57,6 @@ function FidelityGauge({ score }: { score: number }) {
     </div>
   )
 }
->>>>>>> Stashed changes
 
 function DualMetricCard({
   label,
@@ -104,8 +102,6 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
   const h = data.stats.historical
   const s = data.stats.synthetic
 
-<<<<<<< Updated upstream
-=======
   const fidelityScore = useMemo(() => {
     if (data.overallMatch !== undefined) {
       return Math.round(data.overallMatch * 100)
@@ -123,14 +119,16 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
     )
   }, [data.overallMatch, h, s])
 
->>>>>>> Stashed changes
   const pct = (v: number) => `${(v * 100).toFixed(2)}%`
   const num = (v: number) => v.toFixed(3)
   const rc = (v: number) => (v >= 0 ? "text-emerald-500" : "text-red-500")
 
   return (
     <div className="space-y-8">
-      <div className="grid gap-3 grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
+      <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
+        <div className="rounded-xl border border-border bg-card px-5 py-4 col-span-2 md:col-span-1 flex items-center">
+          <FidelityGauge score={fidelityScore} />
+        </div>
         <DualMetricCard
           label="Ann. Return"
           histValue={pct(h.annualizedReturn)}
