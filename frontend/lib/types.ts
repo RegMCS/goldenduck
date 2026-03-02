@@ -16,6 +16,18 @@ export const defaultParameters: MarketParameters = {
   inputFile: null,
 }
 
+export interface PresetMarketParameters {
+  assetClass: "equities" | "fx" | "crypto"
+  trendType: "bearish" | "bullish" | "sideways" | "volatile"
+  marketRegime: "crisis" | "normal" | "low-volatility" | "high-volatility"
+  volatilityLevel: "low" | "medium" | "extreme"
+  generationModel: string
+  timeHorizon: number
+  meanReversion: boolean
+  fatTails: boolean
+  jumpDiffusion: boolean
+}
+
 export interface OHLCVDataPoint {
   date: string
   open: number

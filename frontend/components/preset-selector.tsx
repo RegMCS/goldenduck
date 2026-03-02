@@ -3,17 +3,17 @@
 import { Zap } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { presets, type Preset } from "@/lib/presets"
-import type { MarketParameters } from "@/lib/types"
+import type { PresetMarketParameters } from "@/lib/types"
 
 interface PresetSelectorProps {
   onSelect: (preset: Preset) => void
-  currentParams: MarketParameters
+  currentParams: PresetMarketParameters
 }
 
 export function PresetSelector({ onSelect, currentParams }: PresetSelectorProps) {
   const isPresetActive = (preset: Preset) => {
     return Object.entries(preset.parameters).every(
-      ([key, value]) => currentParams[key as keyof MarketParameters] === value
+      ([key, value]) => currentParams[key as keyof PresetMarketParameters] === value
     )
   }
 

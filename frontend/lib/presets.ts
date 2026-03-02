@@ -1,10 +1,10 @@
-import type { MarketParameters } from "./types"
+import type { PresetMarketParameters } from "./types"
 
 export interface Preset {
   id: string
   name: string
   description: string
-  parameters: Partial<MarketParameters>
+  parameters: Partial<PresetMarketParameters>
 }
 
 export const presets: Preset[] = [
