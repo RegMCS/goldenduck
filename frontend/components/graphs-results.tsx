@@ -12,6 +12,53 @@ interface VisualizationResultsProps {
   data: GeneratedData
 }
 
+<<<<<<< Updated upstream
+=======
+function FidelityGauge({ score }: { score: number }) {
+  const r = 28
+  const circ = 2 * Math.PI * r
+  const offset = circ * (1 - score / 100)
+  const color = score >= 75 ? "#22c55e" : score >= 50 ? "#f59e0b" : "#ef4444"
+  const label = score >= 75 ? "Excellent match" : score >= 50 ? "Moderate match" : "Low match"
+
+  return (
+    <div className="flex items-center gap-3 py-1">
+      <div className="relative h-16 w-16 shrink-0">
+        <svg viewBox="0 0 64 64" className="h-16 w-16 -rotate-90">
+          <circle cx="32" cy="32" r={r} fill="none" stroke="var(--border)" strokeWidth="6" />
+          <circle
+            cx="32"
+            cy="32"
+            r={r}
+            fill="none"
+            stroke={color}
+            strokeWidth="6"
+            strokeDasharray={circ}
+            strokeDashoffset={offset}
+            strokeLinecap="round"
+            style={{ transition: "stroke-dashoffset 1.2s ease-out" }}
+          />
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <span className="text-sm font-bold tabular-nums leading-none" style={{ color }}>
+            {score}
+          </span>
+          <span className="text-[8px] text-muted-foreground uppercase tracking-wider mt-0.5">
+            score
+          </span>
+        </div>
+      </div>
+      <div>
+        <p className="text-sm font-semibold text-foreground">Fidelity</p>
+        <p className="text-[11px] font-medium" style={{ color }}>
+          {label}
+        </p>
+        <p className="text-[10px] text-muted-foreground">vs. desired</p>
+      </div>
+    </div>
+  )
+}
+>>>>>>> Stashed changes
 
 function DualMetricCard({
   label,
@@ -57,6 +104,26 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
   const h = data.stats.historical
   const s = data.stats.synthetic
 
+<<<<<<< Updated upstream
+=======
+  const fidelityScore = useMemo(() => {
+    if (data.overallMatch !== undefined) {
+      return Math.round(data.overallMatch * 100)
+    }
+    // Fallback: compute locally from historical vs synthetic stats
+    const safe = (a: number, b: number) =>
+      1 - Math.min(1, Math.abs((a - b) / Math.max(Math.abs(b), 0.01)))
+    return Math.round(
+      ((safe(s.annualizedVol, h.annualizedVol) +
+        safe(s.kurtosis, h.kurtosis) +
+        safe(s.skewness, h.skewness) +
+        safe(s.sharpe, h.sharpe)) /
+        4) *
+        100
+    )
+  }, [data.overallMatch, h, s])
+
+>>>>>>> Stashed changes
   const pct = (v: number) => `${(v * 100).toFixed(2)}%`
   const num = (v: number) => v.toFixed(3)
   const rc = (v: number) => (v >= 0 ? "text-emerald-500" : "text-red-500")

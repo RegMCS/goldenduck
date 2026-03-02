@@ -85,6 +85,7 @@ export interface GeneratedData {
   returns: ReturnPoint[]
   drawdowns: DrawdownPoint[]
   stats: DataStatistics
+  overallMatch?: number
 }
 
 export const REQUIRED_CSV_HEADERS = ["open", "high", "low", "close", "volume"]

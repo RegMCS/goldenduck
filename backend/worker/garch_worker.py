@@ -406,6 +406,7 @@ while True:
         # Compute chart data for frontend visualizations
         try:
             chart_data = compute_chart_data(data, scenarios[0])
+            chart_data["overallMatch"] = float(metrics.get("overall_match", 0.0))
             job_store.set_chart_data(job_id, chart_data)
             logger.info("Chart data stored for job %s", job_id)
         except Exception as e:
