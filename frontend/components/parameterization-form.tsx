@@ -2,11 +2,12 @@
 
 import React, { useState, useRef } from "react"
 import { useRouter } from "next/navigation"
-import { Upload, X, FileText, Sparkles, RotateCcw, Download, AlertCircle, CheckCircle2, Loader2 } from "lucide-react"
+import { Upload, X, FileText, Sparkles, RotateCcw, Download, AlertCircle, CheckCircle2, Loader2, TriangleAlert, ChevronUp, ChevronDown } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { InfoTooltip } from "@/components/info-tooltip"
 import {
   type MarketParameters,
   type GeneratedData,
@@ -34,6 +35,7 @@ function getUserId(): string {
 interface ParameterFieldProps {
   label: string
   description: string
+  tooltip?: string | string[]
   value: number
   onChange: (value: number) => void
   min: number
@@ -41,30 +43,116 @@ interface ParameterFieldProps {
   step: number
 }
 
-function ParameterField({ label, description, value, onChange, min, max, step }: ParameterFieldProps) {
+function ParameterField({ label, description, tooltip, value, onChange, min, max, step }: ParameterFieldProps) {
+  const [localValue, setLocalValue] = React.useState(String(value))
+
+  // Sync when the parent resets the value externally
+  React.useEffect(() => {
+    setLocalValue(String(value))
+  }, [value])
+
+  const commit = () => {
+    const parsed = parseFloat(localValue)
+    if (!isNaN(parsed)) {
+      const clamped = Math.min(max, Math.max(min, parsed))
+      onChange(clamped)
+      setLocalValue(String(clamped))
+    } else {
+      setLocalValue(String(value))
+    }
+  }
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <Label className="text-sm font-medium text-foreground">{label}</Label>
+        <div className="flex items-center gap-1.5">
+            <Label className="text-sm font-medium text-foreground">{label}</Label>
+            {tooltip && <InfoTooltip content={tooltip} />}
+          </div>
         <span className="text-xs text-muted-foreground">{min} – {max}</span>
       </div>
-      <Input
-        type="number"
-        value={value}
-        onChange={(e) => {
-          const val = parseFloat(e.target.value)
-          if (!isNaN(val)) {
-            onChange(Math.min(max, Math.max(min, val)))
-          }
-        }}
-        min={min}
-        max={max}
-        step={step}
-      />
+      <div className="flex">
+        <Input
+          type="text"
+          inputMode="decimal"
+          value={localValue}
+          onChange={(e) => setLocalValue(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              commit()
+            } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+              e.preventDefault()
+              const current = parseFloat(localValue)
+              const base = isNaN(current) ? parseFloat(String(value)) : current
+              const next = Math.min(max, Math.max(min, parseFloat((base + (e.key === "ArrowUp" ? step : -step)).toFixed(10))))
+              setLocalValue(String(next))
+              onChange(next)
+            }
+          }}
+          className="rounded-r-none"
+        />
+        <div className="flex flex-col border border-l-0 border-input rounded-r-md overflow-hidden">
+          <button
+            type="button"
+            tabIndex={-1}
+            onMouseDown={(e) => {
+              e.preventDefault()
+              const current = parseFloat(localValue)
+              const base = isNaN(current) ? parseFloat(String(value)) : current
+              const next = Math.min(max, parseFloat((base + step).toFixed(10)))
+              setLocalValue(String(next))
+              onChange(next)
+            }}
+            className="flex-1 flex items-center justify-center px-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          >
+            <ChevronUp className="h-3 w-3" />
+          </button>
+          <div className="h-px bg-input" />
+          <button
+            type="button"
+            tabIndex={-1}
+            onMouseDown={(e) => {
+              e.preventDefault()
+              const current = parseFloat(localValue)
+              const base = isNaN(current) ? parseFloat(String(value)) : current
+              const next = Math.max(min, parseFloat((base - step).toFixed(10)))
+              setLocalValue(String(next))
+              onChange(next)
+            }}
+            className="flex-1 flex items-center justify-center px-1.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          >
+            <ChevronDown className="h-3 w-3" />
+          </button>
+        </div>
+      </div>
       <p className="text-xs text-muted-foreground">{description}</p>
     </div>
   )
 }
+
+interface TradeoffRule {
+  condition: (p: MarketParameters) => boolean
+  message: string
+}
+
+const TRADEOFF_RULES: TradeoffRule[] = [
+  {
+    condition: (p) => p.momentum > 0.7,
+    message:
+      "Setting V Momentum > 0.7 will also increase tail thickness (kurtosis +1.5 to +2.0) as a natural side effect of return persistence.",
+  },
+  {
+    condition: (p) => p.fatTails > 1.5 && p.momentum > 0.7,
+    message:
+      "Combining Fat Tails > 1.5 with V Momentum > 0.7 will cause kurtosis to hit the model ceiling (~8.0) — expect extreme tail behaviour.",
+  },
+  {
+    condition: (p) => p.trend > 0.7 || p.trend < -0.7,
+    message:
+      "Setting Trend > 0.7 or < −0.7 will also slightly increase skewness as a natural side effect of strong directional drift.",
+  },
+]
 
 export function ParameterizationForm({ onDataReady }: { onDataReady?: (data: GeneratedData) => void }) {
   const router = useRouter()
@@ -76,6 +164,8 @@ export function ParameterizationForm({ onDataReady }: { onDataReady?: (data: Gen
   const [generateError, setGenerateError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const activeWarnings = TRADEOFF_RULES.filter((r) => r.condition(parameters)).map((r) => r.message)
 
   const updateParameter = <K extends keyof MarketParameters>(
     key: K,
@@ -184,10 +274,13 @@ export function ParameterizationForm({ onDataReady }: { onDataReady?: (data: Gen
 
           if (statusData.status === "completed") {
             clearInterval(pollIntervalRef.current!)
-            setDownloadUrl(`${API_BASE}/api/download/user/${userId}/${data.job_id}`)
+            const dlUrl = `${API_BASE}/api/download/user/${userId}/${data.job_id}`
+            setDownloadUrl(dlUrl)
             setIsGenerating(false)
-            if (statusData.chart_data && onDataReady) {
-              onDataReady(statusData.chart_data as GeneratedData)
+            if (statusData.chart_data) {
+              if (onDataReady) onDataReady(statusData.chart_data as GeneratedData)
+              localStorage.setItem("goldenduck_chart_data", JSON.stringify(statusData.chart_data))
+              router.push("/results")
             }
           } else if (statusData.status === "failed") {
             clearInterval(pollIntervalRef.current!)
@@ -231,6 +324,11 @@ export function ParameterizationForm({ onDataReady }: { onDataReady?: (data: Gen
             <ParameterField
               label="Volatility"
               description="Controls the magnitude of price fluctuations"
+              tooltip={[
+                "Scales overall price swings.",
+                "1.0 = historical level",
+                "2.0 = twice as volatile",
+              ]}
               value={parameters.volatility}
               onChange={(v) => updateParameter("volatility", v)}
               min={0.5}
@@ -240,6 +338,13 @@ export function ParameterizationForm({ onDataReady }: { onDataReady?: (data: Gen
             <ParameterField
               label="Trend"
               description="Market direction bias (-1 bearish, 0 neutral, +1 bullish)"
+              tooltip={[
+                "Sets directional drift.",
+                "0 = neutral",
+                "+1 = strong bull (+15% annual)",
+                "−1 = strong bear (−15% annual)",
+                "Note: extreme values (> 0.7) slightly increase skewness as a side effect.",
+              ]}
               value={parameters.trend}
               onChange={(v) => updateParameter("trend", v)}
               min={-1}
@@ -249,6 +354,11 @@ export function ParameterizationForm({ onDataReady }: { onDataReady?: (data: Gen
             <ParameterField
               label="Fat Tails"
               description="Probability of extreme price movements"
+              tooltip={[
+                "Controls how often extreme moves occur.",
+                "1.0 = moderate tail frequency",
+                "2.0 = crash-like tail frequency",
+              ]}
               value={parameters.fatTails}
               onChange={(v) => updateParameter("fatTails", v)}
               min={0.5}
@@ -258,6 +368,13 @@ export function ParameterizationForm({ onDataReady }: { onDataReady?: (data: Gen
             <ParameterField
               label="V Momentum"
               description="Volatility momentum / persistence"
+              tooltip={[
+                "Controls return persistence.",
+                "0.5 = neutral",
+                "> 0.7 = trending (today predicts tomorrow)",
+                "< 0.3 = mean-reverting",
+                "Note: high values increase tail thickness as a side effect.",
+              ]}
               value={parameters.momentum}
               onChange={(v) => updateParameter("momentum", v)}
               min={0.0}
@@ -266,15 +383,33 @@ export function ParameterizationForm({ onDataReady }: { onDataReady?: (data: Gen
             />
             <ParameterField
               label="Time Horizon"
-              description="Number of trading days to generate"
+              description="Number of trading days to generate. Best results when this matches the length of your uploaded historical data."
               value={parameters.timeHorizon}
               onChange={(v) => updateParameter("timeHorizon", v)}
               min={60}
-              max={500}
+              max={1300}
               step={1}
             />
           </CardContent>
         </Card>
+
+        {activeWarnings.length > 0 && (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 px-4 py-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <TriangleAlert className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+              <span className="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide">
+                Parameter tradeoffs detected
+              </span>
+            </div>
+            <ul className="space-y-1.5 pl-6 list-disc">
+              {activeWarnings.map((msg) => (
+                <li key={msg} className="text-xs text-amber-800 dark:text-amber-300">
+                  {msg}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <Card>
           <CardHeader>

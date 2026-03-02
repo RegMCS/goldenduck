@@ -9,8 +9,8 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Legend,
   ReferenceLine,
+  Brush,
 } from "recharts"
 import { type DrawdownPoint } from "@/lib/types"
 
@@ -48,16 +48,27 @@ export function DrawdownChart({ data, height = 400 }: DrawdownChartProps) {
   }, [])
 
   const CustomTooltip = useCallback(
-    ({ active, payload, label }: { active?: boolean; payload?: Array<{ value: number; name: string }>; label?: string }) => {
+    ({
+      active,
+      payload,
+      label,
+    }: {
+      active?: boolean
+      payload?: Array<{ value: number; name: string }>
+      label?: string
+    }) => {
       if (!active || !payload?.length) return null
       return (
-        <div className="rounded-lg border border-border bg-card p-3 shadow-lg">
+        <div className="rounded-lg border border-border bg-card/95 backdrop-blur p-3 shadow-xl">
           <p className="mb-2 text-xs font-mono text-muted-foreground">{label}</p>
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             {payload.map((entry) => {
               const isHist = entry.name === "historicalDdPct"
               return (
-                <div key={entry.name} className="flex items-center justify-between gap-6 text-xs">
+                <div
+                  key={entry.name}
+                  className="flex items-center justify-between gap-8 text-xs"
+                >
                   <span className="flex items-center gap-1.5">
                     <span
                       className="inline-block h-2 w-2 rounded-full"
@@ -67,7 +78,7 @@ export function DrawdownChart({ data, height = 400 }: DrawdownChartProps) {
                       {isHist ? "Historical" : "Synthetic"}
                     </span>
                   </span>
-                  <span className="font-mono font-medium text-red-500">
+                  <span className="font-mono font-semibold text-red-500">
                     {entry.value.toFixed(2)}%
                   </span>
                 </div>
@@ -81,56 +92,57 @@ export function DrawdownChart({ data, height = 400 }: DrawdownChartProps) {
   )
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-baseline justify-between">
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-4">
         <div>
           <h4 className="text-sm font-semibold text-foreground">Drawdown Analysis</h4>
-          <p className="text-xs text-muted-foreground">
-            Peak-to-trough decline from running maximum
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Peak-to-trough decline · dotted lines mark max drawdown · drag brush to zoom
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-4 text-xs">
-          <div className="flex items-center gap-1">
-            <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
-            <span className="text-muted-foreground">Hist Max:</span>
-            <span className="font-mono font-medium text-red-500">
+        <div className="flex flex-wrap items-center gap-3 text-xs shrink-0">
+          <div className="flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-2.5 rounded-full bg-red-500" />
+            <span className="text-muted-foreground">Hist max:</span>
+            <span className="font-mono font-semibold text-red-500">
               {histMaxDd.toFixed(2)}%
             </span>
           </div>
-          <div className="flex items-center gap-1">
-            <span className="inline-block h-2 w-2 rounded-full bg-orange-500" />
-            <span className="text-muted-foreground">Synth Max:</span>
-            <span className="font-mono font-medium text-red-500">
+          <div className="flex items-center gap-1.5">
+            <span className="inline-block h-2.5 w-2.5 rounded-full bg-orange-500" />
+            <span className="text-muted-foreground">Synth max:</span>
+            <span className="font-mono font-semibold text-red-500">
               {synthMaxDd.toFixed(2)}%
             </span>
           </div>
-          <div className="flex items-center gap-1">
-            <span className="text-muted-foreground">Hist Avg:</span>
-            <span className="font-mono font-medium text-foreground">
+          <div className="flex items-center gap-1 border-l border-border pl-3">
+            <span className="text-muted-foreground">H avg:</span>
+            <span className="font-mono font-semibold text-foreground">
               {histAvgDd.toFixed(2)}%
             </span>
           </div>
           <div className="flex items-center gap-1">
-            <span className="text-muted-foreground">Synth Avg:</span>
-            <span className="font-mono font-medium text-foreground">
+            <span className="text-muted-foreground">S avg:</span>
+            <span className="font-mono font-semibold text-foreground">
               {synthAvgDd.toFixed(2)}%
             </span>
           </div>
         </div>
       </div>
+
       <ResponsiveContainer width="100%" height={height}>
-        <AreaChart data={displayData} margin={{ top: 10, right: 10, bottom: 0, left: 10 }}>
+        <AreaChart data={displayData} margin={{ top: 8, right: 12, bottom: 0, left: 10 }}>
           <defs>
             <linearGradient id="ddHistGrad" x1="0" y1="1" x2="0" y2="0">
-              <stop offset="5%" stopColor="#ef4444" stopOpacity={0.25} />
+              <stop offset="5%" stopColor="#ef4444" stopOpacity={0.35} />
               <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
             </linearGradient>
             <linearGradient id="ddSynthGrad" x1="0" y1="1" x2="0" y2="0">
-              <stop offset="5%" stopColor="#f97316" stopOpacity={0.15} />
+              <stop offset="5%" stopColor="#f97316" stopOpacity={0.25} />
               <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
             </linearGradient>
           </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" opacity={0.5} />
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" opacity={0.4} />
           <XAxis
             dataKey="date"
             tickFormatter={formatDate}
@@ -144,24 +156,49 @@ export function DrawdownChart({ data, height = 400 }: DrawdownChartProps) {
             tickLine={false}
             axisLine={{ stroke: "var(--border)" }}
             tickFormatter={(v: number) => `${v.toFixed(0)}%`}
-            width={55}
+            width={52}
           />
           <Tooltip content={<CustomTooltip />} />
-          <Legend
-            wrapperStyle={{ fontSize: 11 }}
-            formatter={(value: string) => (
-              <span className="text-xs text-muted-foreground">
-                {value === "historicalDdPct" ? "Historical" : "Synthetic"}
-              </span>
-            )}
+          <ReferenceLine y={0} stroke="var(--muted-foreground)" strokeWidth={1} opacity={0.5} />
+          {/* Max drawdown annotation lines */}
+          <ReferenceLine
+            y={histMaxDd}
+            stroke="#ef4444"
+            strokeDasharray="5 3"
+            opacity={0.7}
+            label={{
+              value: `H: ${histMaxDd.toFixed(1)}%`,
+              position: "insideBottomRight",
+              fill: "#ef4444",
+              fontSize: 9,
+            }}
           />
-          <ReferenceLine y={0} stroke="var(--muted-foreground)" strokeWidth={1} />
+          <ReferenceLine
+            y={synthMaxDd}
+            stroke="#f97316"
+            strokeDasharray="5 3"
+            opacity={0.7}
+            label={{
+              value: `S: ${synthMaxDd.toFixed(1)}%`,
+              position: "insideTopRight",
+              fill: "#f97316",
+              fontSize: 9,
+            }}
+          />
+          <Brush
+            dataKey="date"
+            height={28}
+            stroke="var(--border)"
+            fill="var(--card)"
+            travellerWidth={8}
+            tickFormatter={formatDate}
+          />
           <Area
             type="monotone"
             dataKey="historicalDdPct"
             stroke="#ef4444"
+            strokeWidth={2}
             fill="url(#ddHistGrad)"
-            strokeWidth={1.5}
             dot={false}
             name="historicalDdPct"
           />
@@ -169,11 +206,11 @@ export function DrawdownChart({ data, height = 400 }: DrawdownChartProps) {
             type="monotone"
             dataKey="syntheticDdPct"
             stroke="#f97316"
+            strokeWidth={2}
             fill="url(#ddSynthGrad)"
-            strokeWidth={1.5}
             dot={false}
             name="syntheticDdPct"
-            strokeDasharray="4 2"
+            strokeDasharray="5 2"
           />
         </AreaChart>
       </ResponsiveContainer>
