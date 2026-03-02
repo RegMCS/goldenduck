@@ -2,8 +2,9 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import { ConfigSummary } from "@/components/config-summary"
+import type { PresetMarketParameters } from "@/lib/types"
 
-function createParameters() {
+function createParameters(): PresetMarketParameters {
   return {
     assetClass: "equities",
     trendType: "bullish",
@@ -14,7 +15,7 @@ function createParameters() {
     meanReversion: true,
     fatTails: false,
     jumpDiffusion: true,
-  } as unknown
+  }
 }
 
 describe("ConfigSummary", () => {
