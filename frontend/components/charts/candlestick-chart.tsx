@@ -3,6 +3,7 @@
 import { useMemo, useCallback } from "react"
 import {
   ComposedChart,
+  BarChart,
   Bar,
   XAxis,
   YAxis,
@@ -30,8 +31,6 @@ interface CandleData {
   volume: number
   bodyBottom: number
   bodyHeight: number
-  wickTop: number
-  wickBottom: number
   isBullish: boolean
   idx: number
 }
@@ -43,28 +42,21 @@ export function CandlestickChart({
   height = 400,
 }: CandlestickChartProps) {
   const displayData = useMemo(() => {
-    // Downsample to reasonable number for display
     const maxPoints = 120
     const step = Math.max(1, Math.floor(data.length / maxPoints))
     const sampled = data.filter((_, i) => i % step === 0)
-
-    return sampled.map((d, idx) => {
-      const isBullish = d.close >= d.open
-      return {
-        date: d.date,
-        open: d.open,
-        high: d.high,
-        low: d.low,
-        close: d.close,
-        volume: d.volume,
-        bodyBottom: Math.min(d.open, d.close),
-        bodyHeight: Math.abs(d.close - d.open),
-        wickTop: d.high,
-        wickBottom: d.low,
-        isBullish,
-        idx,
-      } as CandleData
-    })
+    return sampled.map((d, idx) => ({
+      date: d.date,
+      open: d.open,
+      high: d.high,
+      low: d.low,
+      close: d.close,
+      volume: d.volume,
+      bodyBottom: Math.min(d.open, d.close),
+      bodyHeight: Math.abs(d.close - d.open),
+      isBullish: d.close >= d.open,
+      idx,
+    })) as CandleData[]
   }, [data])
 
   const { minPrice, maxPrice, avgPrice } = useMemo(() => {
@@ -87,31 +79,48 @@ export function CandlestickChart({
   }, [])
 
   const CustomTooltip = useCallback(
-    ({ active, payload }: { active?: boolean; payload?: Array<{ payload: CandleData }> }) => {
+    ({
+      active,
+      payload,
+    }: {
+      active?: boolean
+      payload?: Array<{ payload: CandleData }>
+    }) => {
       if (!active || !payload?.length) return null
       const d = payload[0].payload
-      const changePercent = ((d.close - d.open) / d.open * 100).toFixed(2)
+      const changePercent = (((d.close - d.open) / d.open) * 100).toFixed(2)
       const isPositive = d.close >= d.open
 
       return (
-        <div className="rounded-lg border border-border bg-card p-3 shadow-lg">
+        <div className="rounded-lg border border-border bg-card/95 backdrop-blur p-3 shadow-xl">
           <p className="mb-2 text-xs font-mono text-muted-foreground">{d.date}</p>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+          <div className="grid grid-cols-2 gap-x-5 gap-y-1 text-xs">
             <span className="text-muted-foreground">Open</span>
-            <span className="font-mono text-foreground text-right">{d.open.toFixed(2)}</span>
+            <span className="font-mono text-foreground text-right tabular-nums">
+              {d.open.toFixed(2)}
+            </span>
             <span className="text-muted-foreground">High</span>
-            <span className="font-mono text-foreground text-right">{d.high.toFixed(2)}</span>
+            <span className="font-mono text-emerald-500 text-right tabular-nums">
+              {d.high.toFixed(2)}
+            </span>
             <span className="text-muted-foreground">Low</span>
-            <span className="font-mono text-foreground text-right">{d.low.toFixed(2)}</span>
+            <span className="font-mono text-red-500 text-right tabular-nums">
+              {d.low.toFixed(2)}
+            </span>
             <span className="text-muted-foreground">Close</span>
-            <span className="font-mono text-foreground text-right">{d.close.toFixed(2)}</span>
+            <span className="font-mono text-foreground text-right tabular-nums">
+              {d.close.toFixed(2)}
+            </span>
             <span className="text-muted-foreground">Volume</span>
-            <span className="font-mono text-foreground text-right">{(d.volume / 1e6).toFixed(2)}M</span>
+            <span className="font-mono text-foreground text-right tabular-nums">
+              {(d.volume / 1e6).toFixed(2)}M
+            </span>
             <span className="text-muted-foreground">Change</span>
             <span
-              className={`font-mono text-right font-medium ${isPositive ? "text-emerald-500" : "text-red-500"}`}
+              className={`font-mono text-right font-semibold ${isPositive ? "text-emerald-500" : "text-red-500"}`}
             >
-              {isPositive ? "+" : ""}{changePercent}%
+              {isPositive ? "+" : ""}
+              {changePercent}%
             </span>
           </div>
         </div>
@@ -120,15 +129,8 @@ export function CandlestickChart({
     []
   )
 
-  // Custom candle shape
   const CandleShape = useCallback(
-    (props: {
-      x?: number
-      y?: number
-      width?: number
-      height?: number
-      payload?: CandleData
-    }) => {
+    (props: { x?: number; y?: number; width?: number; height?: number; payload?: CandleData }) => {
       const { x = 0, width = 0, payload } = props
       if (!payload) return null
 
@@ -136,10 +138,9 @@ export function CandlestickChart({
       const fill = isBullish ? "#22c55e" : "#ef4444"
       const stroke = isBullish ? "#16a34a" : "#dc2626"
 
-      // Calculate pixel positions from domain
-      const chartHeight = height - 60 // approximate internal chart area
+      const priceHeight = height * 0.72
       const range = maxPrice - minPrice
-      const scale = (v: number) => chartHeight - ((v - minPrice) / range) * chartHeight + 30
+      const scale = (v: number) => priceHeight - ((v - minPrice) / range) * priceHeight + 30
 
       const bodyTop = scale(Math.max(open, close))
       const bodyBottom = scale(Math.min(open, close))
@@ -152,7 +153,6 @@ export function CandlestickChart({
 
       return (
         <g>
-          {/* Wick */}
           <line
             x1={centerX}
             y1={wickTopY}
@@ -161,7 +161,6 @@ export function CandlestickChart({
             stroke={stroke}
             strokeWidth={1}
           />
-          {/* Body */}
           <rect
             x={centerX - bodyWidth / 2}
             y={bodyTop}
@@ -180,32 +179,34 @@ export function CandlestickChart({
 
   const firstClose = displayData[0]?.close ?? 0
   const lastClose = displayData[displayData.length - 1]?.close ?? 0
-  const totalChange = ((lastClose - firstClose) / firstClose * 100).toFixed(2)
+  const totalChange = (((lastClose - firstClose) / firstClose) * 100).toFixed(2)
   const isPositiveTotal = lastClose >= firstClose
 
+  const priceHeight = Math.round(height * 0.72)
+  const volHeight = height - priceHeight - 8
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
+      {/* Header */}
       <div className="flex items-baseline justify-between">
         <div>
           <h4 className="text-sm font-semibold text-foreground">{title}</h4>
-          {subtitle && (
-            <p className="text-xs text-muted-foreground">{subtitle}</p>
-          )}
+          {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
         </div>
         <div className="flex items-center gap-3 text-xs">
           <div className="flex items-center gap-1">
             <span className="text-muted-foreground">Last:</span>
-            <span className="font-mono font-medium text-foreground">{lastClose.toFixed(2)}</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <span className="text-muted-foreground">Chg:</span>
-            <span
-              className={`font-mono font-medium ${isPositiveTotal ? "text-emerald-500" : "text-red-500"}`}
-            >
-              {isPositiveTotal ? "+" : ""}{totalChange}%
+            <span className="font-mono font-semibold text-foreground">
+              {lastClose.toFixed(2)}
             </span>
           </div>
-          <div className="flex items-center gap-2">
+          <span
+            className={`font-mono font-semibold ${isPositiveTotal ? "text-emerald-500" : "text-red-500"}`}
+          >
+            {isPositiveTotal ? "+" : ""}
+            {totalChange}%
+          </span>
+          <div className="flex items-center gap-2 border-l border-border pl-2">
             <span className="flex items-center gap-1">
               <span className="inline-block h-2 w-2 rounded-sm bg-emerald-500" />
               <span className="text-muted-foreground">Bull</span>
@@ -217,9 +218,11 @@ export function CandlestickChart({
           </div>
         </div>
       </div>
-      <ResponsiveContainer width="100%" height={height}>
-        <ComposedChart data={displayData} margin={{ top: 10, right: 10, bottom: 0, left: 10 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" opacity={0.5} />
+
+      {/* Price chart */}
+      <ResponsiveContainer width="100%" height={priceHeight}>
+        <ComposedChart data={displayData} margin={{ top: 8, right: 10, bottom: 0, left: 10 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" opacity={0.4} />
           <XAxis
             dataKey="date"
             tickFormatter={formatDate}
@@ -234,22 +237,21 @@ export function CandlestickChart({
             tickLine={false}
             axisLine={{ stroke: "var(--border)" }}
             tickFormatter={(v: number) => v.toFixed(1)}
-            width={55}
+            width={52}
           />
           <Tooltip content={<CustomTooltip />} />
           <ReferenceLine
             y={avgPrice}
             stroke="var(--muted-foreground)"
             strokeDasharray="5 5"
-            opacity={0.4}
+            opacity={0.35}
             label={{
-              value: `Avg: ${avgPrice.toFixed(2)}`,
+              value: `Avg ${avgPrice.toFixed(1)}`,
               position: "right",
               fill: "var(--muted-foreground)",
               fontSize: 9,
             }}
           />
-          {/* Invisible bar used to trigger tooltip and provide x positioning */}
           <Bar
             dataKey="bodyHeight"
             stackId="candle"
@@ -262,6 +264,23 @@ export function CandlestickChart({
           </Bar>
         </ComposedChart>
       </ResponsiveContainer>
+
+      {/* Volume bars */}
+      <ResponsiveContainer width="100%" height={volHeight}>
+        <BarChart data={displayData} margin={{ top: 0, right: 10, bottom: 0, left: 10 }}>
+          <XAxis dataKey="date" hide />
+          <YAxis hide domain={[0, "auto"]} />
+          <Bar dataKey="volume" isAnimationActive={false} radius={[1, 1, 0, 0]}>
+            {displayData.map((entry) => (
+              <Cell
+                key={`vol-${entry.idx}`}
+                fill={entry.isBullish ? "rgba(34,197,94,0.45)" : "rgba(239,68,68,0.45)"}
+              />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+      <p className="text-[10px] text-muted-foreground text-right -mt-1">Volume</p>
     </div>
   )
 }
