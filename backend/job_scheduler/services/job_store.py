@@ -77,5 +77,12 @@ class JobStore:
     def set_output_file(self, job_id: str, path: str):
         redis_client.set(f"job:{job_id}:output_file", path)
 
+    def get_chart_data(self, job_id: str) -> dict:
+        raw = redis_client.get(f"job:{job_id}:chart_data")
+        return json.loads(raw) if raw else {}
+
+    def set_chart_data(self, job_id: str, chart_data: dict):
+        redis_client.set(f"job:{job_id}:chart_data", json.dumps(chart_data))
+
 
 job_store = JobStore()

@@ -29,9 +29,7 @@ services:
     volumes:
       - .:/app
       - ./output:/app/output
-    networks:
-      - default
-      - goldenduck-network
+
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       REDIS_URL: redis://redis:6379
@@ -72,24 +70,8 @@ services:
     depends_on:
       - db
 
-  api-gateway:
-    build: ./api-gateway
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./api-gateway/certs:/etc/nginx/certs:ro
-    networks:
-      - default
-      - goldenduck-network
-    restart: always
-    depends_on:
-      - api
-
 volumes:
   postgres_data:
   redis_data:
 
-networks:
-  goldenduck-network:
-    name: goldenduck-network
+

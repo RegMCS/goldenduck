@@ -2,13 +2,13 @@ services:
   frontend:
     build: .
     container_name: goldenduck-frontend
+    ports:
+      - "3000:3000"
     volumes:
       - .:/app
       - /app/node_modules
-    networks:
-      - goldenduck-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      - BACKEND_SERVICE_URL=http://host.docker.internal:8000
     restart: always
-
-networks:
-  goldenduck-network:
-    external: true
