@@ -380,16 +380,11 @@ class GARCHService:
 
             synthetic_returns_array = np.array(all_synthetic_returns)
 
-            # If user_knobs provided, validate against desired characteristics
-            if user_knobs is not None:
-                validator = ValidationService(self.historical_data)
-                metrics = validator.validate_against_desired(
-                    synthetic_returns_array, user_knobs
-                )
-            else:
-                # Fallback: compare to historical data
-                validator = ValidationService(self.historical_data)
-                metrics = validator.validate(synthetic_returns_array)
+            # Always validate against desired characteristics (user knobs)
+            validator = ValidationService(self.historical_data)
+            metrics = validator.validate_against_desired(
+                synthetic_returns_array, user_knobs
+            )
 
             logger.info(f"Validation complete: {metrics}")
             return metrics

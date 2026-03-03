@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/tooltip"
 
 interface InfoTooltipProps {
-  content: string
+  content: string | string[]
 }
 
 export function InfoTooltip({ content }: InfoTooltipProps) {
@@ -32,7 +32,21 @@ export function InfoTooltip({ content }: InfoTooltipProps) {
           side="top"
           className="max-w-[280px] bg-popover text-popover-foreground"
         >
-          <p className="text-sm">{content}</p>
+          {Array.isArray(content) ? (
+            <div className="space-y-1.5">
+              <p className="text-sm font-medium">{content[0]}</p>
+              <ul className="space-y-1 text-sm list-disc pl-3">
+                {content.slice(1).filter((item) => !item.startsWith("Note:")).map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+              {content.slice(1).filter((item) => item.startsWith("Note:")).map((item) => (
+                <p key={item} className="text-xs text-muted-foreground italic">{item}</p>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm">{content}</p>
+          )}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
