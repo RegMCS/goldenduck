@@ -140,7 +140,7 @@ export function CandlestickChart({
 
       const priceHeight = height * 0.72
       const range = maxPrice - minPrice
-      const scale = (v: number) => priceHeight - ((v - minPrice) / range) * priceHeight + 30
+      const scale = (v: number) => priceHeight - ((v - minPrice) / range) * priceHeight
 
       const bodyTop = scale(Math.max(open, close))
       const bodyBottom = scale(Math.min(open, close))
