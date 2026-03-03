@@ -39,12 +39,12 @@ describe("ParameterizationForm", () => {
     expect(screen.getByText("Input Time Series")).toBeInTheDocument()
     expect(screen.getByText("Configuration Summary")).toBeInTheDocument()
     
-    // Check that parameter fields are rendered (without checking specific values due to multiple matches)
-    expect(screen.getByText("Volatility")).toBeInTheDocument()
-    expect(screen.getByText("Trend")).toBeInTheDocument()
-    expect(screen.getByText("Fat Tails")).toBeInTheDocument()
-    expect(screen.getByText("V Momentum")).toBeInTheDocument()
-    expect(screen.getByText("Time Horizon")).toBeInTheDocument()
+    // Check that parameter fields are rendered - use getAllByText for multiple matches
+    expect(screen.getAllByText("Volatility").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("Trend").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("Fat Tails").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("V Momentum").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("Time Horizon").length).toBeGreaterThan(0)
   })
 
   it("allows updating parameter values", async () => {
