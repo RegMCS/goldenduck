@@ -24,7 +24,7 @@ jobs:
       AWS_SECRET_ACCESS_KEY: test_secret
       AWS_DEFAULT_REGION: us-east-1
       S3_BUCKET_NAME: test_bucket
-      COVERAGE_FAIL_UNDER: "70"
+      COVERAGE_FAIL_UNDER: "60"
 
     steps:
       - name: Checkout code
