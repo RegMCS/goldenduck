@@ -1,0 +1,36 @@
+{
+  "num_regimes": 2,
+  "converged": true,
+  "param_diff": 0.0,
+  "transition_matrix": [
+    [
+      0.0006779327210206762,
+      0.9993220672789794
+    ],
+    [
+      0.0029627877823903727,
+      0.9970372122176097
+    ]
+  ],
+  "regimes": [
+    {
+      "omega": 1.5889996132696176e-08,
+      "alpha": 0.0,
+      "beta": 0.9970271387186783,
+      "dist": "normal",
+      "df": null,
+      "garch_converged": true,
+      "garch_status": 250
+    },
+    {
+      "omega": 0.016095871203571054,
+      "alpha": 0.039298489697246086,
+      "beta": 0.9540793674065433,
+      "dist": "normal",
+      "df": null,
+      "garch_converged": true,
+      "garch_status": 498
+    }
+  ],
+  "loglik": -977.5271811137342
+}

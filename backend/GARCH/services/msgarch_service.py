@@ -50,6 +50,8 @@ class MSGARCHService:
         dist: str = "normal",
         n_iter: int = 5,
         init_split_quantile: float = 0.7,
+        init_split_quantile_low: Optional[float] = None,
+        init_split_quantile_high: Optional[float] = None,
         min_points_per_regime: int = 200,
     ) -> Dict:
         """
@@ -74,8 +76,27 @@ class MSGARCHService:
 
         # 1) Initialize regimes using a volatility proxy
         vol_proxy = self._rolling_vol_proxy(r_scaled)
-        thresh = np.quantile(vol_proxy, init_split_quantile)
-        init_state = (vol_proxy >= thresh).astype(int)  # 0=low, 1=high
+        if (
+            init_split_quantile_low is not None
+            and init_split_quantile_high is not None
+        ):
+            q_low = float(np.quantile(vol_proxy, init_split_quantile_low))
+            q_high = float(np.quantile(vol_proxy, init_split_quantile_high))
+            if q_high <= q_low:
+                raise ValueError("init_split_quantile_high must be > init_split_quantile_low")
+            init_state = np.zeros_like(vol_proxy, dtype=int)
+            hi_mask = vol_proxy >= q_high
+            lo_mask = vol_proxy <= q_low
+            init_state[hi_mask] = 1
+            init_state[lo_mask] = 0
+            mid_mask = ~(hi_mask | lo_mask)
+            if np.any(mid_mask):
+                dist_to_low = np.abs(vol_proxy[mid_mask] - q_low)
+                dist_to_high = np.abs(vol_proxy[mid_mask] - q_high)
+                init_state[mid_mask] = (dist_to_high < dist_to_low).astype(int)
+        else:
+            thresh = np.quantile(vol_proxy, init_split_quantile)
+            init_state = (vol_proxy >= thresh).astype(int)  # 0=low, 1=high
 
         # Initial transition matrix from init_state with smoothing
         P = self._estimate_transition_matrix(init_state, smoothing=1.0)
@@ -176,6 +197,9 @@ class MSGARCHService:
         horizon: int = 252,
         volatility_multiplier: float = 1.0,
         random_seed: Optional[int] = None,
+        include_regime: bool = False,
+        min_run_length: Optional[int] = None,
+        switch_scale: Optional[float] = None,
     ) -> List[pd.DataFrame]:
         """
         Simulate OHLCV scenarios using the fitted MS-GARCH model.
@@ -190,10 +214,23 @@ class MSGARCHService:
 
         scenarios: List[pd.DataFrame] = []
         P = self.P
+        if switch_scale is not None and switch_scale > 0:
+            # Reduce switching by scaling off-diagonal probabilities.
+            # switch_scale < 1 => fewer switches; ==1 => no change.
+            P_adj = P.copy()
+            off01 = float(P_adj[0, 1]) * float(switch_scale)
+            off10 = float(P_adj[1, 0]) * float(switch_scale)
+            P_adj[0, 1] = min(max(off01, 0.0), 1.0)
+            P_adj[1, 0] = min(max(off10, 0.0), 1.0)
+            P_adj[0, 0] = 1.0 - P_adj[0, 1]
+            P_adj[1, 1] = 1.0 - P_adj[1, 0]
+            P = P_adj
         rp0, rp1 = self.regime_params
 
         for sidx in range(num_scenarios):
-            states = self._simulate_markov_chain(P, horizon, start_state=None)
+            states = self._simulate_markov_chain(
+                P, horizon, start_state=None, min_run_length=min_run_length
+            )
 
             # GARCH recursion per regime
             r, sigma = self._simulate_msgarch_path(
@@ -213,6 +250,8 @@ class MSGARCHService:
 
             # Convert to OHLCV using same helper style as your GARCHService
             ohlcv = self._generate_ohlcv_from_close(close_prices, sigma)
+            if include_regime:
+                ohlcv["Regime"] = states.astype(int)
             scenarios.append(ohlcv)
 
             if (sidx + 1) % 100 == 0:
@@ -439,7 +478,13 @@ class MSGARCHService:
     # ----------------------------
     # Internals: simulation
     # ----------------------------
-    def _simulate_markov_chain(self, P: np.ndarray, T: int, start_state: Optional[int]) -> np.ndarray:
+    def _simulate_markov_chain(
+        self,
+        P: np.ndarray,
+        T: int,
+        start_state: Optional[int],
+        min_run_length: Optional[int] = None,
+    ) -> np.ndarray:
         if start_state is None:
             pi = self._stationary_dist(P)
             state = 0 if np.random.rand() < pi[0] else 1
@@ -447,10 +492,18 @@ class MSGARCHService:
             state = int(start_state)
 
         states = np.zeros(T, dtype=int)
+        min_run = int(min_run_length) if min_run_length and min_run_length > 0 else 0
+        remaining = min_run
         for t in range(T):
             states[t] = state
+            if remaining > 0:
+                remaining -= 1
+                continue
             u = np.random.rand()
-            state = 0 if u < P[state, 0] else 1
+            next_state = 0 if u < P[state, 0] else 1
+            if next_state != state and min_run > 0:
+                remaining = min_run - 1
+            state = next_state
         return states
 
     def _simulate_msgarch_path(
