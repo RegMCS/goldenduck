@@ -101,7 +101,7 @@ describe("VisualizationResults", () => {
     
     expect(screen.getByText("Fidelity")).toBeInTheDocument()
     expect(screen.getByText("score")).toBeInTheDocument()
-    expect(screen.getByText("vs. historical")).toBeInTheDocument()
+    expect(screen.getByText("vs. desired")).toBeInTheDocument()
   })
 
   it("shows dual metric cards with historical and synthetic values", () => {
