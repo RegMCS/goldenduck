@@ -221,7 +221,20 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
       {/* Statistical comparison */}
       <section>
         <h3 className="mb-4 text-base font-semibold text-foreground">Statistical Comparison</h3>
-        <StatsPanel stats={data.stats} />
+          <StatsPanel
+          stats={{
+            ...data.stats,
+            historical: {
+              ...data.stats.historical,
+              numDataPoints: data.historical.length,
+            },
+            synthetic: {
+              ...data.stats.synthetic,
+              numDataPoints: data.synthetic.length,
+            },
+          }}
+        />
+
       </section>
     </div>
   )
