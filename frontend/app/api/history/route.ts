@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const API_GATEWAY_URL = process.env.API_GATEWAY_URL || "http://localhost:8080";
+const BACKEND_SERVICE_URL = process.env.BACKEND_SERVICE_URL || "http://job-scheduler:8000";
 
 async function proxyRequest(request: NextRequest, method: string) {
   const { searchParams } = new URL(request.url);
   const queryString = searchParams.toString();
-  const url = `${API_GATEWAY_URL}/api/history${queryString ? `?${queryString}` : ""}`;
+  const url = `${BACKEND_SERVICE_URL}/api/history${queryString ? `?${queryString}` : ""}`;
 
   const options: RequestInit = { method };
 
