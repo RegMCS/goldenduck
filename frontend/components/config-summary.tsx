@@ -4,17 +4,16 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import {
-  Play,
   Download,
   RotateCcw,
   ChevronRight,
   ChevronLeft,
   Sparkles,
 } from "lucide-react"
-import type { MarketParameters } from "@/lib/types"
+import type { PresetMarketParameters } from "@/lib/types"
 
 interface ConfigSummaryProps {
-  parameters: MarketParameters
+  parameters: PresetMarketParameters
   onGenerate: () => void
   onReset: () => void
   isGenerating?: boolean

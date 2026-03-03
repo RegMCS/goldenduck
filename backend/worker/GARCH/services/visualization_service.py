@@ -5,8 +5,14 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from typing import List, Optional
 import logging
+import os
 
 logger = logging.getLogger(__name__)
+
+# Output directory for visualizations
+OUTPUT_DIR = os.path.abspath("/app/output")
+if not os.path.exists(OUTPUT_DIR):
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
 class VisualizationService:

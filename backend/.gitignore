@@ -13,6 +13,9 @@ venv/
 
 # Docker
 .docker/
+*.prod.*
+*.prod
+*.sh
 
 # IDEs
 .vscode/
@@ -35,3 +38,7 @@ ml_training/models/saved_models/
 ml_training/models/**/*.pkl
 ml_training/models/**/*.joblib
 mlruns/
+
+test-results/
+.coverage
+.htmlcov/

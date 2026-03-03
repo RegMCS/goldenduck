@@ -71,6 +71,7 @@ async def get_job_status(user_id: str, job_id: str):
             {
                 "parameters": job_store.get_parameters(job_id),
                 "metrics": job_store.get_metrics(job_id),
+                "chart_data": job_store.get_chart_data(job_id),
                 "download_url": f"/api/download/user/{user_id}/{job_id}",
             }
         )
