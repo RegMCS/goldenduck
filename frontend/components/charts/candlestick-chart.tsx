@@ -138,7 +138,7 @@ export function CandlestickChart({
       const fill = isBullish ? "#22c55e" : "#ef4444"
       const stroke = isBullish ? "#16a34a" : "#dc2626"
 
-      const priceHeight = height * 0.72
+      const priceHeight = height * 0.6
       const range = maxPrice - minPrice
       const scale = (v: number) => priceHeight - ((v - minPrice) / range) * priceHeight
 
