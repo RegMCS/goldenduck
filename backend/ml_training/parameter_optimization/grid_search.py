@@ -137,5 +137,3 @@ def garch_fx_simulate(
         paths.append(ret_path)
 
     return np.vstack(paths)
-
-
