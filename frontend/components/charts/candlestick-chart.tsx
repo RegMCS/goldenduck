@@ -138,9 +138,9 @@ export function CandlestickChart({
       const fill = isBullish ? "#22c55e" : "#ef4444"
       const stroke = isBullish ? "#16a34a" : "#dc2626"
 
-      const priceHeight = height * 0.72
+      const priceHeight = height * 0.6
       const range = maxPrice - minPrice
-      const scale = (v: number) => priceHeight - ((v - minPrice) / range) * priceHeight + 30
+      const scale = (v: number) => priceHeight - ((v - minPrice) / range) * priceHeight
 
       const bodyTop = scale(Math.max(open, close))
       const bodyBottom = scale(Math.min(open, close))
@@ -264,23 +264,6 @@ export function CandlestickChart({
           </Bar>
         </ComposedChart>
       </ResponsiveContainer>
-
-      {/* Volume bars */}
-      <ResponsiveContainer width="100%" height={volHeight}>
-        <BarChart data={displayData} margin={{ top: 0, right: 10, bottom: 0, left: 10 }}>
-          <XAxis dataKey="date" hide />
-          <YAxis hide domain={[0, "auto"]} />
-          <Bar dataKey="volume" isAnimationActive={false} radius={[1, 1, 0, 0]}>
-            {displayData.map((entry) => (
-              <Cell
-                key={`vol-${entry.idx}`}
-                fill={entry.isBullish ? "rgba(34,197,94,0.45)" : "rgba(239,68,68,0.45)"}
-              />
-            ))}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
-      <p className="text-[10px] text-muted-foreground text-right -mt-1">Volume</p>
     </div>
   )
 }
