@@ -14,8 +14,9 @@ class ValidationService:
         returns = historical_data["Close"].pct_change().dropna()
         self.historical_returns = np.asarray(returns).flatten()
 
-        # Compute statistics with safe scalar extraction
-        self.historical_volatility = self._to_scalar(np.std(self.historical_returns))
+        # Compute statistics with safe scalar extraction (ddof=1 for sample std,
+        # consistent with _series_stats in garch_worker.py)
+        self.historical_volatility = self._to_scalar(np.std(self.historical_returns, ddof=1))
         self.historical_kurtosis = self._to_scalar(
             stats.kurtosis(self.historical_returns)
         )
@@ -102,7 +103,7 @@ class ValidationService:
         synth_returns = synth_returns[np.isfinite(synth_returns)]
 
         # Calculate synthetic statistics
-        synth_volatility = self._to_scalar(np.std(synth_returns))
+        synth_volatility = self._to_scalar(np.std(synth_returns, ddof=1))
         synth_kurtosis = self._to_scalar(stats.kurtosis(synth_returns))
         synth_skewness = self._to_scalar(stats.skew(synth_returns))
         synth_acf = self._to_scalar(acf(synth_returns, nlags=10, fft=False)[1])
@@ -180,12 +181,15 @@ class ValidationService:
         )
 
         return {
+            "volatility_historical": self._to_scalar(self.historical_volatility),
             "volatility_synthetic": synth_volatility,
             "volatility_desired": desired_volatility_value,
             "volatility_match": volatility_match,
+            "kurtosis_historical": self._to_scalar(self.historical_kurtosis),
             "kurtosis_synthetic": synth_kurtosis,
             "kurtosis_desired": desired_kurtosis_value,
             "kurtosis_match": kurtosis_match,
+            "skewness_historical": self._to_scalar(self.historical_skewness),
             "skewness_synthetic": synth_skewness,
             "skewness_desired": desired_skewness_value,
             "skewness_match": skewness_match,
