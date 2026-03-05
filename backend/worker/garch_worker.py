@@ -51,7 +51,12 @@ def _get_risk_free_rate() -> float:
     try:
         tbill = yf.download("^IRX", period="5d", progress=False, threads=False)
         if not tbill.empty:
-            rf = float(tbill["Close"].iloc[-1]) / 100  # ^IRX is quoted in percent
+            close = tbill["Close"]
+            # yfinance ≥0.2 returns a MultiIndex DataFrame for single tickers;
+            # squeeze to a plain Series if needed.
+            if isinstance(close, pd.DataFrame):
+                close = close.iloc[:, 0]
+            rf = float(close.iloc[-1]) / 100  # ^IRX is quoted in percent
             _cached_rf_rate = rf
             logger.info(f"Risk-free rate fetched from ^IRX: {rf:.4%}")
             return rf
@@ -415,6 +420,23 @@ while True:
         try:
             chart_data = compute_chart_data(data, scenarios[0])
             chart_data["overallMatch"] = float(metrics.get("overall_match", 0.0))
+
+            # Override per-scenario kurtosis/skewness/std with values computed
+            # across all 100 scenarios (from validation), which are far more
+            # statistically robust than the single-scenario estimates.
+            if "kurtosis_synthetic" in metrics:
+                chart_data["stats"]["synthetic"]["kurtosis"] = metrics["kurtosis_synthetic"]
+            if "kurtosis_historical" in metrics:
+                chart_data["stats"]["historical"]["kurtosis"] = metrics["kurtosis_historical"]
+            if "skewness_synthetic" in metrics:
+                chart_data["stats"]["synthetic"]["skewness"] = metrics["skewness_synthetic"]
+            if "skewness_historical" in metrics:
+                chart_data["stats"]["historical"]["skewness"] = metrics["skewness_historical"]
+            if "volatility_synthetic" in metrics:
+                chart_data["stats"]["synthetic"]["std"] = metrics["volatility_synthetic"]
+            if "volatility_historical" in metrics:
+                chart_data["stats"]["historical"]["std"] = metrics["volatility_historical"]
+
             job_store.set_chart_data(job_id, chart_data)
             logger.info("Chart data stored for job %s", job_id)
         except Exception as e:

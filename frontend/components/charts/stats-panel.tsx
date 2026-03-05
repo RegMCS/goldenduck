@@ -149,8 +149,8 @@ export function StatsPanel({ stats }: StatsPanelProps) {
         />
         <ComparisonRow
           label="Excess Kurtosis"
-          historical={Math.abs(h.kurtosis)}
-          synthetic={Math.abs(s.kurtosis)}
+          historical={h.kurtosis}
+          synthetic={s.kurtosis}
         />
         <div className="py-3 border-b border-border/50 last:border-0">
           <div className="flex items-center justify-between mb-1">
