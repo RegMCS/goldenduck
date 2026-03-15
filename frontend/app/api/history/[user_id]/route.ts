@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { BACKEND_SERVICE_URL } from "@/lib/server-constants"
+import { getAccessTokenFromRequest, backendAuthHeaders } from "@/lib/server-auth"
 
 export async function GET(
     request: NextRequest,
@@ -8,11 +9,13 @@ export async function GET(
     const { user_id } = await params
     const { searchParams } = new URL(request.url)
     const queryString = searchParams.toString()
+    const token = getAccessTokenFromRequest(request)
+    const headers = backendAuthHeaders(token)
 
     const url = `${BACKEND_SERVICE_URL}/api/history/user/${user_id}${queryString ? `?${queryString}` : ""}`
 
     try {
-        const response = await fetch(url, { method: "GET" })
+        const response = await fetch(url, { method: "GET", headers })
         const data = await response.json()
         return NextResponse.json(data, { status: response.status })
     } catch (error) {
