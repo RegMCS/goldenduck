@@ -248,6 +248,14 @@ while True:
 
         job_store.set_status(job_id, "running")
 
+        try:
+            db = SessionLocal()
+            update_job_status(db, job_id, JobStatus.running)
+        except Exception as db_exc:
+            logger.error("Failed to update DB for running job %s: %s", job_id, db_exc)
+        finally:
+            db.close()
+
         params = job["parameters"]
 
         ticker = params.get("ticker")
@@ -441,6 +449,17 @@ while True:
             logger.exception("Job %s failed", job_id)
             job_store.set_status(job_id, "failed")
             job_store.set_error(job_id, str(e))
+
+            try:
+                db = SessionLocal()
+                update_job_status(db, job_id, JobStatus.failed)
+                logger.info("Updated DB status to failed for job %s", job_id)
+            except Exception as db_exc:
+                logger.error(
+                    "Failed to update DB for failed job %s: %s", job_id, db_exc
+                )
+            finally:
+                db.close()
         else:
             logger.exception("Worker error before job pickup")
         time.sleep(1)
