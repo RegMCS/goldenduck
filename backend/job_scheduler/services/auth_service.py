@@ -22,6 +22,12 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 
+def _is_dev_no_auth() -> bool:
+    """True when auth can be skipped (dev only). Set NODE_ENV=development or NODE_ENV=dev."""
+    env = (os.environ.get("NODE_ENV") or "").lower()
+    return env in ("development", "dev")
+
+
 def get_token_from_request(request: Request) -> str:
     """Get JWT from Authorization header."""
     auth = request.headers.get("Authorization")
@@ -68,6 +74,21 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
 
 def get_current_user(request: Request, db: Session = Depends(get_db)):
+    # Dev Mode: User admin/admin if no token is sent.
+    if _is_dev_no_auth() and not request.headers.get("Authorization"):
+        user = db.query(User).order_by(User.username).first()
+        if not user:
+            user = User(
+                username="admin",
+                hashed_password=get_password_hash("admin"),
+                first_name=None,
+                last_name=None,
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+        return user
+
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",

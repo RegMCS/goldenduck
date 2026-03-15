@@ -4,7 +4,17 @@ import { getAccessTokenFromRequest, clearAuthCookieOnResponse } from "@/lib/serv
 
 export async function GET(request: NextRequest) {
   const token = getAccessTokenFromRequest(request)
+  const isDev = process.env.NODE_ENV === "development"
+
   if (!token) {
+    if (isDev) {
+      try {
+        const response = await fetch(`${BACKEND_SERVICE_URL}/api/auth/me`)
+        if (response.ok) return NextResponse.json(await response.json())
+      } catch {
+        // backend unreachable; fall through to return no user
+      }
+    }
     const res = NextResponse.json({ user: null })
     clearAuthCookieOnResponse(res)
     return res
