@@ -89,3 +89,20 @@ export interface GeneratedData {
 }
 
 export const REQUIRED_CSV_HEADERS = ["open", "high", "low", "close", "volume"]
+
+export type JobStatus = "queued" | "running" | "completed" | "failed"
+export type JobType = "garch" | "gan" | "ddpm"
+
+export interface JobHistoryItem {
+  id: string
+  status: JobStatus
+  job_type: JobType | null
+  requested_at: string
+  completed_at: string | null
+  s3_url: string | null
+}
+
+export interface JobHistoryResponse {
+  jobs: JobHistoryItem[]
+  total: number
+}

@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field, model_validator
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
+from datetime import datetime
 from job_scheduler.models.enums import JobStatus, JobType
 
 
@@ -29,3 +30,19 @@ class GenerateResponse(BaseModel):
     job_id: str
     status: JobStatus
     message: str
+
+
+class JobHistoryItem(BaseModel):
+    id: str
+    status: JobStatus
+    job_type: Optional[JobType] = None
+    requested_at: datetime
+    completed_at: Optional[datetime] = None
+    s3_url: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+class JobHistoryResponse(BaseModel):
+    jobs: List[JobHistoryItem]
+    total: int

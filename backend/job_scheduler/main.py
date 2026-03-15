@@ -19,5 +19,6 @@ def read_root():
             "generate": "/api/generate/user/{user_id}",
             "status": "/api/status/user/{user_id}/{job_id}",
             "download": "/api/download/user/{user_id}/{job_id}",
+            "history": "/api/history/user/{user_id}",
         },
     }

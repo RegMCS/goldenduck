@@ -12,21 +12,11 @@ Install dependencies:
 npm install
 ```
 
-### Start the backend
-
-The frontend requires the backend to be running. From the repo root:
-
-```bash
-cd backend
-docker compose up --build
-```
-
 ### Start the frontend
 
 ```bash
 cd frontend
 docker compose up --build
-npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
