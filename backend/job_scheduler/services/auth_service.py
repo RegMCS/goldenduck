@@ -12,12 +12,25 @@ from job_scheduler.db.session import get_db
 from job_scheduler.models.user import User
 from job_scheduler.schemas.auth import TokenData
 
-_SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
-SECRET_KEY = _SECRET_KEY.strip()
+
+def _get_secret_key() -> str:
+    raw = os.environ.get("JWT_SECRET_KEY") or ""
+    return (raw or "").strip()
+
+
+def _get_access_token_expire_minutes() -> int:
+    raw = os.environ.get("JWT_EXPIRE_MINUTES")
+    if raw is None or not str(raw).strip():
+        return 60 * 24 * 7  # 7 days default
+    try:
+        return int(str(raw).strip())
+    except (ValueError, TypeError):
+        return 60 * 24 * 7
+
+
+SECRET_KEY = _get_secret_key()
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(
-    os.environ.get("JWT_EXPIRE_MINUTES", 60 * 24 * 7)
-)  # 7 days default
+ACCESS_TOKEN_EXPIRE_MINUTES = _get_access_token_expire_minutes()
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 

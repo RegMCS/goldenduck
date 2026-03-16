@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from pathlib import Path
 from typing import Optional
@@ -27,7 +27,7 @@ router = APIRouter(prefix="/api", tags=["jobs"])
 @router.post("/generate/user/{user_id}", response_model=GenerateResponse)
 async def generate_job(
     user_id: str,
-    request: GenerateRequest,
+    body: GenerateRequest = Body(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -38,13 +38,13 @@ async def generate_job(
     job = create_job(
         db=db,
         user_id=user_id,
-        job_type=request.job_type,
+        job_type=body.job_type,
     )
 
     job_store.create_job(
         job_id=str(job.id),
         user_id=user_id,
-        parameters=request.model_dump(),
+        parameters=body.model_dump(),
         status=JobStatus.queued,
     )
 
