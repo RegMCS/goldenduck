@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { InfoTooltip } from "@/components/info-tooltip"
+import { TimingEstimate } from "@/components/timing-estimate"
 import {
   type MarketParameters,
   type GeneratedData,
@@ -500,6 +501,8 @@ export function ParameterizationForm({ onDataReady }: { onDataReady?: (data: Gen
                 </div>
               ))}
             </div>
+
+            <TimingEstimate parameters={parameters} />
 
             <div className="flex flex-col gap-2 pt-2 border-t border-border">
               {jobStatus && jobStatus !== "completed" && jobStatus !== "failed" && (
