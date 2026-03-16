@@ -10,6 +10,7 @@ venv/
 .env.*
 ! .env.example
 *.key
+*.pem
 
 # Docker
 .docker/

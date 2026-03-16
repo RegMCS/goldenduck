@@ -23,9 +23,10 @@ def update_job_status(
     s3_url: str | None = None,
 ):
     values = {"status": status}
+    if status in (JobStatus.completed, JobStatus.failed):
+        values["completed_at"] = func.now()
     if status == JobStatus.completed:
         values["s3_url"] = s3_url
-        values["completed_at"] = func.now()
 
     db.query(AIModelJob).filter_by(id=job_id).update(values)
     db.commit()

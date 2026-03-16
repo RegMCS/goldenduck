@@ -15,23 +15,11 @@ import {
   defaultParameters,
   REQUIRED_CSV_HEADERS,
 } from "@/lib/types"
+import { getUserId, API_BASE } from "@/lib/constants"
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? ""
-const DEFAULT_TICKER = "AAPL"
 
 type JobStatus = "queued" | "running" | "completed" | "failed"
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-function getUserId(): string {
-  if (typeof window === "undefined") return "anonymous"
-  let id = localStorage.getItem("goldenduck_user_id")
-  if (!id || !UUID_RE.test(id)) {
-    id = crypto.randomUUID()
-    localStorage.setItem("goldenduck_user_id", id)
-  }
-  return id
-}
 
 interface ParameterFieldProps {
   label: string
@@ -67,9 +55,9 @@ function ParameterField({ label, description, tooltip, value, onChange, min, max
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
-            <Label className="text-sm font-medium text-foreground">{label}</Label>
-            {tooltip && <InfoTooltip content={tooltip} />}
-          </div>
+          <Label className="text-sm font-medium text-foreground">{label}</Label>
+          {tooltip && <InfoTooltip content={tooltip} />}
+        </div>
         <span className="text-xs text-muted-foreground">{min} – {max}</span>
       </div>
       <div className="flex">

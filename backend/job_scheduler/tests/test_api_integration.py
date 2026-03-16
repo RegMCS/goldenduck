@@ -131,3 +131,30 @@ def test_download_returns_404_when_output_not_ready():
     download_response = client.get(f"/api/download/user/{user_id}/{job_id}")
     assert download_response.status_code == 404
     assert download_response.json()["detail"] == "File not ready"
+
+
+def test_retrieval_of_reports_history():
+    user_id = str(uuid.uuid4())
+
+    # Send multiple job generating requests
+    for i in range(3):
+        response = client.post(
+            f"/api/generate/user/{user_id}", json=_generate_payload()
+        )
+        assert response.status_code == 200
+
+    # Retrieve reports (history)
+    history_response = client.get(f"/api/history/user/{user_id}")
+    assert history_response.status_code == 200
+
+    history_data = history_response.json()
+    assert "jobs" in history_data
+    assert "total" in history_data
+    assert history_data["total"] == 3
+    assert len(history_data["jobs"]) == 3
+
+    # Assert fields are correctly formatted
+    for job in history_data["jobs"]:
+        assert "id" in job
+        assert "status" in job
+        assert "requested_at" in job

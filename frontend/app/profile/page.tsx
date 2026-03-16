@@ -20,7 +20,7 @@ import {
   BarChart3,
   RefreshCw,
 } from "lucide-react";
-import type { MarketConfig } from "@/lib/types";
+import type { PresetMarketParameters } from "@/lib/types";
 
 interface HistoryRecord {
   id: number;
@@ -33,7 +33,7 @@ interface HistoryRecord {
   time_horizon: number;
   data_points: number;
   created_at: string;
-  config_json: MarketConfig;
+  config_json: PresetMarketParameters;
 }
 
 const trendIcons: Record<string, React.ReactNode> = {

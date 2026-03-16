@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from pathlib import Path
+from typing import Optional
 
 from job_scheduler.db.session import get_db
 from job_scheduler.models.user import User
+from job_scheduler.models.ai_model_job import AIModelJob
 from fastapi.responses import FileResponse, RedirectResponse
 import boto3
 import os
@@ -11,7 +13,12 @@ import os
 from job_scheduler.services.job_service import create_job
 from job_scheduler.models.enums import JobStatus
 from job_scheduler.services.job_store import job_store
-from job_scheduler.schemas.jobs import GenerateRequest, GenerateResponse
+from job_scheduler.schemas.jobs import (
+    GenerateRequest,
+    GenerateResponse,
+    JobHistoryItem,
+    JobHistoryResponse,
+)
 
 router = APIRouter(prefix="/api", tags=["jobs"])
 
@@ -22,6 +29,7 @@ async def generate_job(
     request: GenerateRequest,
     db: Session = Depends(get_db),
 ):
+    # Temporary work-around for development without Auth module
     user = db.query(User).filter_by(id=user_id).first()
     if not user:
         user = User(id=user_id)
@@ -121,3 +129,37 @@ async def download_results(user_id: str, job_id: str):
         raise HTTPException(
             status_code=500, detail=f"Failed to generate download URL: {str(e)}"
         )
+
+
+@router.get("/history/user/{user_id}", response_model=JobHistoryResponse)
+async def get_job_history(
+    user_id: str,
+    status: Optional[JobStatus] = Query(None, description="Filter by job status"),
+    limit: int = Query(50, ge=1, le=200, description="Max number of results"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    db: Session = Depends(get_db),
+):
+    query = db.query(AIModelJob).filter(AIModelJob.requestor == user_id)
+
+    if status is not None:
+        query = query.filter(AIModelJob.status == status)
+
+    total = query.count()
+    jobs = (
+        query.order_by(AIModelJob.requested_at.desc()).offset(offset).limit(limit).all()
+    )
+
+    return JobHistoryResponse(
+        jobs=[
+            JobHistoryItem(
+                id=str(job.id),
+                status=job.status,
+                job_type=job.job_type,
+                requested_at=job.requested_at,
+                completed_at=job.completed_at,
+                s3_url=job.s3_url,
+            )
+            for job in jobs
+        ],
+        total=total,
+    )
