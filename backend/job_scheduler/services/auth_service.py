@@ -5,41 +5,26 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 import bcrypt
 import jwt
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from job_scheduler.db.session import get_db
 from job_scheduler.models.user import User
-from job_scheduler.schemas.auth import TokenData
 
-_SECRET_KEY = os.environ.get("JWT_SECRET_KEY")
-SECRET_KEY = _SECRET_KEY.strip()
+
+SECRET_KEY = (os.environ.get("JWT_SECRET_KEY") or "").strip()
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(
-    os.environ.get("JWT_EXPIRE_MINUTES", 60 * 24 * 7)
-)  # 7 days default
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("JWT_EXPIRE_MINUTES") or 60 * 24 * 7)
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+# auto_error=False so we receive None instead of an automatic 401 when no
+# token is present — lets dev-mode bypass work cleanly.
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
 
 def _is_dev_no_auth() -> bool:
     """True when auth can be skipped (dev only). Set NODE_ENV=development or NODE_ENV=dev."""
     env = (os.environ.get("NODE_ENV") or "").lower()
     return env in ("development", "dev")
-
-
-def get_token_from_request(request: Request) -> str:
-    """Get JWT from Authorization header."""
-    auth = request.headers.get("Authorization")
-    if auth and auth.startswith("Bearer "):
-        token = auth[7:].strip()
-        if token:
-            return token
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
 
 
 def _password_digest(password: str) -> bytes:
@@ -64,18 +49,17 @@ def get_password_hash(password: str) -> str:
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
-    else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=15)
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=15))
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return str(encoded_jwt)
+    return str(jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM))
 
 
-def get_current_user(request: Request, db: Session = Depends(get_db)):
-    # Dev Mode: User admin/admin if no token is sent.
-    if _is_dev_no_auth() and not request.headers.get("Authorization"):
+def get_current_user(
+    token: Optional[str] = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+):
+    # Dev mode: skip auth, return first user or auto-create admin.
+    if _is_dev_no_auth() and not token:
         user = db.query(User).order_by(User.username).first()
         if not user:
             user = User(
@@ -89,34 +73,28 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
             db.refresh(user)
         return user
 
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        token = get_token_from_request(request)
-    except HTTPException:
-        raise
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id = payload.get("sub")
-        username = payload.get("username")
-        if user_id is None:
-            raise credentials_exception
-        token_data = TokenData(user_id=user_id, username=username)
-    except jwt.InvalidTokenError:
-        raise credentials_exception
-    try:
-        user_uuid = uuid_lib.UUID(token_data.user_id)
-    except (ValueError, TypeError):
+        user_id: str = payload.get("sub")
+        if not user_id:
+            raise ValueError("missing sub")
+        user_uuid = uuid_lib.UUID(user_id)
+    except (jwt.InvalidTokenError, ValueError, TypeError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session invalid. Please log in again.",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
     user = db.query(User).filter(User.id == user_uuid).first()
-    if user is None:
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session invalid. Please log in again.",

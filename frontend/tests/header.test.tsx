@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import { Header } from "@/components/header"
+import { AuthProvider } from "@/components/auth-provider"
 
 // Mock next-themes
 vi.mock("next-themes", () => ({
@@ -16,9 +17,17 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/",
 }))
 
+// Mock fetch so AuthProvider's /api/auth/me call doesn't fail
+global.fetch = vi.fn(() =>
+  Promise.resolve({ ok: false, json: () => Promise.resolve({}) } as Response)
+)
+
+const renderWithAuth = (ui: React.ReactElement) =>
+  render(<AuthProvider>{ui}</AuthProvider>)
+
 describe("Header", () => {
   it("renders the logo and app name", () => {
-    render(<Header />)
+    renderWithAuth(<Header />)
 
     expect(screen.getByText("SynthMarket")).toBeInTheDocument()
     expect(screen.getByText("Synthetic Data Generator")).toBeInTheDocument()
@@ -26,7 +35,7 @@ describe("Header", () => {
   })
 
   it("renders nav links and action buttons", () => {
-    render(<Header />)
+    renderWithAuth(<Header />)
 
     expect(screen.getByRole("link", { name: /configure/i })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: /reports/i })).toBeInTheDocument()
@@ -35,7 +44,7 @@ describe("Header", () => {
   })
 
   it("reports nav link points to /reports", () => {
-    render(<Header />)
+    renderWithAuth(<Header />)
 
     const reportsLink = screen.getByRole("link", { name: /reports/i })
     expect(reportsLink).toHaveAttribute("href", "/reports")
@@ -43,14 +52,14 @@ describe("Header", () => {
   })
 
   it("configure nav link points to /", () => {
-    render(<Header />)
+    renderWithAuth(<Header />)
 
     const configureLink = screen.getByRole("link", { name: /configure/i })
     expect(configureLink).toHaveAttribute("href", "/")
   })
 
   it("has proper accessibility attributes", () => {
-    render(<Header />)
+    renderWithAuth(<Header />)
 
     expect(screen.getByRole("banner")).toBeInTheDocument()
     expect(screen.getByRole("navigation")).toBeInTheDocument()
@@ -59,7 +68,7 @@ describe("Header", () => {
   })
 
   it("applies sticky positioning", () => {
-    render(<Header />)
+    renderWithAuth(<Header />)
 
     const header = screen.getByRole("banner")
     expect(header).toHaveClass("sticky")

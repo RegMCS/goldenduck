@@ -3,16 +3,22 @@ import uuid
 from unittest.mock import MagicMock, patch
 
 import pytest
+from fastapi import Depends
 from fastapi.testclient import TestClient
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from job_scheduler.db.base import Base
 from job_scheduler.db.session import SessionLocal, engine
 from job_scheduler.main import app
 from job_scheduler.models.ai_model_job import AIModelJob
+from job_scheduler.models.user import User
 from job_scheduler.redis_client import redis_client
+from job_scheduler.services.auth_service import get_current_user
 from job_scheduler.services.job_store import job_store
+from job_scheduler.services.auth_service import get_password_hash
 
+TEST_USER_ID = uuid.uuid4()
 client = TestClient(app)
 
 
@@ -36,8 +42,33 @@ def clean_state():
     redis_client.delete("queue:garch")
 
 
+@pytest.fixture(autouse=True)
+def auth_user(clean_state):
+    """Create a test user and override get_current_user so API calls are authenticated."""
+    from job_scheduler.db.session import get_db
+
+    with SessionLocal() as db:
+        user = User(
+            id=TEST_USER_ID,
+            username="test",
+            hashed_password=get_password_hash("test"),
+            first_name=None,
+            last_name=None,
+        )
+        db.add(user)
+        db.commit()
+
+    def override_current_user(db: Session = Depends(get_db)):
+        return db.query(User).filter(User.id == TEST_USER_ID).first()
+
+    app.dependency_overrides[get_current_user] = override_current_user
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
+
+
 def _generate_payload():
     return {
+        "job_type": "garch",
         "ticker": "AAPL",
         "horizon": 252,
         "desired_volatility": 1.1,
@@ -48,13 +79,15 @@ def _generate_payload():
 
 
 def test_generate_creates_db_job_and_redis_queue_entry():
-    user_id = str(uuid.uuid4())
+    user_id = str(TEST_USER_ID)
     with patch.object(job_store, "enqueue", wraps=job_store.enqueue) as enqueue_spy:
         response = client.post(
             f"/api/generate/user/{user_id}", json=_generate_payload()
         )
 
-    assert response.status_code == 200
+    assert (
+        response.status_code == 200
+    ), f"Expected 200, got {response.status_code}. Body: {response.json()}"
     body = response.json()
     assert body["status"] == "queued"
     job_id = body["job_id"]
@@ -76,7 +109,7 @@ def test_generate_creates_db_job_and_redis_queue_entry():
 
 
 def test_status_completed_and_download_redirect_flow():
-    user_id = str(uuid.uuid4())
+    user_id = str(TEST_USER_ID)
     response = client.post(f"/api/generate/user/{user_id}", json=_generate_payload())
     assert response.status_code == 200
     job_id = response.json()["job_id"]
@@ -107,8 +140,8 @@ def test_status_completed_and_download_redirect_flow():
     assert download_response.headers["location"] == "https://example.com/file.csv"
 
 
-def test_status_returns_404_for_wrong_user():
-    owner_user_id = str(uuid.uuid4())
+def test_status_returns_403_for_wrong_user():
+    owner_user_id = str(TEST_USER_ID)
     other_user_id = str(uuid.uuid4())
 
     response = client.post(
@@ -118,12 +151,12 @@ def test_status_returns_404_for_wrong_user():
     job_id = response.json()["job_id"]
 
     status_response = client.get(f"/api/status/user/{other_user_id}/{job_id}")
-    assert status_response.status_code == 404
-    assert status_response.json()["detail"] == "Job not found"
+    assert status_response.status_code == 403
+    assert status_response.json()["detail"] == "Not authorized"
 
 
 def test_download_returns_404_when_output_not_ready():
-    user_id = str(uuid.uuid4())
+    user_id = str(TEST_USER_ID)
     response = client.post(f"/api/generate/user/{user_id}", json=_generate_payload())
     assert response.status_code == 200
     job_id = response.json()["job_id"]
@@ -134,7 +167,7 @@ def test_download_returns_404_when_output_not_ready():
 
 
 def test_retrieval_of_reports_history():
-    user_id = str(uuid.uuid4())
+    user_id = str(TEST_USER_ID)
 
     # Send multiple job generating requests
     for i in range(3):

@@ -24,6 +24,8 @@ jobs:
       AWS_SECRET_ACCESS_KEY: test_secret
       AWS_DEFAULT_REGION: us-east-1
       S3_BUCKET_NAME: test_bucket
+      JWT_SECRET_KEY: test-jwt-secret-key-for-ci-only
+      JWT_EXPIRE_MINUTES: "10080"
       COVERAGE_FAIL_UNDER: "60"
 
     steps:

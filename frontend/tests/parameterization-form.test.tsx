@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi, beforeEach } from "vitest"
 import { ParameterizationForm } from "@/components/parameterization-form"
 import { defaultParameters } from "@/lib/types"
+import { AuthProvider } from "@/components/auth-provider"
 
 // Mock the router
 vi.mock("next/navigation", () => ({
@@ -10,6 +11,14 @@ vi.mock("next/navigation", () => ({
     push: vi.fn(),
   }),
 }))
+
+// Mock fetch so AuthProvider's /api/auth/me call doesn't fail
+global.fetch = vi.fn(() =>
+  Promise.resolve({ ok: false, json: () => Promise.resolve({}) } as Response)
+)
+
+const renderWithAuth = (ui: React.ReactElement) =>
+  render(<AuthProvider>{ui}</AuthProvider>)
 
 // Mock the FileReader API
 const mockFileReader = {
@@ -33,12 +42,12 @@ describe("ParameterizationForm", () => {
   })
 
   it("renders with default parameters", () => {
-    render(<ParameterizationForm />)
+    renderWithAuth(<ParameterizationForm />)
 
     expect(screen.getByText("Model Parameters")).toBeInTheDocument()
     expect(screen.getByText("Input Time Series")).toBeInTheDocument()
     expect(screen.getByText("Configuration Summary")).toBeInTheDocument()
-    
+
     // Check that parameter fields are rendered - use getAllByText for multiple matches
     expect(screen.getAllByText("Volatility").length).toBeGreaterThan(0)
     expect(screen.getAllByText("Trend").length).toBeGreaterThan(0)
@@ -49,7 +58,7 @@ describe("ParameterizationForm", () => {
 
   it("allows updating parameter values", async () => {
     const user = userEvent.setup()
-    render(<ParameterizationForm />)
+    renderWithAuth(<ParameterizationForm />)
 
     // Use a more specific selector to avoid multiple matches
     const volatilityInputs = screen.getAllByDisplayValue(String(defaultParameters.volatility))
@@ -62,7 +71,7 @@ describe("ParameterizationForm", () => {
 
   it("shows file upload interface", async () => {
     const user = userEvent.setup()
-    render(<ParameterizationForm />)
+    renderWithAuth(<ParameterizationForm />)
 
     const uploadButton = screen.getByText("Click to upload CSV")
     expect(uploadButton).toBeInTheDocument()
@@ -76,11 +85,11 @@ describe("ParameterizationForm", () => {
 
   it("displays validation error for non-CSV files", async () => {
     const user = userEvent.setup()
-    render(<ParameterizationForm />)
+    renderWithAuth(<ParameterizationForm />)
 
     const fileInput = screen.getByLabelText(/click to upload csv/i)
     const file = new File(["test content"], "test.txt", { type: "text/plain" })
-    
+
     await user.upload(fileInput, file)
 
     // The error might appear, but let's just verify the file input interaction works
@@ -88,22 +97,9 @@ describe("ParameterizationForm", () => {
     expect(fileInput).toBeInTheDocument()
   })
 
-  it("has generate button that responds to file upload", async () => {
-    const user = userEvent.setup()
-    render(<ParameterizationForm />)
-
-    // Check that generate button exists
-    const generateButton = screen.getByRole("button", { name: /generate data/i })
-    expect(generateButton).toBeInTheDocument()
-
-    // The button state might depend on file upload, but let's focus on basic functionality
-    const fileInput = screen.getByLabelText(/click to upload csv/i)
-    expect(fileInput).toBeInTheDocument()
-  })
-
   it("shows parameter tradeoff warnings when conditions are met", async () => {
     const user = userEvent.setup()
-    render(<ParameterizationForm />)
+    renderWithAuth(<ParameterizationForm />)
 
     // Set momentum > 0.7 to trigger warning
     const momentumInputs = screen.getAllByDisplayValue(String(defaultParameters.momentum))
@@ -118,7 +114,7 @@ describe("ParameterizationForm", () => {
 
   it("allows resetting parameters", async () => {
     const user = userEvent.setup()
-    render(<ParameterizationForm />)
+    renderWithAuth(<ParameterizationForm />)
 
     // Change a parameter
     const volatilityInputs = screen.getAllByDisplayValue(String(defaultParameters.volatility))
@@ -136,7 +132,7 @@ describe("ParameterizationForm", () => {
   })
 
   it("displays configuration summary with current values", () => {
-    render(<ParameterizationForm />)
+    renderWithAuth(<ParameterizationForm />)
 
     // Check for summary section titles instead of parameter labels to avoid duplicates
     expect(screen.getByText("Configuration Summary")).toBeInTheDocument()

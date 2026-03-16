@@ -6,6 +6,7 @@ import uuid
 import pytest
 from job_scheduler.db.session import get_db
 from job_scheduler.main import app
+from job_scheduler.services.auth_service import get_current_user
 
 client = TestClient(app)
 
@@ -19,7 +20,19 @@ def override_db_dependency():
 
     app.dependency_overrides[get_db] = fake_db
     yield
-    app.dependency_overrides.clear()
+    app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.fixture(autouse=True)
+def override_auth():
+    """Override get_current_user so API calls succeed without a real JWT."""
+
+    def fake_current_user(request=None, db=None):
+        return MagicMock(id=USER_ID, username="test")
+
+    app.dependency_overrides[get_current_user] = fake_current_user
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 # Global mock: replace Redis-backed job_store everywhere in routes
