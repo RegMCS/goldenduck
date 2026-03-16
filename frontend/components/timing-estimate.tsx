@@ -1,6 +1,5 @@
 "use client"
 
-import React from "react"
 import { Clock, AlertCircle } from "lucide-react"
 import { type MarketParameters } from "@/lib/types"
 
