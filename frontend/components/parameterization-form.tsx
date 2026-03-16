@@ -11,7 +11,6 @@ import { InfoTooltip } from "@/components/info-tooltip"
 import { TimingEstimate } from "@/components/timing-estimate"
 import {
   type MarketParameters,
-  type GeneratedData,
   defaultParameters,
   REQUIRED_CSV_HEADERS,
 } from "@/lib/types"
@@ -144,7 +143,7 @@ const TRADEOFF_RULES: TradeoffRule[] = [
   },
 ]
 
-export function ParameterizationForm({ onDataReady }: { onDataReady?: (data: GeneratedData) => void }) {
+export function ParameterizationForm() {
   const router = useRouter()
   const { user, logout } = useAuth()
   const [parameters, setParameters] = useState<MarketParameters>(defaultParameters)
@@ -267,14 +266,9 @@ export function ParameterizationForm({ onDataReady }: { onDataReady?: (data: Gen
 
           if (statusData.status === "completed") {
             clearInterval(pollIntervalRef.current!)
-            const dlUrl = `/api/download/user/${userId}/${data.job_id}`
-            setDownloadUrl(dlUrl)
+            setDownloadUrl(`/api/download/user/${userId}/${data.job_id}`)
             setIsGenerating(false)
-            if (statusData.chart_data) {
-              if (onDataReady) onDataReady(statusData.chart_data as GeneratedData)
-              localStorage.setItem("goldenduck_chart_data", JSON.stringify(statusData.chart_data))
-              router.push("/results")
-            }
+            router.push(`/results?jobId=${data.job_id}`)
           } else if (statusData.status === "failed") {
             clearInterval(pollIntervalRef.current!)
             setGenerateError(statusData.error || "Job failed")

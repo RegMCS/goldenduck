@@ -313,7 +313,7 @@ export default function ReportsPage() {
                         <table className="w-full text-sm">
                             <thead>
                                 <tr className="border-b border-border bg-muted/40">
-                                    {["Job ID", "Model", "Status", "Requested", "Duration", "Download"].map(
+                                    {["Job ID", "Model", "Status", "Requested", "Duration", "Actions"].map(
                                         (h) => (
                                             <th
                                                 key={h}
@@ -373,19 +373,28 @@ export default function ReportsPage() {
                                                 {duration(job.requested_at, job.completed_at)}
                                             </td>
 
-                                            {/* Download */}
+                                            {/* Actions */}
                                             <td className="px-4 py-3.5">
                                                 {job.status === "completed" ? (
-                                                    <a
-                                                        id={`download-btn-${job.id}`}
-                                                        href={`/api/download/user/${userId}/${job.id}`}
-                                                        target="_blank"
-                                                        rel="noreferrer"
-                                                        className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium text-primary hover:bg-muted transition-colors"
-                                                    >
-                                                        <Download className="h-3.5 w-3.5" />
-                                                        Download
-                                                    </a>
+                                                    <div className="flex items-center gap-1">
+                                                        <Link
+                                                            href={`/results?jobId=${job.id}`}
+                                                            className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium text-primary hover:bg-muted transition-colors"
+                                                        >
+                                                            <BarChart3 className="h-3.5 w-3.5" />
+                                                            View
+                                                        </Link>
+                                                        <a
+                                                            id={`download-btn-${job.id}`}
+                                                            href={`/api/download/user/${userId}/${job.id}`}
+                                                            target="_blank"
+                                                            rel="noreferrer"
+                                                            className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted transition-colors"
+                                                        >
+                                                            <Download className="h-3.5 w-3.5" />
+                                                            Download
+                                                        </a>
+                                                    </div>
                                                 ) : (
                                                     <span className="text-muted-foreground text-xs">—</span>
                                                 )}

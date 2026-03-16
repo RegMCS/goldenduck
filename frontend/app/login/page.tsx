@@ -23,6 +23,7 @@ function LoginForm() {
   const searchParams = useSearchParams()
   const { setUserFromLogin } = useAuth()
   const registered = searchParams.get("registered") === "1"
+  const next = searchParams.get("next") ?? "/"
 
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
@@ -53,7 +54,7 @@ function LoginForm() {
           last_name: data.user.last_name ?? null,
         })
       }
-      router.push("/")
+      router.push(next)
       router.refresh()
     } catch {
       setError("Something went wrong. Please try again.")
