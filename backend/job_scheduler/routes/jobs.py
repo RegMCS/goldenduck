@@ -13,6 +13,7 @@ import os
 from job_scheduler.services.job_service import create_job
 from job_scheduler.models.enums import JobStatus
 from job_scheduler.services.job_store import job_store
+from job_scheduler.services.auth_service import get_current_user
 from job_scheduler.schemas.jobs import (
     GenerateRequest,
     GenerateResponse,
@@ -28,13 +29,10 @@ async def generate_job(
     user_id: str,
     request: GenerateRequest,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    # Temporary work-around for development without Auth module
-    user = db.query(User).filter_by(id=user_id).first()
-    if not user:
-        user = User(id=user_id)
-        db.add(user)
-        db.commit()
+    if user_id != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
 
     # Create job in DB
     job = create_job(
@@ -61,7 +59,11 @@ async def generate_job(
 
 
 @router.get("/status/user/{user_id}/{job_id}")
-async def get_job_status(user_id: str, job_id: str):
+async def get_job_status(
+    user_id: str, job_id: str, current_user: User = Depends(get_current_user)
+):
+    if user_id != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
     job = job_store.get_job(job_id)
 
     if not job or job["user_id"] != user_id:
@@ -91,7 +93,11 @@ async def get_job_status(user_id: str, job_id: str):
 
 
 @router.get("/download/user/{user_id}/{job_id}")
-async def download_results(user_id: str, job_id: str):
+async def download_results(
+    user_id: str, job_id: str, current_user: User = Depends(get_current_user)
+):
+    if user_id != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
     job = job_store.get_job(job_id)
 
     if not job or job["user_id"] != user_id:
@@ -138,7 +144,10 @@ async def get_job_history(
     limit: int = Query(50, ge=1, le=200, description="Max number of results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    if user_id != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
     query = db.query(AIModelJob).filter(AIModelJob.requestor == user_id)
 
     if status is not None:

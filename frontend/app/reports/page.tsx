@@ -28,7 +28,7 @@ import {
     SelectValue,
 } from "@/components/ui/select"
 import { type JobHistoryItem, type JobHistoryResponse, type JobStatus } from "@/lib/types"
-import { getUserId } from "@/lib/constants"
+import { useAuth } from "@/components/auth-provider"
 
 // ── Constants ────────────────────────────────────────────────────────────────
 const PAGE_SIZE = 10
@@ -148,12 +148,8 @@ export default function ReportsPage() {
     const [error, setError] = useState<string | null>(null)
     const [statusFilter, setStatusFilter] = useState<string>("all")
     const [page, setPage] = useState(0)
-    // Resolve user ID once on mount (needs browser context for localStorage)
-    const [userId, setUserId] = useState<string>("")
-
-    useEffect(() => {
-        setUserId(getUserId())
-    }, [])
+    const { user } = useAuth()
+    const userId = user?.id ?? ""
 
     const fetchHistory = useCallback(async () => {
         if (!userId) return
@@ -188,6 +184,16 @@ export default function ReportsPage() {
             <Header />
 
             <main className="container mx-auto max-w-7xl px-4 py-6 sm:py-8">
+                {!user && (
+                    <div className="rounded-lg border border-border bg-muted/30 px-6 py-8 text-center">
+                        <p className="text-muted-foreground mb-2">Log in to view your reports.</p>
+                        <Button asChild>
+                            <Link href="/login">Log in</Link>
+                        </Button>
+                    </div>
+                )}
+                {user && (
+                <>
                 {/* ── Page Header ── */}
                 <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
@@ -421,6 +427,8 @@ export default function ReportsPage() {
                         </div>
                     )}
                 </div>
+                </>
+                )}
             </main>
         </div>
     )

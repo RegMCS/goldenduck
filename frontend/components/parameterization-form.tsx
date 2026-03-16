@@ -15,7 +15,8 @@ import {
   defaultParameters,
   REQUIRED_CSV_HEADERS,
 } from "@/lib/types"
-import { getUserId, API_BASE } from "@/lib/constants"
+import { useAuth } from "@/components/auth-provider"
+import Link from "next/link"
 
 
 type JobStatus = "queued" | "running" | "completed" | "failed"
@@ -145,6 +146,7 @@ const TRADEOFF_RULES: TradeoffRule[] = [
 
 export function ParameterizationForm({ onDataReady }: { onDataReady?: (data: GeneratedData) => void }) {
   const router = useRouter()
+  const { user, logout } = useAuth()
   const [parameters, setParameters] = useState<MarketParameters>(defaultParameters)
   const [isGenerating, setIsGenerating] = useState(false)
   const [fileError, setFileError] = useState<string | null>(null)
@@ -221,7 +223,8 @@ export function ParameterizationForm({ onDataReady }: { onDataReady?: (data: Gen
     setDownloadUrl(null)
     setGenerateError(null)
 
-    const userId = getUserId()
+    const userId = user?.id
+    if (!userId) return
 
     try {
       // Read CSV file content
@@ -232,7 +235,7 @@ export function ParameterizationForm({ onDataReady }: { onDataReady?: (data: Gen
         reader.readAsText(parameters.inputFile!)
       })
 
-      const res = await fetch(`${API_BASE}/api/generate/user/${userId}`, {
+      const res = await fetch(`/api/generate/user/${userId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -247,6 +250,7 @@ export function ParameterizationForm({ onDataReady }: { onDataReady?: (data: Gen
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: "Failed to submit job" }))
+        if (res.status === 401) await logout()
         throw new Error(err.detail || "Failed to submit job")
       }
 
@@ -256,14 +260,14 @@ export function ParameterizationForm({ onDataReady }: { onDataReady?: (data: Gen
       pollIntervalRef.current = setInterval(async () => {
         try {
           const statusRes = await fetch(
-            `${API_BASE}/api/status/user/${userId}/${data.job_id}`
+            `/api/status/user/${userId}/${data.job_id}`
           )
           const statusData = await statusRes.json()
           setJobStatus(statusData.status as JobStatus)
 
           if (statusData.status === "completed") {
             clearInterval(pollIntervalRef.current!)
-            const dlUrl = `${API_BASE}/api/download/user/${userId}/${data.job_id}`
+            const dlUrl = `/api/download/user/${userId}/${data.job_id}`
             setDownloadUrl(dlUrl)
             setIsGenerating(false)
             if (statusData.chart_data) {
@@ -511,24 +515,33 @@ export function ParameterizationForm({ onDataReady }: { onDataReady?: (data: Gen
                   <span>{generateError}</span>
                 </div>
               )}
-              <Button
-                onClick={handleGenerate}
-                disabled={isGenerating}
-                className="w-full gap-2"
-                size="lg"
-              >
-                {isGenerating ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Generating…
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="h-4 w-4" />
-                    Generate Data
-                  </>
-                )}
-              </Button>
+              {!user ? (
+                <p className="text-sm text-muted-foreground text-center py-2">
+                  <Link href="/login" className="font-medium text-primary hover:underline">
+                    Log in
+                  </Link>
+                  {" "}to generate data.
+                </p>
+              ) : (
+                <Button
+                  onClick={handleGenerate}
+                  disabled={isGenerating}
+                  className="w-full gap-2"
+                  size="lg"
+                >
+                  {isGenerating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Generating…
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4" />
+                      Generate Data
+                    </>
+                  )}
+                </Button>
+              )}
               {downloadUrl && (
                 <Button
                   asChild

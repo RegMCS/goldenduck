@@ -1,0 +1,2 @@
+ALTER TABLE users ADD COLUMN username TEXT UNIQUE;
+ALTER TABLE users ADD COLUMN hashed_password TEXT;
