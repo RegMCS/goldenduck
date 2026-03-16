@@ -49,7 +49,8 @@ function estimateJobDuration(parameters: MarketParameters): {
 
 function formatDuration(seconds: number): string {
   if (seconds < 60) {
-    return `${Math.ceil(seconds)} seconds`
+    const roundedSeconds = Math.ceil(seconds)
+    return `${roundedSeconds} second${roundedSeconds === 1 ? '' : 's'}`
   } else {
     const minutes = Math.ceil(seconds / 60)
     return `${minutes} minute${minutes > 1 ? 's' : ''}`
