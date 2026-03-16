@@ -3,7 +3,7 @@ import uuid
 from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi import Depends, Request
+from fastapi import Depends
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -58,7 +58,7 @@ def auth_user(clean_state):
         db.add(user)
         db.commit()
 
-    def override_current_user(request: Request, db: Session = Depends(get_db)):
+    def override_current_user(db: Session = Depends(get_db)):
         return db.query(User).filter(User.id == TEST_USER_ID).first()
 
     app.dependency_overrides[get_current_user] = override_current_user
