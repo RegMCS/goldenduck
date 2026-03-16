@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { Activity, Settings, Sun, Moon, History, LogOut, User } from "lucide-react"
 import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
@@ -17,6 +17,7 @@ export function Header() {
   const { theme, setTheme } = useTheme()
   const pathname = usePathname()
   const { user, loading, logout } = useAuth()
+  const router = useRouter()
 
   return (
     <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-50">
@@ -76,7 +77,7 @@ export function Header() {
                     <DropdownMenuItem asChild>
                       <Link href="/profile">Profile</Link>
                     </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => logout()}>
+                    <DropdownMenuItem onClick={async () => { await logout(); router.push("/login") }}>
                       <LogOut className="h-4 w-4" />
                       Log out
                     </DropdownMenuItem>

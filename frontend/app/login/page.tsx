@@ -1,6 +1,6 @@
 "use client"
 
-import { Suspense, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useAuth } from "@/components/auth-provider"
@@ -21,9 +21,15 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { setUserFromLogin } = useAuth()
+  const { user, loading: authLoading, setUserFromLogin } = useAuth()
   const registered = searchParams.get("registered") === "1"
   const next = searchParams.get("next") ?? "/"
+
+  useEffect(() => {
+    if (!authLoading && user) {
+      router.replace(next)
+    }
+  }, [authLoading, user, next, router])
 
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
