@@ -12,9 +12,10 @@ vi.mock("next-themes", () => ({
   }),
 }))
 
-// Mock next/navigation (usePathname)
+// Mock next/navigation
 vi.mock("next/navigation", () => ({
   usePathname: () => "/",
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
 }))
 
 // Mock fetch so AuthProvider's /api/auth/me call doesn't fail
