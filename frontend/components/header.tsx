@@ -94,7 +94,7 @@ export function Header() {
                     <Link href="/login">Log in</Link>
                   </Button>
                   <Button size="sm" asChild>
-                    <Link href="/register">Register</Link>
+                    <Link href="/register" prefetch={false}>Register</Link>
                   </Button>
                 </>
               )}
