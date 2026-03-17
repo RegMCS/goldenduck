@@ -73,6 +73,7 @@ function LoginForm() {
     <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
       <Link
         href="/"
+        prefetch={false}
         className="flex items-center gap-3 mb-8 hover:opacity-80 transition-opacity"
       >
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary shadow-lg shadow-primary/20">
@@ -144,6 +145,7 @@ function LoginForm() {
               Don&apos;t have an account?{" "}
               <Link
                 href="/register"
+                prefetch={false}
                 className="font-medium text-primary hover:underline"
               >
                 Register
