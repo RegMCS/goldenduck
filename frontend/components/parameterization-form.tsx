@@ -17,6 +17,11 @@ import {
 import { useAuth } from "@/components/auth-provider"
 import Link from "next/link"
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? ""
+const DEFAULT_TICKER = "AAPL"
+const MIN_HORIZON_DAYS = 500
+const MAX_HORIZON_DAYS = 2600
+const MIN_CSV_ROWS = 500
 
 type JobStatus = "queued" | "running" | "completed" | "failed"
 
@@ -141,6 +146,11 @@ const TRADEOFF_RULES: TradeoffRule[] = [
     message:
       "Setting Trend > 0.7 or < −0.7 will also slightly increase skewness as a natural side effect of strong directional drift.",
   },
+  {
+    condition: (p) => Math.abs(p.trend) > 0,
+    message:
+      `Non-zero Trend is easier to observe over longer horizons. Recommended: at least 1000 days (preferably 2000+ days).`,
+  },
 ]
 
 export function ParameterizationForm() {
@@ -164,19 +174,26 @@ export function ParameterizationForm() {
     setParameters((prev) => ({ ...prev, [key]: value }))
   }
 
-  const validateCsvHeaders = (file: File): Promise<boolean> => {
+  const validateCsvStructure = (
+    file: File
+  ): Promise<{ validHeaders: boolean; rowCount: number }> => {
     return new Promise((resolve) => {
       const reader = new FileReader()
       reader.onload = (e) => {
         const text = e.target?.result as string
-        const firstLine = text.split("\n")[0].toLowerCase().trim()
+        const lines = text
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter((l) => l.length > 0)
+        const firstLine = (lines[0] ?? "").toLowerCase().trim()
         const headers = firstLine.split(",").map((h) => h.trim())
         const hasAllHeaders = REQUIRED_CSV_HEADERS.every((required) =>
           headers.includes(required)
         )
-        resolve(hasAllHeaders)
+        const rowCount = Math.max(lines.length - 1, 0)
+        resolve({ validHeaders: hasAllHeaders, rowCount })
       }
-      reader.onerror = () => resolve(false)
+      reader.onerror = () => resolve({ validHeaders: false, rowCount: 0 })
       reader.readAsText(file)
     })
   }
@@ -191,9 +208,15 @@ export function ParameterizationForm() {
       return
     }
 
-    const valid = await validateCsvHeaders(file)
-    if (!valid) {
+    const { validHeaders, rowCount } = await validateCsvStructure(file)
+    if (!validHeaders) {
       setFileError("CSV must have OHLCV headers: Open, High, Low, Close, Volume")
+      updateParameter("inputFile", null)
+      return
+    }
+
+    if (rowCount < MIN_CSV_ROWS) {
+      setFileError(`CSV must contain at least ${MIN_CSV_ROWS} data rows (found ${rowCount}).`)
       updateParameter("inputFile", null)
       return
     }
@@ -370,11 +393,11 @@ export function ParameterizationForm() {
             />
             <ParameterField
               label="Time Horizon"
-              description="Number of trading days to generate. Best results when this matches the length of your uploaded historical data."
+              description={`Number of trading days to generate. Use longer horizons to clearly observe non-zero trend effects.`}
               value={parameters.timeHorizon}
               onChange={(v) => updateParameter("timeHorizon", v)}
-              min={60}
-              max={1300}
+              min={MIN_HORIZON_DAYS}
+              max={MAX_HORIZON_DAYS}
               step={1}
             />
           </CardContent>

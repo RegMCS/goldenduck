@@ -45,6 +45,83 @@ class ValidationService:
             logger.error(f"Could not convert {type(value)} to scalar: {value}")
             raise
 
+    def _compute_mean_sign_match(
+        self,
+        synth_mean: float,
+        desired_trend: float,
+        synth_std: float,
+        sample_size: int,
+    ) -> float:
+        """
+        Trend match focused on DIRECTION (bull/bear), not exact mean magnitude.
+
+        - desired_trend > 0: reward positive synthetic mean
+        - desired_trend < 0: reward negative synthetic mean
+        - desired_trend near 0: reward near-zero synthetic mean
+        """
+        neutral_trend_eps = 0.1
+        # Neutral tolerance (daily mean units):
+        # use max of a fixed floor and a noise-aware confidence band.
+        fixed_floor_band = 0.05 / 252  # ±5% annualised
+        if sample_size > 1 and synth_std > 0:
+            se_mean = synth_std / np.sqrt(sample_size)
+            noise_band = 2.0 * se_mean  # ~95% band
+        else:
+            noise_band = fixed_floor_band
+        neutral_mean_band = max(fixed_floor_band, noise_band)
+
+        if abs(desired_trend) < neutral_trend_eps:
+            # Smooth score: 1 at 0, decays with distance from 0
+            return float(np.exp(-abs(synth_mean) / (neutral_mean_band + 1e-12)))
+
+        desired_sign = 1.0 if desired_trend > 0 else -1.0
+        return 1.0 if (synth_mean * desired_sign) > 0 else 0.0
+
+    def compute_positive_terminal_ratio_metrics(
+        self, scenarios: list[pd.DataFrame], user_knobs: dict
+    ) -> dict:
+        """
+        Evaluate trend direction at the PATH level.
+
+        Metric: percentage of simulated price paths with positive terminal return.
+        This directly answers "how often do paths end up higher than they start?".
+        """
+        terminal_returns = []
+        for scenario in scenarios:
+            if "Close" not in scenario.columns or len(scenario) < 2:
+                continue
+            first_close = float(scenario["Close"].iloc[0])
+            last_close = float(scenario["Close"].iloc[-1])
+            if first_close == 0:
+                continue
+            terminal_returns.append((last_close / first_close) - 1.0)
+
+        if len(terminal_returns) == 0:
+            positive_terminal_ratio = 0.5
+            negative_terminal_ratio = 0.5
+        else:
+            terminal_returns_arr = np.asarray(terminal_returns, dtype=float)
+            positive_terminal_ratio = float(np.mean(terminal_returns_arr > 0.0))
+            negative_terminal_ratio = float(np.mean(terminal_returns_arr < 0.0))
+
+        # Map trend knob to desired probability of ending positive:
+        # -1 -> 0.0, 0 -> 0.5, +1 -> 1.0
+        desired_trend = float(user_knobs.get("desired_trend", 0.0))
+        desired_positive_terminal_ratio = float(np.clip(0.5 + 0.5 * desired_trend, 0.0, 1.0))
+
+        trend_match = max(
+            0.0,
+            1.0 - abs(positive_terminal_ratio - desired_positive_terminal_ratio),
+        )
+
+        return {
+            "positive_terminal_ratio": positive_terminal_ratio,
+            "negative_terminal_ratio": negative_terminal_ratio,
+            "desired_positive_terminal_ratio": desired_positive_terminal_ratio,
+            "trend_match": trend_match,
+            "num_paths_evaluated": int(len(terminal_returns)),
+        }
+
     def validate(self, synthetic_returns: np.ndarray) -> dict:
         """
         Validate synthetic data against historical data
@@ -103,6 +180,7 @@ class ValidationService:
         synth_returns = synth_returns[np.isfinite(synth_returns)]
 
         # Calculate synthetic statistics
+        synth_mean = self._to_scalar(np.mean(synth_returns))
         synth_volatility = self._to_scalar(np.std(synth_returns, ddof=1))
         synth_kurtosis = self._to_scalar(stats.kurtosis(synth_returns))
         synth_skewness = self._to_scalar(stats.skew(synth_returns))
@@ -121,13 +199,18 @@ class ValidationService:
         # Volatility
         desired_volatility_value = self.historical_volatility * desired_volatility
 
+        # Mean return (trend) — absolute bull/bear target
+        # desired_trend=-1 -> -15% annual, 0 -> 0%, +1 -> +15% annual.
+        historical_mean = self._to_scalar(np.mean(self.historical_returns))
+        desired_mean_value = desired_trend * 0.15 / 252
+
         # Kurtosis (with momentum adjustment)
-        # base_kurtosis = self.historical_kurtosis * desired_fat_tails
-        # momentum_boost = max(0.0, (desired_momentum - 0.7) * 2.0)
-        # desired_kurtosis_value = base_kurtosis + momentum_boost
+        base_kurtosis = self.historical_kurtosis * desired_fat_tails
+        momentum_boost = max(0.0, (desired_momentum - 0.7) * 2.0)
+        desired_kurtosis_value = base_kurtosis + momentum_boost
 
         # Kurtosis (FIXED - use model-aware formula)
-        desired_kurtosis_value = self.compute_target_kurtosis(user_knobs)
+        # desired_kurtosis_value = self.compute_target_kurtosis(user_knobs)
 
         # Skewness (AR(1) + trend contributions)
         phi = -0.1 + 0.4 * desired_momentum
@@ -161,8 +244,11 @@ class ValidationService:
             / (abs(desired_kurtosis_value) + 0.5),
             1.0,
         )
-        skewness_match = 1.0 - abs(synth_skewness - desired_skewness_value) / (
-            abs(desired_skewness_value) + 0.2
+        mean_match = self._compute_mean_sign_match(
+            synth_mean=synth_mean,
+            desired_trend=desired_trend,
+            synth_std=synth_volatility,
+            sample_size=len(synth_returns),
         )
         acf_match = 1.0 - abs(synth_acf - desired_acf_value) / (
             abs(desired_acf_value) + 0.1
@@ -174,13 +260,18 @@ class ValidationService:
 
         logger.info(
             f"Validation vs desired:"
+            f"\n  Mean (directional): synth={synth_mean:.6f} vs desired={desired_mean_value:.6f} (match={mean_match:.2%})"
             f"\n  Volatility: synth={synth_volatility:.4f} vs desired={desired_volatility_value:.4f} (match={volatility_match:.2%})"
             f"\n  Kurtosis: synth={synth_kurtosis:.2f} vs desired={desired_kurtosis_value:.2f} (match={kurtosis_match:.2%})"
-            f"\n  Skewness: synth={synth_skewness:.4f} vs desired={desired_skewness_value:.4f} (match={skewness_match:.2%})"
+            f"\n  Skewness (diagnostic): synth={synth_skewness:.4f} vs desired={desired_skewness_value:.4f}"
             f"\n  ACF: synth={synth_acf:.4f} vs desired={desired_acf_value:.4f} (match={acf_match:.2%})"
         )
 
         return {
+            "mean_historical": historical_mean,
+            "mean_synthetic": synth_mean,
+            "mean_desired": desired_mean_value,
+            "mean_match": mean_match,
             "volatility_historical": self._to_scalar(self.historical_volatility),
             "volatility_synthetic": synth_volatility,
             "volatility_desired": desired_volatility_value,
@@ -192,71 +283,55 @@ class ValidationService:
             "skewness_historical": self._to_scalar(self.historical_skewness),
             "skewness_synthetic": synth_skewness,
             "skewness_desired": desired_skewness_value,
-            "skewness_match": skewness_match,
             "acf_synthetic": synth_acf,
             "acf_desired": desired_acf_value,
             "acf_match": acf_match,
             "overall_match": (
-                volatility_match + kurtosis_match + skewness_match + acf_match
+                mean_match + volatility_match + kurtosis_match + acf_match
             )
             / 4.0,
         }
 
     def compute_target_kurtosis(self, user_knobs):
         """
-        Compute realistic target kurtosis for AR-GARCH-FX model
+        Compute target excess kurtosis based on the fat_tails knob.
 
-        Key insight: Don't use raw historical kurtosis as baseline.
-        Use achievable model baseline instead.
+        WHY NOT anchored to historical kurtosis:
+        Historical sample kurtosis (e.g. AAPL ~12.5) is inflated by a handful
+        of extreme events (COVID crash, flash crashes) over many years. It is a
+        sample artefact, not a stable distributional property. Our model with
+        t(6) shocks + GARCH clustering has a true achievable range of ~2-10,
+        so anchoring the target to 12.5 would always produce a poor match at
+        fat_tails=1.0, which is misleading.
+
+        Knob semantics:
+          fat_tails = 0.5  → ~2.0  (thin tails, near-normal)
+          fat_tails = 1.0  → ~4.5  (model's natural t(6)+GARCH baseline)
+          fat_tails = 1.5  → ~7.0  (noticeably fat tails)
+          fat_tails = 2.0  → ~10.0 (very fat tails, near model ceiling)
         """
+        desired_fat_tails = float(user_knobs.get("desired_fat_tails", 1.0))
+        desired_momentum = float(user_knobs.get("desired_momentum", 0.5))
 
-        desired_fat_tails = user_knobs.get("desired_fat_tails", 1.0)
-        desired_momentum = user_knobs.get("desired_momentum", 0.5)
+        # Model's natural output with t(6) shocks + GARCH (empirically ~4-5)
+        baseline_kurtosis = 4.5
+        # Achievable ceiling (empirically validated)
+        max_kurtosis = 10.0
 
-        # ============================================================
-        # Define achievable baseline (NOT historical)
-        # ============================================================
-
-        # Baseline: moderate fat tails (achievable by GARCH with t-dist)
-        baseline_kurtosis = 2.0  # Excess kurtosis ~2 is typical for GARCH
-
-        # Maximum: upper limit for stable AR-GARCH-FX models
-        max_kurtosis = 8.0  # From literature on GARCH/SV limits
-
-        # ============================================================
-        # Map fat_tails knob to achievable range
-        # ============================================================
-
+        # Linear interpolation across the full knob range [0.5, 2.0]
+        # anchored: fat_tails=1.0 → baseline, fat_tails=2.0 → max
         if desired_fat_tails <= 1.0:
-            # Thin to baseline tails
-            # fat_tails=0.5 → kurtosis=0.5 (near-normal)
-            # fat_tails=1.0 → kurtosis=2.0 (baseline)
-            kurtosis_from_fat_tails = baseline_kurtosis * desired_fat_tails
+            # Scale from near-normal (2.0) up to baseline (4.5)
+            kurtosis_from_fat_tails = 2.0 + (baseline_kurtosis - 2.0) * (desired_fat_tails / 1.0)
         else:
-            # Fatter than baseline
-            # fat_tails=1.5 → kurtosis=4.5
-            # fat_tails=2.0 → kurtosis=7.0
-            # fat_tails=3.0 → kurtosis=8.0 (capped)
-            excess = desired_fat_tails - 1.0
-            kurtosis_from_fat_tails = baseline_kurtosis + (
-                max_kurtosis - baseline_kurtosis
-            ) * min(excess / 2.0, 1.0)
+            # Scale from baseline (4.5) up to max (10.0)
+            excess = desired_fat_tails - 1.0  # [0, 1.0]
+            kurtosis_from_fat_tails = baseline_kurtosis + (max_kurtosis - baseline_kurtosis) * min(excess, 1.0)
 
-        # ============================================================
-        # Add momentum contribution
-        # ============================================================
-
-        # AR(1) creates persistence → fatter tails
+        # AR(1) persistence adds to unconditional tail heaviness
         momentum_boost = 0.0
         if desired_momentum > 0.7:
-            # High momentum adds up to +2.0 kurtosis
             momentum_boost = (desired_momentum - 0.7) / 0.3 * 2.0
 
-        # ============================================================
-        # Combine and clip
-        # ============================================================
-
         target_kurtosis = kurtosis_from_fat_tails + momentum_boost
-        target_kurtosis = min(target_kurtosis, max_kurtosis)
-
-        return target_kurtosis
+        return float(min(target_kurtosis, max_kurtosis))

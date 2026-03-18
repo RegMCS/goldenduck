@@ -3,7 +3,7 @@ export interface MarketParameters {
   trend: number // -1.0 to +1.0 (directional)
   fatTails: number // 0.5 to 2.0 (multiplier)
   momentum: number // 0.0 to 1.0 (probability-like)
-  timeHorizon: number // 60 to 1300 days
+  timeHorizon: number // 500 to 2600 days
   inputFile: File | null // CSV with OHLCV headers
 }
 
@@ -12,7 +12,7 @@ export const defaultParameters: MarketParameters = {
   trend: 0,
   fatTails: 1.0,
   momentum: 0.5,
-  timeHorizon: 252,
+  timeHorizon: 500,
   inputFile: null,
 }
 

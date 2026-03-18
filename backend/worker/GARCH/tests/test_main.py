@@ -71,7 +71,7 @@ def test_generate_api_success(mock_job_store):
         f"/api/generate/user/{USER_ID}",
         json={
             "ticker": "AAPL",
-            "horizon": 252,
+            "horizon": 500,
             "desired_volatility": 1.5,
             "desired_trend": 0.0,
             "desired_fat_tails": 1.2,
@@ -95,7 +95,7 @@ def test_generate_api_invalid_parameters():
         f"/api/generate/user/{USER_ID}",
         json={
             "ticker": "AAPL",
-            "horizon": 252,
+            "horizon": 500,
             "desired_volatility": 3.0,  # invalid: > 2.0
             "desired_trend": 0.0,
             "desired_fat_tails": 1.2,
