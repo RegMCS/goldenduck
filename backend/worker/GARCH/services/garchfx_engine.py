@@ -254,7 +254,9 @@ class GARCHFXEngine:
 
         return returns
 
-    def _generate_shock(self, distribution: str, use_skew_shocks: bool = False) -> float:
+    def _generate_shock(
+        self, distribution: str, use_skew_shocks: bool = False
+    ) -> float:
         """
         Generate a random shock from specified distribution
         Uses SYMMETRIC distributions to avoid uncontrolled skewness

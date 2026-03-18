@@ -24,8 +24,8 @@ from pathlib import Path
 from scipy import stats
 
 # ── Config ────────────────────────────────────────────────────────────────────
-TICKER    = sys.argv[1] if len(sys.argv) > 1 else "GC=F"
-PERIOD    = "5y"
+TICKER = sys.argv[1] if len(sys.argv) > 1 else "GC=F"
+PERIOD = "5y"
 OUTPUT_DIR = Path(__file__).parent
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -42,7 +42,7 @@ def download(ticker: str) -> pd.DataFrame:
         df.columns = df.columns.get_level_values(0)
 
     required = ["Open", "High", "Low", "Close", "Volume"]
-    missing  = [c for c in required if c not in df.columns]
+    missing = [c for c in required if c not in df.columns]
     if missing:
         raise RuntimeError(f"Missing columns {missing}. Available: {list(df.columns)}")
 
@@ -52,15 +52,15 @@ def download(ticker: str) -> pd.DataFrame:
 
 
 def print_stats(df: pd.DataFrame, ticker: str):
-    closes  = df["Close"].values
+    closes = df["Close"].values
     returns = np.log(closes[1:] / closes[:-1])
     returns = returns[np.isfinite(returns)]
 
-    ann_vol    = np.std(returns) * np.sqrt(252)
+    ann_vol = np.std(returns) * np.sqrt(252)
     ann_return = (1 + np.mean(returns)) ** 252 - 1
-    kurtosis   = stats.kurtosis(returns)      # excess kurtosis
-    skewness   = stats.skew(returns)
-    acf1       = float(pd.Series(returns).autocorr(lag=1))
+    kurtosis = stats.kurtosis(returns)  # excess kurtosis
+    skewness = stats.skew(returns)
+    acf1 = float(pd.Series(returns).autocorr(lag=1))
 
     print(f"\n{'─'*50}")
     print(f"  Asset            : {ticker}")
@@ -77,7 +77,7 @@ def print_stats(df: pd.DataFrame, ticker: str):
 def save(df: pd.DataFrame, ticker: str) -> Path:
     # Sanitise ticker for filename (GC=F → GC_F)
     safe_name = ticker.replace("=", "_").replace("/", "_")
-    out_path  = OUTPUT_DIR / f"{safe_name}_5y.csv"
+    out_path = OUTPUT_DIR / f"{safe_name}_5y.csv"
     df.to_csv(out_path)
     print(f"Saved → {out_path}")
     return out_path

@@ -25,10 +25,14 @@ def _compute_target_kurtosis(user_knobs):
     max_kurtosis = 10.0
 
     if desired_fat_tails <= 1.0:
-        kurtosis_from_fat_tails = 2.0 + (baseline_kurtosis - 2.0) * (desired_fat_tails / 1.0)
+        kurtosis_from_fat_tails = 2.0 + (baseline_kurtosis - 2.0) * (
+            desired_fat_tails / 1.0
+        )
     else:
         excess = desired_fat_tails - 1.0
-        kurtosis_from_fat_tails = baseline_kurtosis + (max_kurtosis - baseline_kurtosis) * min(excess, 1.0)
+        kurtosis_from_fat_tails = baseline_kurtosis + (
+            max_kurtosis - baseline_kurtosis
+        ) * min(excess, 1.0)
 
     momentum_boost = 0.0
     if desired_momentum > 0.7:

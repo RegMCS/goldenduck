@@ -499,17 +499,29 @@ while True:
             # across all 100 scenarios (from validation), which are far more
             # statistically robust than the single-scenario estimates.
             if "kurtosis_synthetic" in metrics:
-                chart_data["stats"]["synthetic"]["kurtosis"] = metrics["kurtosis_synthetic"]
+                chart_data["stats"]["synthetic"]["kurtosis"] = metrics[
+                    "kurtosis_synthetic"
+                ]
             if "kurtosis_historical" in metrics:
-                chart_data["stats"]["historical"]["kurtosis"] = metrics["kurtosis_historical"]
+                chart_data["stats"]["historical"]["kurtosis"] = metrics[
+                    "kurtosis_historical"
+                ]
             if "skewness_synthetic" in metrics:
-                chart_data["stats"]["synthetic"]["skewness"] = metrics["skewness_synthetic"]
+                chart_data["stats"]["synthetic"]["skewness"] = metrics[
+                    "skewness_synthetic"
+                ]
             if "skewness_historical" in metrics:
-                chart_data["stats"]["historical"]["skewness"] = metrics["skewness_historical"]
+                chart_data["stats"]["historical"]["skewness"] = metrics[
+                    "skewness_historical"
+                ]
             if "volatility_synthetic" in metrics:
-                chart_data["stats"]["synthetic"]["std"] = metrics["volatility_synthetic"]
+                chart_data["stats"]["synthetic"]["std"] = metrics[
+                    "volatility_synthetic"
+                ]
             if "volatility_historical" in metrics:
-                chart_data["stats"]["historical"]["std"] = metrics["volatility_historical"]
+                chart_data["stats"]["historical"]["std"] = metrics[
+                    "volatility_historical"
+                ]
 
             job_store.set_chart_data(job_id, chart_data)
             logger.info("Chart data stored for job %s", job_id)

@@ -244,7 +244,8 @@ class GARCHService:
             close_prices_scenario = initial_price * np.exp(cumulative_returns)
 
             ohlcv = self._generate_ohlcv_from_close(
-                close_prices_scenario, volatility_forecast/ self.scale_factor,
+                close_prices_scenario,
+                volatility_forecast / self.scale_factor,
                 nu=self.garch_params.get("nu", 8),
             )
             scenarios.append(ohlcv)
@@ -338,7 +339,7 @@ class GARCHService:
         """
         n = len(close_prices)
         nu = max(float(nu), 4.01)
-        logger.info(f"OHLCV generation using nu={nu}") 
+        logger.info(f"OHLCV generation using nu={nu}")
 
         # Ensure volatility matches length
         if len(volatility) != n:

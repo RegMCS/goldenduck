@@ -16,7 +16,9 @@ class ValidationService:
 
         # Compute statistics with safe scalar extraction (ddof=1 for sample std,
         # consistent with _series_stats in garch_worker.py)
-        self.historical_volatility = self._to_scalar(np.std(self.historical_returns, ddof=1))
+        self.historical_volatility = self._to_scalar(
+            np.std(self.historical_returns, ddof=1)
+        )
         self.historical_kurtosis = self._to_scalar(
             stats.kurtosis(self.historical_returns)
         )
@@ -107,7 +109,9 @@ class ValidationService:
         # Map trend knob to desired probability of ending positive:
         # -1 -> 0.0, 0 -> 0.5, +1 -> 1.0
         desired_trend = float(user_knobs.get("desired_trend", 0.0))
-        desired_positive_terminal_ratio = float(np.clip(0.5 + 0.5 * desired_trend, 0.0, 1.0))
+        desired_positive_terminal_ratio = float(
+            np.clip(0.5 + 0.5 * desired_trend, 0.0, 1.0)
+        )
 
         trend_match = max(
             0.0,
@@ -322,11 +326,15 @@ class ValidationService:
         # anchored: fat_tails=1.0 → baseline, fat_tails=2.0 → max
         if desired_fat_tails <= 1.0:
             # Scale from near-normal (2.0) up to baseline (4.5)
-            kurtosis_from_fat_tails = 2.0 + (baseline_kurtosis - 2.0) * (desired_fat_tails / 1.0)
+            kurtosis_from_fat_tails = 2.0 + (baseline_kurtosis - 2.0) * (
+                desired_fat_tails / 1.0
+            )
         else:
             # Scale from baseline (4.5) up to max (10.0)
             excess = desired_fat_tails - 1.0  # [0, 1.0]
-            kurtosis_from_fat_tails = baseline_kurtosis + (max_kurtosis - baseline_kurtosis) * min(excess, 1.0)
+            kurtosis_from_fat_tails = baseline_kurtosis + (
+                max_kurtosis - baseline_kurtosis
+            ) * min(excess, 1.0)
 
         # AR(1) persistence adds to unconditional tail heaviness
         momentum_boost = 0.0
