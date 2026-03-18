@@ -2,6 +2,7 @@
 import numpy as np
 from typing import Optional, List, Dict
 import logging
+from arch.univariate.distribution import SkewStudent
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,9 @@ class GARCHFXEngine:
         # Store original parameters for potential modulation
         self.base_alpha = self.alpha
         self.base_beta = self.beta
+
+        # Lazy-initialized true skew-t sampler (arch package)
+        self._skewt_sampler = None
 
         logger.info(
             f"GARCH-FX initialized: σ₀={self.initial_volatility:.4f}, "
@@ -185,7 +189,7 @@ class GARCHFXEngine:
             volatility_forecast: Array of volatility values (from forecast())
             distribution: Distribution type ('normal', 't', 'skewt')
             user_knobs: User-specified desired characteristics
-            historical_returns: Historical returns for computing baseline mean
+            historical_returns: Historical returns (optional; not required for trend target)
 
         Returns:
             Array of returns with correct trend and momentum
@@ -197,15 +201,10 @@ class GARCHFXEngine:
         # 1. Compute target mean return (TREND)
         # ============================================================
 
-        if historical_returns is not None and user_knobs is not None:
-            # Historical baseline
-            historical_mean = np.mean(historical_returns)
-
-            # Adjust for desired trend
-            trend_adjustment = user_knobs.get("desired_trend", 0.0) * 0.15 / 252
-            # Note: 0.15 = ±15% annual, divided by 252 for daily
-
-            mu = historical_mean + trend_adjustment
+        if user_knobs is not None:
+            # Absolute trend target (not relative to historical drift)
+            # desired_trend=-1 -> -15% annual, 0 -> 0%, +1 -> +15% annual.
+            mu = user_knobs.get("desired_trend", 0.0) * 0.15 / 252
         else:
             # Fallback: assume zero drift
             mu = 0.0
@@ -222,19 +221,27 @@ class GARCHFXEngine:
             phi = 0.0  # No autocorrelation by default
 
         # ============================================================
+        # 2b. A/B switch: optional skew-aware shocks
+        # Default is False to preserve current behavior.
+        # ============================================================
+        use_skew_shocks = False
+        if user_knobs is not None:
+            use_skew_shocks = bool(user_knobs.get("use_skew_shocks", False))
+
+        # ============================================================
         # 3. Generate returns with AR(1) + GARCH volatility
         # ============================================================
 
         returns = np.zeros(horizon)
 
         # First return (no previous return to reference)
-        shock_0 = self._generate_shock(distribution)
+        shock_0 = self._generate_shock(distribution, use_skew_shocks=use_skew_shocks)
         returns[0] = mu + volatility_forecast[0] * shock_0
 
         # Subsequent returns with AR(1) component
         for t in range(1, horizon):
             # Generate shock (symmetric distribution for unbiased skewness)
-            shock = self._generate_shock(distribution)
+            shock = self._generate_shock(distribution, use_skew_shocks=use_skew_shocks)
 
             # AR(1) term (creates momentum/autocorrelation)
             ar_component = phi * (returns[t - 1] - mu)
@@ -247,7 +254,7 @@ class GARCHFXEngine:
 
         return returns
 
-    def _generate_shock(self, distribution: str) -> float:
+    def _generate_shock(self, distribution: str, use_skew_shocks: bool = False) -> float:
         """
         Generate a random shock from specified distribution
         Uses SYMMETRIC distributions to avoid uncontrolled skewness
@@ -261,10 +268,30 @@ class GARCHFXEngine:
             shock = shock / np.sqrt(nu / (nu - 2)) if nu > 2 else shock
 
         elif distribution == "skewt":
-            # For skewed-t, we actually want to USE standard normal
-            # to avoid uncontrolled skewness interfering with trend
-            # (Skewness should be a side effect of volatility dynamics, not forced)
-            shock = np.random.randn()
+            if use_skew_shocks:
+                # True standardized skew-t draw using arch's SkewStudent.
+                # Parameters: eta (df), lambda (skew), with constraints
+                # eta > 4 for finite kurtosis and |lambda| < 1.
+                eta = max(float(self.params.get("nu", 8.0)), 4.05)
+                lam = float(self.params.get("lambda", 0.0))
+                lam = float(np.clip(lam, -0.99, 0.99))
+
+                # Build sampler lazily and refresh if parameters changed.
+                if self._skewt_sampler is None:
+                    dist = SkewStudent(seed=np.random.randint(0, 2**31 - 1))
+                    self._skewt_sampler = (eta, lam, dist.simulate([eta, lam]))
+                else:
+                    cached_eta, cached_lam, sampler = self._skewt_sampler
+                    if abs(cached_eta - eta) > 1e-12 or abs(cached_lam - lam) > 1e-12:
+                        dist = SkewStudent(seed=np.random.randint(0, 2**31 - 1))
+                        self._skewt_sampler = (eta, lam, dist.simulate([eta, lam]))
+
+                _, _, sampler = self._skewt_sampler
+                shock = float(sampler(1)[0])
+            else:
+                # Default behavior (safe): keep shocks symmetric
+                # to avoid uncontrolled skewness interfering with trend.
+                shock = np.random.randn()
 
         else:  # "normal"
             # Standard normal (symmetric)

@@ -75,10 +75,17 @@ class GARCHService:
             params["lambda"] = float(fitted.params["lambda"])
 
         # Store GARCH parameters for GARCH-FX usage
+        # Floor nu at 4.0: t(ν) requires ν > 4 for finite excess kurtosis.
+        # t(4.5) → excess kurtosis ≈ 12, t(5) → 6, t(6) → 3.
+        # Using the true fitted ν (often 4–6 for equities) lets the shock
+        # distribution carry realistic heavy tails instead of suppressing them.
+        fitted_nu = params.get("nu", 8)
         self.garch_params = {
             "alpha": params["alpha"],
             "beta": params["beta"],
             "omega": params["omega"],
+            "nu": max(float(fitted_nu), 4.0),
+            "lambda": float(params.get("lambda", 0.0)),
         }
 
         # FIX: Store distribution type separately
@@ -174,6 +181,15 @@ class GARCHService:
             f"Starting GARCH-FX generation: {num_scenarios} scenarios, "
             f"θ={theta}, scenario={scenario_type}"
         )
+        force_skewt_distribution = bool(
+            (user_knobs or {}).get("force_skewt_distribution", False)
+        )
+        shock_distribution = "skewt" if force_skewt_distribution else self.distribution
+        logger.info(
+            f"Return shock config: distribution={shock_distribution}, "
+            f"use_skew_shocks={bool((user_knobs or {}).get('use_skew_shocks', False))}, "
+            f"force_skewt_distribution={force_skewt_distribution}"
+        )
 
         from .garchfx_engine import GARCHFXEngine
 
@@ -219,7 +235,7 @@ class GARCHService:
             # ============================================================
             returns = engine.generate_returns_from_volatility(
                 volatility_forecast,
-                distribution=self.distribution,
+                distribution=shock_distribution,
                 user_knobs=user_knobs,  # ← For trend and momentum
                 historical_returns=historical_returns,  # ← For baseline mean
             )
@@ -228,7 +244,8 @@ class GARCHService:
             close_prices_scenario = initial_price * np.exp(cumulative_returns)
 
             ohlcv = self._generate_ohlcv_from_close(
-                close_prices_scenario, volatility_forecast
+                close_prices_scenario, volatility_forecast/ self.scale_factor,
+                nu=self.garch_params.get("nu", 8),
             )
             scenarios.append(ohlcv)
 
@@ -294,7 +311,9 @@ class GARCHService:
                 close_prices = initial_price_value * np.exp(cumulative_returns)
 
                 # Generate OHLCV
-                ohlcv = self._generate_ohlcv_from_close(close_prices, volatility)
+                ohlcv = self._generate_ohlcv_from_close(
+                    close_prices, volatility, nu=self.garch_params.get("nu", 8)
+                )
                 scenarios.append(ohlcv)
 
                 if (scenario_idx + 1) % 100 == 0:
@@ -310,12 +329,16 @@ class GARCHService:
             raise
 
     def _generate_ohlcv_from_close(
-        self, close_prices: np.ndarray, volatility: np.ndarray
+        self, close_prices: np.ndarray, volatility: np.ndarray, nu: float = 8
     ) -> pd.DataFrame:
         """
-        Generate realistic OHLCV from close prices
+        Generate realistic OHLCV from close prices.
+        Open gap and High/Low range use standardised Student-t shocks,
+        consistent with the t-distributed innovations used for close prices.
         """
         n = len(close_prices)
+        nu = max(float(nu), 4.01)
+        logger.info(f"OHLCV generation using nu={nu}") 
 
         # Ensure volatility matches length
         if len(volatility) != n:
@@ -327,6 +350,12 @@ class GARCHService:
             else:
                 volatility = volatility[:n]
 
+        def _t_shock() -> float:
+            """Standardised Student-t shock with unit variance, clipped to ±4."""
+            shock = np.random.standard_t(nu)
+            shock = shock / np.sqrt(nu / (nu - 2)) if nu > 2 else shock
+            return float(np.clip(shock, -4.0, 4.0))
+
         # Build OHLCV data row by row
         ohlcv_rows = []
 
@@ -334,15 +363,15 @@ class GARCHService:
             C = float(close_prices[i])
             sigma = float(volatility[i])
 
-            # Open: Previous close + gap
+            # Open: Previous close + t-distributed overnight gap
             if i > 0:
-                gap = np.random.normal(0, sigma * 0.3)
+                gap = sigma * 0.3 * _t_shock()
                 O = float(close_prices[i - 1] * (1 + gap))
             else:
                 O = C
 
-            # High/Low using Parkinson range
-            hl_range = abs(np.random.normal(0, sigma * 1.5))
+            # High/Low using Parkinson range with t-distributed spread
+            hl_range = abs(sigma * 1.5 * _t_shock())
             H = max(O, C) * (1 + hl_range)
             L = min(O, C) * (1 - hl_range)
 
@@ -385,6 +414,20 @@ class GARCHService:
             metrics = validator.validate_against_desired(
                 synthetic_returns_array, user_knobs
             )
+
+            # Path-level trend direction metric (using all simulated paths)
+            trend_metrics = validator.compute_positive_terminal_ratio_metrics(
+                scenarios, user_knobs or {}
+            )
+            metrics.update(trend_metrics)
+
+            # Overall score reflects path-level trend match
+            metrics["overall_match"] = (
+                metrics.get("trend_match", 0.0)
+                + metrics.get("volatility_match", 0.0)
+                + metrics.get("kurtosis_match", 0.0)
+                + metrics.get("acf_match", 0.0)
+            ) / 4.0
 
             logger.info(f"Validation complete: {metrics}")
             return metrics

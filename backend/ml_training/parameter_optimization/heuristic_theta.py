@@ -52,7 +52,9 @@ def compute_theta_hybrid(user_knobs, historical_returns):
         theta *= momentum_damping
 
     # Step 4: Clip to reasonable range
-    theta = np.clip(theta, 1e-4, 1e-2)
+    # Upper bound 5e-2: allows high vol-of-vol needed to replicate
+    # excess kurtosis > 6 in assets with very fat-tailed returns.
+    theta = np.clip(theta, 1e-4, 5e-2)
 
     return float(theta)
 

@@ -39,7 +39,7 @@ def clean_state():
 def _generate_payload():
     return {
         "ticker": "AAPL",
-        "horizon": 252,
+        "horizon": 500,
         "desired_volatility": 1.1,
         "desired_trend": 0.1,
         "desired_fat_tails": 1.2,
