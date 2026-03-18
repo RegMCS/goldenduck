@@ -8,6 +8,7 @@ from pathlib import Path
 import yfinance as yf
 import numpy as np
 import pandas as pd
+from scipy import stats
 
 import io
 import boto3
@@ -35,9 +36,44 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 logger = logging.getLogger("garch-worker")
+MIN_CSV_DATA_POINTS = 500
 
 # Cache the risk-free rate so we only fetch it once per worker process
 _cached_rf_rate: float | None = None
+
+
+def _infer_skew_shock_flags(returns: np.ndarray) -> tuple[bool, dict]:
+    """
+    Infer whether to enable skew-aware shocks based on historical return skewness.
+
+    Rule:
+    - Enable skew-aware shocks if sample skew is meaningfully negative.
+    - Use both magnitude and sampling-noise threshold for robustness.
+    """
+    clean = np.asarray(returns).flatten()
+    clean = clean[np.isfinite(clean)]
+    n = int(len(clean))
+
+    if n < 50:
+        return False, {
+            "historical_skewness": 0.0,
+            "skew_threshold": 0.0,
+            "sample_size": n,
+            "reason": "insufficient_samples",
+        }
+
+    sample_skew = float(stats.skew(clean, bias=False))
+    # Approximate std error of sample skewness under normality.
+    skew_se = float(np.sqrt(6.0 / n))
+    threshold = max(0.10, skew_se)
+    enable = bool(sample_skew < -threshold)
+
+    return enable, {
+        "historical_skewness": sample_skew,
+        "skew_threshold": threshold,
+        "sample_size": n,
+        "reason": "negative_skew_detected" if enable else "not_negative_enough",
+    }
 
 
 def _get_risk_free_rate() -> float:
@@ -51,7 +87,12 @@ def _get_risk_free_rate() -> float:
     try:
         tbill = yf.download("^IRX", period="5d", progress=False, threads=False)
         if not tbill.empty:
-            rf = float(tbill["Close"].iloc[-1]) / 100  # ^IRX is quoted in percent
+            close = tbill["Close"]
+            # yfinance ≥0.2 returns a MultiIndex DataFrame for single tickers;
+            # squeeze to a plain Series if needed.
+            if isinstance(close, pd.DataFrame):
+                close = close.iloc[:, 0]
+            rf = float(close.iloc[-1]) / 100  # ^IRX is quoted in percent
             _cached_rf_rate = rf
             logger.info(f"Risk-free rate fetched from ^IRX: {rf:.4%}")
             return rf
@@ -268,12 +309,19 @@ while True:
         num_scenarios = 100
         volatility_multiplier = 1.0
 
-        # Extract user knobs for ML parameter prediction
+        # Extract user knobs for ML parameter prediction.
+        # Skew flags may be auto-overridden later after data is loaded.
         user_knobs = {
             "desired_volatility": float(params.get("desired_volatility", 1.0)),
             "desired_trend": float(params.get("desired_trend", 0.0)),
             "desired_fat_tails": float(params.get("desired_fat_tails", 1.0)),
             "desired_momentum": float(params.get("desired_momentum", 0.5)),
+            # A/B toggle for asymmetric innovation shocks when dist='skewt'
+            "use_skew_shocks": bool(params.get("use_skew_shocks", False)),
+            # A/B toggle to force using 'skewt' branch for return shocks
+            "force_skewt_distribution": bool(
+                params.get("force_skewt_distribution", False)
+            ),
         }
 
         # Load data from CSV or Yahoo Finance
@@ -306,6 +354,12 @@ while True:
 
             # Keep only the required OHLCV columns
             data = data[required_cols]
+
+            # Ensure sufficient data for stable fitting/validation
+            if len(data) < MIN_CSV_DATA_POINTS:
+                raise ValueError(
+                    f"CSV must contain at least {MIN_CSV_DATA_POINTS} data rows; found {len(data)}"
+                )
 
             # Create a date index if not present (for uploaded CSV without dates)
             # Use recent dates working backwards from today
@@ -344,6 +398,31 @@ while True:
         # Predict delta and theta using ML
         logger.info(f"Predicting GARCH-FX parameters from user knobs...")
         returns = np.log(data["Close"].values[1:] / data["Close"].values[:-1])
+
+        # Auto mode for skew flags:
+        # If user omits a flag, infer from data skewness.
+        auto_enable_skew, skew_meta = _infer_skew_shock_flags(returns)
+        use_skew_user_provided = "use_skew_shocks" in params
+        force_skewt_user_provided = "force_skewt_distribution" in params
+
+        if not use_skew_user_provided:
+            user_knobs["use_skew_shocks"] = auto_enable_skew
+        if not force_skewt_user_provided:
+            user_knobs["force_skewt_distribution"] = auto_enable_skew
+
+        logger.info(
+            "Skew flag decision: use_skew_shocks=%s, force_skewt_distribution=%s "
+            "(user_provided_use=%s, user_provided_force=%s, hist_skew=%.4f, threshold=%.4f, n=%s, reason=%s)",
+            user_knobs["use_skew_shocks"],
+            user_knobs["force_skewt_distribution"],
+            use_skew_user_provided,
+            force_skewt_user_provided,
+            skew_meta["historical_skewness"],
+            skew_meta["skew_threshold"],
+            skew_meta["sample_size"],
+            skew_meta["reason"],
+        )
+
         pred_params = predict_parameters(
             historical_returns=returns, user_knobs=user_knobs
         )
@@ -415,6 +494,35 @@ while True:
         try:
             chart_data = compute_chart_data(data, scenarios[0])
             chart_data["overallMatch"] = float(metrics.get("overall_match", 0.0))
+
+            # Override per-scenario kurtosis/skewness/std with values computed
+            # across all 100 scenarios (from validation), which are far more
+            # statistically robust than the single-scenario estimates.
+            if "kurtosis_synthetic" in metrics:
+                chart_data["stats"]["synthetic"]["kurtosis"] = metrics[
+                    "kurtosis_synthetic"
+                ]
+            if "kurtosis_historical" in metrics:
+                chart_data["stats"]["historical"]["kurtosis"] = metrics[
+                    "kurtosis_historical"
+                ]
+            if "skewness_synthetic" in metrics:
+                chart_data["stats"]["synthetic"]["skewness"] = metrics[
+                    "skewness_synthetic"
+                ]
+            if "skewness_historical" in metrics:
+                chart_data["stats"]["historical"]["skewness"] = metrics[
+                    "skewness_historical"
+                ]
+            if "volatility_synthetic" in metrics:
+                chart_data["stats"]["synthetic"]["std"] = metrics[
+                    "volatility_synthetic"
+                ]
+            if "volatility_historical" in metrics:
+                chart_data["stats"]["historical"]["std"] = metrics[
+                    "volatility_historical"
+                ]
+
             job_store.set_chart_data(job_id, chart_data)
             logger.info("Chart data stored for job %s", job_id)
         except Exception as e:
@@ -426,6 +534,13 @@ while True:
             "delta_predicted": float(pred_params["delta"]),
             "theta_predicted": float(pred_params["theta"]),
             "delta_confidence": pred_params["delta_confidence"],
+            "historical_skewness": float(skew_meta["historical_skewness"]),
+            "historical_skewness_threshold": float(skew_meta["skew_threshold"]),
+            "skew_detection_sample_size": int(skew_meta["sample_size"]),
+            "use_skew_shocks_effective": bool(user_knobs["use_skew_shocks"]),
+            "force_skewt_distribution_effective": bool(
+                user_knobs["force_skewt_distribution"]
+            ),
         }
         job_store.set_parameters(job_id, results_with_predictions)
         job_store.set_metrics(job_id, metrics)

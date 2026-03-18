@@ -5,6 +5,71 @@ Comprehensively covers all 4 user knobs: volatility, trend, fat_tails, momentum
 
 import numpy as np
 from scipy import stats
+from statsmodels.tsa.stattools import acf as sm_acf
+
+
+def _compute_target_kurtosis(user_knobs):
+    """
+    Model-aware kurtosis target — mirrors compute_target_kurtosis in
+    validation_service.py exactly so training and inference optimise
+    against the same objective.
+
+    fat_tails = 0.5  → ~2.0  (near-normal)
+    fat_tails = 1.0  → ~4.5  (model baseline with t(6)+GARCH)
+    fat_tails = 2.0  → ~10.0 (near model ceiling)
+    """
+    desired_fat_tails = float(user_knobs.get("desired_fat_tails", 1.0))
+    desired_momentum = float(user_knobs.get("desired_momentum", 0.5))
+
+    baseline_kurtosis = 4.5
+    max_kurtosis = 10.0
+
+    if desired_fat_tails <= 1.0:
+        kurtosis_from_fat_tails = 2.0 + (baseline_kurtosis - 2.0) * (
+            desired_fat_tails / 1.0
+        )
+    else:
+        excess = desired_fat_tails - 1.0
+        kurtosis_from_fat_tails = baseline_kurtosis + (
+            max_kurtosis - baseline_kurtosis
+        ) * min(excess, 1.0)
+
+    momentum_boost = 0.0
+    if desired_momentum > 0.7:
+        momentum_boost = (desired_momentum - 0.7) / 0.3 * 2.0
+
+    return float(min(kurtosis_from_fat_tails + momentum_boost, max_kurtosis))
+
+
+def _compute_target_daily_mean(user_knobs):
+    """
+    Match validation_service.py trend target exactly (daily units).
+    Absolute bull/bear semantics:
+      desired_trend=-1 -> -15% annual, 0 -> 0%, +1 -> +15% annual.
+    """
+    desired_trend = float(user_knobs.get("desired_trend", 0.0))
+    return desired_trend * 0.15 / 252
+
+
+def _compute_mean_sign_score(synthetic_mean, desired_trend, synthetic_std, sample_size):
+    """
+    Trend score focused on direction (bull/bear), not exact mean magnitude.
+    Mirrors ValidationService._compute_mean_sign_match().
+    """
+    neutral_trend_eps = 0.1
+    fixed_floor_band = 0.05 / 252  # ±5% annualised treated as neutral
+    if sample_size > 1 and synthetic_std > 0:
+        se_mean = synthetic_std / np.sqrt(sample_size)
+        noise_band = 2.0 * se_mean
+    else:
+        noise_band = fixed_floor_band
+    neutral_mean_band = max(fixed_floor_band, noise_band)
+
+    if abs(desired_trend) < neutral_trend_eps:
+        return float(np.exp(-abs(synthetic_mean) / (neutral_mean_band + 1e-12)))
+
+    desired_sign = 1.0 if desired_trend > 0 else -1.0
+    return 1.0 if (synthetic_mean * desired_sign) > 0 else 0.0
 
 
 def score_synthetic_data(synthetic_returns, historical_returns, user_knobs):
@@ -32,34 +97,30 @@ def score_synthetic_data(synthetic_returns, historical_returns, user_knobs):
     # ============================================================
     # Extract synthetic characteristics
     # ============================================================
-    synthetic_vol = np.std(synthetic_flat) * np.sqrt(252)
-    synthetic_mean = np.mean(synthetic_flat) * 252  # Annualized mean return
+    synthetic_std = np.std(synthetic_flat)
+    synthetic_vol = synthetic_std * np.sqrt(252)
+    synthetic_mean = np.mean(synthetic_flat)  # Daily mean return
     synthetic_kurtosis = stats.kurtosis(synthetic_flat)
     synthetic_skew = stats.skew(synthetic_flat)
 
-    # Autocorrelation (momentum)
-    if len(synthetic_flat) > 1:
-        try:
-            synthetic_autocorr = np.corrcoef(synthetic_flat[:-1], synthetic_flat[1:])[
-                0, 1
-            ]
-            if not np.isfinite(synthetic_autocorr):
-                synthetic_autocorr = 0
-        except:
-            synthetic_autocorr = 0
-    else:
-        synthetic_autocorr = 0
+    # Autocorrelation (momentum) — use statsmodels ACF to match inference
+    try:
+        synthetic_autocorr = float(sm_acf(synthetic_flat, nlags=10, fft=False)[1])
+        if not np.isfinite(synthetic_autocorr):
+            synthetic_autocorr = 0.0
+    except Exception:
+        synthetic_autocorr = 0.0
 
     # ============================================================
     # Extract historical characteristics
     # ============================================================
     historical_vol = np.std(historical_returns) * np.sqrt(252)
-    historical_mean = np.mean(historical_returns) * 252
+    historical_mean = np.mean(historical_returns)
     historical_kurtosis = stats.kurtosis(historical_returns)
     historical_autocorr = (
-        np.corrcoef(historical_returns[:-1], historical_returns[1:])[0, 1]
+        float(sm_acf(historical_returns, nlags=10, fft=False)[1])
         if len(historical_returns) > 1
-        else 0
+        else 0.0
     )
 
     # ============================================================
@@ -69,32 +130,17 @@ def score_synthetic_data(synthetic_returns, historical_returns, user_knobs):
     # 1. Target volatility
     target_vol = historical_vol * user_knobs["desired_volatility"]
 
-    # 2. Target mean return (trend)
-    # Map trend knob [-1, +1] to mean return adjustment
-    # trend = -1 → -15% annual return (strong bear)
-    # trend = 0 → historical mean (neutral)
-    # trend = +1 → +15% annual return (strong bull)
-    trend_knob = user_knobs["desired_trend"]
-    if trend_knob < 0:
-        # Bearish: scale down to negative
-        target_mean = historical_mean + (trend_knob * 0.15)  # -1 → -15%
-    elif trend_knob > 0:
-        # Bullish: scale up to positive
-        target_mean = historical_mean + (trend_knob * 0.15)  # +1 → +15%
-    else:
-        # Neutral: keep historical
-        target_mean = historical_mean
+    # 2. Target mean return (trend) - daily units, aligned with inference
+    target_mean = _compute_target_daily_mean(user_knobs)
 
-    # 3. Target kurtosis (fat tails)
-    # Additive adjustment (kurtosis doesn't scale linearly)
-    target_kurtosis = historical_kurtosis + 3 * (user_knobs["desired_fat_tails"] - 1.0)
+    # 3. Target kurtosis — model-aware formula matching validation_service.py
+    target_kurtosis = _compute_target_kurtosis(user_knobs)
 
-    # 4. Target autocorrelation (momentum)
-    # Map momentum [0, 1] to autocorr [-0.1, 0.3]
-    # momentum = 0 → autocorr = -0.1 (mean reverting)
-    # momentum = 0.5 → autocorr = 0.1 (neutral)
-    # momentum = 1.0 → autocorr = 0.3 (strong trending)
-    target_autocorr = -0.1 + 0.4 * user_knobs["desired_momentum"]
+    # 4. Target autocorrelation (momentum) with GARCH dampening
+    # phi maps [0,1] → [-0.1, 0.3]; multiplied by 0.9 to match
+    # the dampening applied at inference in validation_service.py
+    phi = -0.1 + 0.4 * user_knobs["desired_momentum"]
+    target_autocorr = phi * 0.9
 
     # ============================================================
     # Score each characteristic
@@ -105,9 +151,14 @@ def score_synthetic_data(synthetic_returns, historical_returns, user_knobs):
     vol_score = max(0, 1 - vol_error)
 
     # 2. Trend score (20%)
-    # More lenient: within ±5% is good
+    # Same normalization as inference validation service
     mean_error = abs(synthetic_mean - target_mean)
-    mean_score = max(0, 1 - mean_error / 0.05)  # ±5% tolerance
+    mean_score = _compute_mean_sign_score(
+        synthetic_mean,
+        float(user_knobs.get("desired_trend", 0.0)),
+        synthetic_std,
+        len(synthetic_flat),
+    )
 
     # 3. Kurtosis score (25%)
     kurtosis_error = abs(synthetic_kurtosis - target_kurtosis) / max(
@@ -145,36 +196,42 @@ def detailed_score_breakdown(synthetic_returns, historical_returns, user_knobs):
         return {"error": "Insufficient valid data"}
 
     # Extract characteristics
-    synthetic_vol = np.std(synthetic_flat) * np.sqrt(252)
-    synthetic_mean = np.mean(synthetic_flat) * 252
+    synthetic_std = np.std(synthetic_flat)
+    synthetic_vol = synthetic_std * np.sqrt(252)
+    synthetic_mean = np.mean(synthetic_flat)
     synthetic_kurtosis = stats.kurtosis(synthetic_flat)
 
     try:
-        synthetic_autocorr = np.corrcoef(synthetic_flat[:-1], synthetic_flat[1:])[0, 1]
+        synthetic_autocorr = float(sm_acf(synthetic_flat, nlags=10, fft=False)[1])
         if not np.isfinite(synthetic_autocorr):
-            synthetic_autocorr = 0
-    except:
-        synthetic_autocorr = 0
+            synthetic_autocorr = 0.0
+    except Exception:
+        synthetic_autocorr = 0.0
 
     historical_vol = np.std(historical_returns) * np.sqrt(252)
-    historical_mean = np.mean(historical_returns) * 252
+    historical_mean = np.mean(historical_returns)
     historical_kurtosis = stats.kurtosis(historical_returns)
 
     # Calculate targets
     target_vol = historical_vol * user_knobs["desired_volatility"]
 
-    trend_knob = user_knobs["desired_trend"]
-    target_mean = historical_mean + (trend_knob * 0.15)
+    target_mean = _compute_target_daily_mean(user_knobs)
 
-    target_kurtosis = historical_kurtosis + 3 * (user_knobs["desired_fat_tails"] - 1.0)
-    target_autocorr = -0.1 + 0.4 * user_knobs["desired_momentum"]
+    target_kurtosis = _compute_target_kurtosis(user_knobs)
+    phi = -0.1 + 0.4 * user_knobs["desired_momentum"]
+    target_autocorr = phi * 0.9
 
     # Calculate scores
     vol_error = abs(synthetic_vol - target_vol) / max(target_vol, 0.01)
     vol_score = max(0, 1 - vol_error)
 
     mean_error = abs(synthetic_mean - target_mean)
-    mean_score = max(0, 1 - mean_error / 0.05)
+    mean_score = _compute_mean_sign_score(
+        synthetic_mean,
+        float(user_knobs.get("desired_trend", 0.0)),
+        synthetic_std,
+        len(synthetic_flat),
+    )
 
     kurtosis_error = abs(synthetic_kurtosis - target_kurtosis) / max(
         abs(target_kurtosis), 3

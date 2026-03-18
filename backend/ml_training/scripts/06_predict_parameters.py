@@ -20,6 +20,14 @@ from parameter_optimization.heuristic_theta import compute_theta_hybrid
 
 logger = logging.getLogger(__name__)
 
+# IMPORTANT: Keep this order fixed to match training feature layout (32 dims total)
+USER_KNOB_ORDER = (
+    "desired_volatility",
+    "desired_trend",
+    "desired_fat_tails",
+    "desired_momentum",
+)
+
 
 class ParameterPredictor:
     """
@@ -102,7 +110,12 @@ class ParameterPredictor:
 
             # Extract features for delta prediction
             asset_features = extract_all_features(historical_returns)
-            user_knob_features = np.array(list(user_knobs.values()))
+
+            # Use ONLY the 4 model knobs in fixed order.
+            # Ignore runtime flags like use_skew_shocks/force_skewt_distribution.
+            user_knob_features = np.array(
+                [float(user_knobs.get(k, 0.0)) for k in USER_KNOB_ORDER]
+            )
             X = np.concatenate([asset_features, user_knob_features])
 
             # Predict delta (ML model)

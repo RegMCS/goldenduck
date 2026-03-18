@@ -21,6 +21,13 @@ from config.training_config import (
 from feature_extraction.catch22_extractor import extract_all_features
 from parameter_optimization.grid_search import find_optimal_parameters
 
+USER_KNOB_ORDER = (
+    "desired_volatility",
+    "desired_trend",
+    "desired_fat_tails",
+    "desired_momentum",
+)
+
 
 def main():
     # Load asset split
@@ -70,15 +77,17 @@ def generate_samples_for_assets(asset_list, split="train"):
                     [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
                 ),
                 "desired_trend": np.random.choice([-1.0, -0.5, 0.0, 0.5, 1.0]),
-                "desired_fat_tails": np.random.choice([0.8, 1.0, 1.2, 1.5]),
-                "desired_momentum": np.random.choice([0.5, 0.75, 1.0, 1.25]),
+                "desired_fat_tails": np.random.choice([0.5, 1.0, 1.2, 1.5, 2.0]),
+                "desired_momentum": np.random.choice([0, 0.5, 0.75, 1.0]),
             }
 
             # Find optimal parameters (ground truth)
             optimal_delta, optimal_theta = find_optimal_parameters(returns, user_knobs)
 
             # Create sample
-            user_knob_features = np.array(list(user_knobs.values()))
+            user_knob_features = np.array(
+                [float(user_knobs[k]) for k in USER_KNOB_ORDER]
+            )
             X = np.concatenate([asset_features, user_knob_features])
 
             samples.append(

@@ -12,15 +12,21 @@ function ComparisonRow({
   synthetic,
   isPercent = false,
   lowerIsBetter = false,
+  showSign = false,
 }: {
   label: string
   historical: number
   synthetic: number
   isPercent?: boolean
   lowerIsBetter?: boolean
+  showSign?: boolean
 }) {
-  const fmt = (v: number) =>
-    isPercent ? `${(v * 100).toFixed(2)}%` : v.toFixed(4)
+  const fmt = (v: number) => {
+    if (isPercent) {
+      return `${showSign && v >= 0 ? "+" : ""}${(v * 100).toFixed(2)}%`
+    }
+    return `${showSign && v >= 0 ? "+" : ""}${v.toFixed(4)}`
+  }
 
   const absH = Math.abs(historical)
   const absS = Math.abs(synthetic)
@@ -144,13 +150,14 @@ export function StatsPanel({ stats }: StatsPanelProps) {
         />
         <ComparisonRow
           label="Skewness"
-          historical={Math.abs(h.skewness)}
-          synthetic={Math.abs(s.skewness)}
+          historical={h.skewness}
+          synthetic={s.skewness}
+          showSign
         />
         <ComparisonRow
           label="Excess Kurtosis"
-          historical={Math.abs(h.kurtosis)}
-          synthetic={Math.abs(s.kurtosis)}
+          historical={h.kurtosis}
+          synthetic={s.kurtosis}
         />
         <div className="py-3 border-b border-border/50 last:border-0">
           <div className="flex items-center justify-between mb-1">
