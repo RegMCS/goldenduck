@@ -6,7 +6,8 @@ import { ArrowLeft, Loader2 } from "lucide-react"
 import { Header } from "@/components/header"
 import { VisualizationResults } from "@/components/graphs-results"
 import { Button } from "@/components/ui/button"
-import { type GeneratedData } from "@/lib/types"
+import { type GeneratedData, type JobParameters } from "@/lib/types"
+import { InfoTooltip } from "@/components/info-tooltip"
 import { useAuth } from "@/components/auth-provider"
 
 function ResultsContent() {
@@ -19,6 +20,7 @@ function ResultsContent() {
   const backHref = fromReports ? "/reports" : "/"
 
   const [data, setData] = useState<GeneratedData | null>(null)
+  const [jobParams, setJobParams] = useState<JobParameters | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -31,6 +33,8 @@ function ResultsContent() {
         .then((d) => {
           if (d.chart_data) {
             setData(d.chart_data as GeneratedData)
+            const raw = localStorage.getItem(`goldenduck_job_params_${jobId}`)
+            if (raw) setJobParams(JSON.parse(raw) as JobParameters)
           } else {
             setError("No visualisation data available for this job.")
           }
@@ -95,7 +99,34 @@ function ResultsContent() {
           </div>
         )}
 
-        {!loading && !error && data && <VisualizationResults data={data} />}
+        {!loading && !error && data && (
+          <>
+            {jobParams && (
+              <div className="mb-6 rounded-xl border border-border bg-card px-5 py-4">
+                <h3 className="text-sm font-semibold text-foreground mb-3">Input Parameters</h3>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+                  {[
+                    { label: "Volatility", value: jobParams.volatility.toFixed(2), range: "Range: 0.5 – 2.0" },
+                    { label: "Trend", value: jobParams.trend.toFixed(2), range: "Range: −1.0 – 1.0" },
+                    { label: "Fat Tails", value: jobParams.fatTails.toFixed(2), range: "Range: 0.5 – 2.0" },
+                    { label: "V Momentum", value: jobParams.momentum.toFixed(2), range: "Range: 0.0 – 1.0" },
+                    { label: "Time Horizon", value: `${jobParams.timeHorizon} days`, range: "Range: 500 – 2600 days" },
+                    ...(jobParams.fileName ? [{ label: "Input File", value: jobParams.fileName, range: "" }] : []),
+                  ].map((item) => (
+                    <div key={item.label}>
+                      <div className="flex items-center gap-1 mb-0.5">
+                        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">{item.label}</p>
+                        {item.range && <InfoTooltip content={item.range} />}
+                      </div>
+                      <p className="text-sm font-mono font-medium text-foreground truncate" title={item.value}>{item.value}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <VisualizationResults data={data} />
+          </>
+        )}
       </main>
     </div>
   )

@@ -301,6 +301,17 @@ export function ParameterizationForm() {
             clearInterval(pollIntervalRef.current!)
             setDownloadUrl(`/api/download/user/${userId}/${data.job_id}`)
             setIsGenerating(false)
+            localStorage.setItem(
+              `goldenduck_job_params_${data.job_id}`,
+              JSON.stringify({
+                volatility: parameters.volatility,
+                trend: parameters.trend,
+                fatTails: parameters.fatTails,
+                momentum: parameters.momentum,
+                timeHorizon: parameters.timeHorizon,
+                fileName: parameters.inputFile?.name ?? null,
+              })
+            )
             router.push(`/results?jobId=${data.job_id}`)
           } else if (statusData.status === "failed") {
             clearInterval(pollIntervalRef.current!)

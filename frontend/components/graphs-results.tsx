@@ -167,31 +167,26 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
       <section className="rounded-xl border border-border bg-card p-5">
         <div className="mb-5">
           <h3 className="text-base font-semibold text-foreground">OHLCV Candlestick Comparison</h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Historical (left) vs synthetic (right) · Hover candles for full OHLCV detail · Volume bars below each chart
-          </p>
         </div>
-        <div className="grid gap-4 lg:grid-cols-2">
-          <div className="rounded-lg border border-blue-500/20 bg-background p-3">
+        <div className="grid gap-6 lg:grid-cols-2">
+          <div className="rounded-lg border border-blue-500/20 bg-background pt-5 pr-0 pb-5 pl-0">
             <CandlestickChart
               data={data.historical}
               title="Historical"
-              subtitle={`${data.historical.length} pts · ${data.historical[0]?.date} → ${data.historical[data.historical.length - 1]?.date}`}
-              height={320}
+              height={420}
             />
           </div>
-          <div className="rounded-lg border border-amber-500/20 bg-background p-3">
+          <div className="rounded-lg border border-amber-500/20 bg-background pt-5 pr-0 pb-5 pl-0">
             <CandlestickChart
               data={data.synthetic}
               title="Synthetic"
-              subtitle={`${data.synthetic.length} pts · Generated`}
-              height={320}
+              height={420}
             />
           </div>
         </div>
       </section>
 
-      {/* Analytics tabs — brush-zoomable */}
+      {/* Analytics */}
       <section className="space-y-4">
         <h3 className="text-base font-semibold text-foreground">Analytics</h3>
         <Tabs defaultValue="overlay">

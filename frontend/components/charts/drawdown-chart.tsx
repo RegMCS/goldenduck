@@ -20,15 +20,11 @@ interface DrawdownChartProps {
 }
 
 export function DrawdownChart({ data, height = 400 }: DrawdownChartProps) {
-  const displayData = useMemo(() => {
-    const maxPoints = 300
-    const step = Math.max(1, Math.floor(data.length / maxPoints))
-    return data.filter((_, i) => i % step === 0).map((d) => ({
-      ...d,
-      historicalDdPct: d.historicalDrawdown * 100,
-      syntheticDdPct: d.syntheticDrawdown * 100,
-    }))
-  }, [data])
+  const displayData = useMemo(() => data.map((d) => ({
+    ...d,
+    historicalDdPct: d.historicalDrawdown * 100,
+    syntheticDdPct: d.syntheticDrawdown * 100,
+  })), [data])
 
   const { histMaxDd, synthMaxDd, histAvgDd, synthAvgDd } = useMemo(() => {
     const hDds = data.map((d) => d.historicalDrawdown)

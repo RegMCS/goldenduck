@@ -20,11 +20,7 @@ interface PriceOverlayChartProps {
 }
 
 export function PriceOverlayChart({ data, height = 400 }: PriceOverlayChartProps) {
-  const displayData = useMemo(() => {
-    const maxPoints = 300
-    const step = Math.max(1, Math.floor(data.length / maxPoints))
-    return data.filter((_, i) => i % step === 0)
-  }, [data])
+  const displayData = useMemo(() => data, [data])
 
   const correlation = useMemo(() => {
     if (data.length < 2) return 0

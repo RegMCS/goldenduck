@@ -20,15 +20,11 @@ interface CumulativeReturnChartProps {
 }
 
 export function CumulativeReturnChart({ data, height = 400 }: CumulativeReturnChartProps) {
-  const displayData = useMemo(() => {
-    const maxPoints = 300
-    const step = Math.max(1, Math.floor(data.length / maxPoints))
-    return data.filter((_, i) => i % step === 0).map((d) => ({
-      ...d,
-      historicalCumPct: d.historicalCumReturn * 100,
-      syntheticCumPct: d.syntheticCumReturn * 100,
-    }))
-  }, [data])
+  const displayData = useMemo(() => data.map((d) => ({
+    ...d,
+    historicalCumPct: d.historicalCumReturn * 100,
+    syntheticCumPct: d.syntheticCumReturn * 100,
+  })), [data])
 
   const { histFinalReturn, synthFinalReturn, trackingError } = useMemo(() => {
     if (data.length === 0) return { histFinalReturn: 0, synthFinalReturn: 0, trackingError: 0 }

@@ -88,6 +88,15 @@ export interface GeneratedData {
   overallMatch?: number
 }
 
+export interface JobParameters {
+  volatility: number
+  trend: number
+  fatTails: number
+  momentum: number
+  timeHorizon: number
+  fileName: string | null
+}
+
 export const REQUIRED_CSV_HEADERS = ["open", "high", "low", "close", "volume"]
 
 export type JobStatus = "queued" | "running" | "completed" | "failed"
