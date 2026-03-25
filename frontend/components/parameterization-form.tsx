@@ -345,7 +345,7 @@ export function ParameterizationForm() {
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
       <div className="space-y-6">
-        <Card>
+                <Card>
           <CardHeader>
             <CardTitle className="text-base font-semibold text-foreground">
               Input Time Series
@@ -407,6 +407,103 @@ export function ParameterizationForm() {
             </div>
           </CardContent>
         </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base font-semibold text-foreground">
+              Model Parameters
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-6 sm:grid-cols-2">
+            <ParameterField
+              label="Volatility"
+              description="Controls the magnitude of price fluctuations"
+              tooltip={[
+                "Scales overall price swings.",
+                "1.0 = historical level",
+                "2.0 = twice as volatile",
+              ]}
+              value={parameters.volatility}
+              onChange={(v) => updateParameter("volatility", v)}
+              min={0.5}
+              max={2.0}
+              step={0.01}
+            />
+            <ParameterField
+              label="Trend"
+              description="Market direction bias (-1 bearish, 0 neutral, +1 bullish)"
+              tooltip={[
+                "Sets directional drift (annual % change).",
+                "0 = 0% (neutral)",
+                "±0.25 = ±10% annual",
+                "±0.5 = ±25% annual",
+                "±1.0 = ±50% annual",
+                "Note: extreme values (> 0.7) slightly increase skewness as a side effect.",
+              ]}
+              value={parameters.trend}
+              onChange={(v) => updateParameter("trend", v)}
+              min={-1}
+              max={1}
+              step={0.01}
+            />
+            <ParameterField
+              label="Fat Tails"
+              description="Probability of extreme price movements"
+              tooltip={[
+                "Controls how often extreme moves occur.",
+                "1.0 = moderate tail frequency",
+                "2.0 = crash-like tail frequency",
+              ]}
+              value={parameters.fatTails}
+              onChange={(v) => updateParameter("fatTails", v)}
+              min={0.5}
+              max={2.0}
+              step={0.01}
+            />
+            <ParameterField
+              label="Momentum"
+              description="Volatility momentum / persistence"
+              tooltip={[
+                "Controls return persistence.",
+                "0.5 = neutral",
+                "> 0.7 = trending (today predicts tomorrow)",
+                "< 0.3 = mean-reverting",
+                "Note: high values increase tail thickness as a side effect.",
+              ]}
+              value={parameters.momentum}
+              onChange={(v) => updateParameter("momentum", v)}
+              min={0.0}
+              max={1.0}
+              step={0.01}
+            />
+            <ParameterField
+              label="Time Horizon"
+              description={`Number of trading days to generate. Use longer horizons to clearly observe non-zero trend effects.`}
+              value={parameters.timeHorizon}
+              onChange={(v) => updateParameter("timeHorizon", v)}
+              min={MIN_HORIZON_DAYS}
+              max={MAX_HORIZON_DAYS}
+              step={1}
+            />
+          </CardContent>
+        </Card>
+
+        {activeWarnings.length > 0 && (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 px-4 py-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <TriangleAlert className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+              <span className="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide">
+                Parameter tradeoffs detected
+              </span>
+            </div>
+            <ul className="space-y-1.5 pl-6 list-disc">
+              {activeWarnings.map((msg) => (
+                <li key={msg} className="text-xs text-amber-800 dark:text-amber-300">
+                  {msg}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <Card>
           <CardHeader>
@@ -433,10 +530,11 @@ export function ParameterizationForm() {
               label="Trend"
               description="Market direction bias (-1 bearish, 0 neutral, +1 bullish)"
               tooltip={[
-                "Sets directional drift.",
-                "0 = neutral",
-                "+1 = strong bull (+15% annual)",
-                "−1 = strong bear (−15% annual)",
+                "Sets directional drift (annual % change).",
+                "0 = 0% (neutral)",
+                "±0.25 = ±10% annual",
+                "±0.5 = ±25% annual",
+                "±1.0 = ±50% annual",
                 "Note: extreme values (> 0.7) slightly increase skewness as a side effect.",
               ]}
               value={parameters.trend}

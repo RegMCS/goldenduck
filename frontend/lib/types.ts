@@ -86,6 +86,10 @@ export interface GeneratedData {
   drawdowns: DrawdownPoint[]
   stats: DataStatistics
   overallMatch?: number
+  selectedScenarioId?: number
+  selectionObjective?: string
+  selectionTarget?: number
+  selectionValue?: number
 }
 
 export interface JobParameters {

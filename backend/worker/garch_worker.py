@@ -270,6 +270,132 @@ def compute_chart_data(historical_df: pd.DataFrame, scenario: pd.DataFrame) -> d
     }
 
 
+def _safe_lag1_acf(returns_arr: np.ndarray) -> float:
+    """
+    Compute lag-1 autocorrelation safely.
+    Returns 0.0 if series is too short or degenerate.
+    """
+    x = np.asarray(returns_arr).ravel()
+    x = x[np.isfinite(x)]
+    if len(x) < 3:
+        return 0.0
+
+    x0 = x[:-1]
+    x1 = x[1:]
+    s0 = float(np.std(x0))
+    s1 = float(np.std(x1))
+    if s0 < 1e-12 or s1 < 1e-12:
+        return 0.0
+
+    corr = float(np.corrcoef(x0, x1)[0, 1])
+    if not np.isfinite(corr):
+        return 0.0
+    return corr
+
+
+def _get_log_returns_from_scenario(scenario: pd.DataFrame) -> np.ndarray:
+    """
+    Extract daily log returns from scenario close prices.
+    """
+    close = scenario["Close"].values.astype(float)
+    if len(close) < 2:
+        return np.array([], dtype=float)
+
+    # Clip for numerical safety
+    close = np.clip(close, 1e-12, None)
+    return np.log(close[1:] / close[:-1])
+
+
+def _select_best_display_scenario(
+    scenarios: list[pd.DataFrame], user_knobs: dict
+) -> tuple[int, str, float, float]:
+    """
+    Select one scenario path for frontend display using a single-knob visual objective.
+
+    Rules (single-knob assumption):
+      - Trend knob active: choose path with mean log return closest to target mean.
+      - Momentum knob active: choose path with lag-1 ACF closest to target ACF.
+      - Otherwise: fallback to first path.
+
+    Returns:
+      (best_index, objective_name, target_value, best_value)
+    """
+    if not scenarios:
+        return 0, "fallback", 0.0, 0.0
+
+    desired_volatility = float(user_knobs.get("desired_volatility", 1.0))
+    desired_trend = float(user_knobs.get("desired_trend", 0.0))
+    desired_fat_tails = float(user_knobs.get("desired_fat_tails", 1.0))
+    desired_momentum = float(user_knobs.get("desired_momentum", 0.5))
+
+    # Detect "single knob changed" mode (with tiny tolerance)
+    eps = 1e-12
+    trend_active = abs(desired_trend - 0.0) > eps
+    momentum_active = abs(desired_momentum - 0.5) > eps
+    volatility_active = abs(desired_volatility - 1.0) > eps
+    fat_tails_active = abs(desired_fat_tails - 1.0) > eps
+
+    # Only act on trend/momentum objectives under the user's one-knob assumption.
+    # Exactly one of trend/momentum should be active; otherwise fallback.
+    if (
+        trend_active
+        and not momentum_active
+        and not volatility_active
+        and not fat_tails_active
+    ):
+        trend_mag = float(np.clip(abs(desired_trend), 0.0, 1.0))
+        if trend_mag <= 0.25:
+            annual_drift_mag = 0.40 * trend_mag
+        elif trend_mag <= 0.50:
+            annual_drift_mag = 0.10 + 0.60 * (trend_mag - 0.25)
+        else:
+            annual_drift_mag = 0.25 + 0.50 * (trend_mag - 0.50)
+
+        annual_drift = np.sign(desired_trend) * annual_drift_mag
+        target_mean = annual_drift / 252.0
+        best_idx = 0
+        best_err = float("inf")
+        best_val = 0.0
+
+        for i, scenario in enumerate(scenarios):
+            r = _get_log_returns_from_scenario(scenario)
+            val = float(np.mean(r)) if len(r) > 0 else 0.0
+            err = abs(val - target_mean)
+            if err < best_err:
+                best_err = err
+                best_idx = i
+                best_val = val
+
+        return best_idx, "trend_mean", float(target_mean), float(best_val)
+
+    if (
+        momentum_active
+        and not trend_active
+        and not volatility_active
+        and not fat_tails_active
+    ):
+        # Keep target aligned with existing inference/validation logic.
+        phi = -0.1 + 0.4 * desired_momentum
+        target_acf = phi * 0.9
+
+        best_idx = 0
+        best_err = float("inf")
+        best_val = 0.0
+
+        for i, scenario in enumerate(scenarios):
+            r = _get_log_returns_from_scenario(scenario)
+            val = _safe_lag1_acf(r)
+            err = abs(val - target_acf)
+            if err < best_err:
+                best_err = err
+                best_idx = i
+                best_val = val
+
+        return best_idx, "momentum_acf1", float(target_acf), float(best_val)
+
+    return 0, "fallback", 0.0, 0.0
+
+
 S3_BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "goldenduck-results")
 s3_client = boto3.client("s3")
 
@@ -492,8 +618,28 @@ while True:
 
         # Compute chart data for frontend visualizations
         try:
-            chart_data = compute_chart_data(data, scenarios[0])
+            (
+                selected_idx,
+                selection_objective,
+                selection_target,
+                selection_value,
+            ) = _select_best_display_scenario(scenarios, user_knobs)
+            selected_idx = int(np.clip(selected_idx, 0, max(len(scenarios) - 1, 0)))
+
+            logger.info(
+                "Display path selection: objective=%s, selected_scenario=%s, target=%.8f, value=%.8f",
+                selection_objective,
+                selected_idx + 1,
+                selection_target,
+                selection_value,
+            )
+
+            chart_data = compute_chart_data(data, scenarios[selected_idx])
             chart_data["overallMatch"] = float(metrics.get("overall_match", 0.0))
+            chart_data["selectedScenarioId"] = int(selected_idx + 1)
+            chart_data["selectionObjective"] = selection_objective
+            chart_data["selectionTarget"] = float(selection_target)
+            chart_data["selectionValue"] = float(selection_value)
 
             # Override per-scenario kurtosis/skewness/std with values computed
             # across all 100 scenarios (from validation), which are far more

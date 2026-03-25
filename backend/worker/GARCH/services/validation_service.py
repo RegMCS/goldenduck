@@ -204,9 +204,19 @@ class ValidationService:
         desired_volatility_value = self.historical_volatility * desired_volatility
 
         # Mean return (trend) — absolute bull/bear target
-        # desired_trend=-1 -> -15% annual, 0 -> 0%, +1 -> +15% annual.
+        # Piecewise annual drift mapping (symmetric for bearish):
+        # +0.25 -> +10%/yr, +0.50 -> +25%/yr, +1.00 -> +50%/yr.
         historical_mean = self._to_scalar(np.mean(self.historical_returns))
-        desired_mean_value = desired_trend * 0.15 / 252
+        trend_mag = float(np.clip(abs(desired_trend), 0.0, 1.0))
+        if trend_mag <= 0.25:
+            annual_drift_mag = 0.40 * trend_mag
+        elif trend_mag <= 0.50:
+            annual_drift_mag = 0.10 + 0.60 * (trend_mag - 0.25)
+        else:
+            annual_drift_mag = 0.25 + 0.50 * (trend_mag - 0.50)
+
+        annual_drift = np.sign(desired_trend) * annual_drift_mag
+        desired_mean_value = annual_drift / 252
 
         # Kurtosis (with momentum adjustment)
         base_kurtosis = self.historical_kurtosis * desired_fat_tails

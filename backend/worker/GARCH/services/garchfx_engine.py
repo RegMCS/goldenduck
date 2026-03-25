@@ -203,8 +203,20 @@ class GARCHFXEngine:
 
         if user_knobs is not None:
             # Absolute trend target (not relative to historical drift)
-            # desired_trend=-1 -> -15% annual, 0 -> 0%, +1 -> +15% annual.
-            mu = user_knobs.get("desired_trend", 0.0) * 0.15 / 252
+            # Piecewise annual drift mapping (symmetric for bearish):
+            #  +0.25 -> +10%/yr, +0.50 -> +25%/yr, +1.00 -> +50%/yr.
+            desired_trend = float(user_knobs.get("desired_trend", 0.0))
+            trend_mag = float(np.clip(abs(desired_trend), 0.0, 1.0))
+
+            if trend_mag <= 0.25:
+                annual_drift_mag = 0.40 * trend_mag
+            elif trend_mag <= 0.50:
+                annual_drift_mag = 0.10 + 0.60 * (trend_mag - 0.25)
+            else:
+                annual_drift_mag = 0.25 + 0.50 * (trend_mag - 0.50)
+
+            annual_drift = np.sign(desired_trend) * annual_drift_mag
+            mu = annual_drift / 252
         else:
             # Fallback: assume zero drift
             mu = 0.0

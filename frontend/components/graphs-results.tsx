@@ -122,12 +122,28 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
   const pct = (v: number) => `${(v * 100).toFixed(2)}%`
   const num = (v: number) => v.toFixed(3)
   const rc = (v: number) => (v >= 0 ? "text-emerald-500" : "text-red-500")
+  const selectedPathLabel = data.selectedScenarioId
+    ? `Path #${data.selectedScenarioId}`
+    : "Path #1"
+  const objectiveLabel =
+    data.selectionObjective === "trend_mean"
+      ? "Trend target"
+      : data.selectionObjective === "momentum_acf1"
+        ? "Momentum target (ACF1)"
+        : "Default fallback"
 
   return (
     <div className="space-y-8">
       <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
         <div className="rounded-xl border border-border bg-card px-5 py-4 col-span-2 md:col-span-1 flex items-center">
           <FidelityGauge score={fidelityScore} />
+        </div>
+        <div className="rounded-xl border border-border bg-card px-5 py-4 col-span-2 md:col-span-1 lg:col-span-1 flex flex-col justify-center">
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">
+            Selected Display Path
+          </p>
+          <p className="mt-1 text-lg font-bold tabular-nums text-foreground">{selectedPathLabel}</p>
+          <p className="text-[11px] text-muted-foreground">{objectiveLabel}</p>
         </div>
         <DualMetricCard
           label="Ann. Return"
