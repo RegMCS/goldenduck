@@ -23,15 +23,18 @@ from services.gc_garch_service import (
 # ==============================
 # Editable inputs (change these)
 # ==============================
-CSV_PATH = r"C:\Users\guiqu\OneDrive\Documents\GitHub\goldenduck\backend\AAPL_100.csv"
+CSV_PATH = r"C:\Users\guiqu\OneDrive\Documents\GitHub\goldenduck\backend\AAPL_10.csv"
 HORIZON = 500
 KNOBS = GCGarchKnobs(
     volatility=1,
     trend=0.0,
     fat_tails=1,
-    momentum=2,
+    momentum=0.5,
 )
-SEED = 30
+SEED = 41
+SEED_START = 1
+SEED_END = 100
+SEED_FOR_OUTPUT = 41
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 OUTPUT_PATH = str(RESULTS_DIR / "gc_garch_output.csv")  # set to "" to skip
 PLOT_PATH = str(RESULTS_DIR / "gc_garch_characteristics.png")
@@ -131,7 +134,7 @@ def _plot_overlay(
 
     x = np.arange(n)
     fig, ax = plt.subplots(figsize=(10, 4))
-    ax.plot(x, actual_close[-n:], label="input (AAPL_100)", linewidth=1.2)
+    ax.plot(x, actual_close[:n], label="input (AAPL_100)", linewidth=1.2)
     ax.plot(x, synthetic_close[:n], label="synthetic", linewidth=1.2)
     ax.set_title("GC-GARCH Close: Input vs Synthetic (Overlay)")
     ax.set_xlabel("Index")
@@ -158,7 +161,7 @@ def _plot_returns_overlay(
     if n == 0:
         return
 
-    a = actual_returns[-n:]
+    a = actual_returns[:n]
     s = synthetic_returns[:n]
 
     fig, ax = plt.subplots(figsize=(8.5, 4))
@@ -286,6 +289,20 @@ def _plot_quality_metrics(quality: Dict[str, float], output_path: str) -> None:
     plt.close(fig)
 
 
+def _average_quality_metrics(qualities: list[Dict[str, float]]) -> Dict[str, float]:
+    if not qualities:
+        return {}
+    keys = list(qualities[0].keys())
+    avg: Dict[str, float] = {}
+    for k in keys:
+        vals = [q.get(k) for q in qualities if isinstance(q.get(k), (int, float))]
+        if vals:
+            avg[k] = float(np.mean(vals))
+        else:
+            avg[k] = qualities[0].get(k)
+    return avg
+
+
 def _summarize_inputs(df: pd.DataFrame, knobs: GCGarchKnobs, horizon: int) -> Dict:
     close = df["close"].to_numpy(dtype=float)
     mu_base = _compute_baseline_mu(close)
@@ -323,7 +340,7 @@ def main() -> None:
 
     generator = GCGarchGenerator()
     generator.fit(df)
-    scenario = generator.generate(horizon=HORIZON, knobs=knobs, seed=SEED)
+    scenario = generator.generate(horizon=HORIZON, knobs=knobs, seed=SEED_FOR_OUTPUT)
 
     print("Generated rows:", len(scenario))
     print("Head:\n", scenario.head())
@@ -334,13 +351,9 @@ def main() -> None:
         scenario.to_csv(OUTPUT_PATH, index=False)
         print("Saved to:", OUTPUT_PATH)
 
-    # Plot characteristics vs input
+    # Prepare series for plotting/metrics
     actual_close = df["close"].to_numpy(dtype=float)
     synthetic_close = scenario["Close"].to_numpy(dtype=float)
-    actual_chars = _compute_characteristics(actual_close)
-    synthetic_chars = _compute_characteristics(synthetic_close)
-    _plot_characteristics(actual_chars, synthetic_chars, PLOT_PATH)
-    print("Saved plot to:", PLOT_PATH)
 
     # Plot overlay of close prices
     _plot_overlay(actual_close, synthetic_close, PLOT_OVERLAY_PATH)
@@ -349,10 +362,16 @@ def main() -> None:
     _plot_returns_overlay(actual_close, synthetic_close, PLOT_RETURNS_OVERLAY_PATH)
     print("Saved returns overlay plot to:", PLOT_RETURNS_OVERLAY_PATH)
 
-    # Compute and display quality metrics (overall_match)
-    quality = _compute_quality_metrics(actual_close, synthetic_close, knobs)
-    print("Quality metrics:", quality)
-    _plot_quality_metrics(quality, PLOT_QUALITY_PATH)
+    # Compute and display average quality metrics across multiple seeds
+    qualities = []
+    for seed in range(SEED_START, SEED_END + 1):
+        scenario_seed = generator.generate(horizon=HORIZON, knobs=knobs, seed=seed)
+        synth_close_seed = scenario_seed["Close"].to_numpy(dtype=float)
+        qualities.append(_compute_quality_metrics(actual_close, synth_close_seed, knobs))
+
+    avg_quality = _average_quality_metrics(qualities)
+    print(f"Average quality metrics (seeds {SEED_START}-{SEED_END}):", avg_quality)
+    _plot_quality_metrics(avg_quality, PLOT_QUALITY_PATH)
     print("Saved quality metrics plot to:", PLOT_QUALITY_PATH)
 
 

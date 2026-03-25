@@ -191,10 +191,9 @@ class GCGarchGenerator:
         beta = float(self.params["beta"])
         omega = float(self.params["omega"]) / (self.scale_factor**2)
 
-        alpha_new, beta_new = apply_momentum_to_persistence(alpha, beta, knobs.momentum)
-        omega_new = adjust_omega_for_persistence(
-            omega, alpha, beta, alpha_new, beta_new
-        )
+        # Momentum no longer changes GARCH persistence; keep alpha/beta unchanged
+        alpha_new, beta_new = alpha, beta
+        omega_new = omega
 
         # Apply volatility knob as a variance scale
         vol_scale = knobs.volatility
@@ -213,8 +212,8 @@ class GCGarchGenerator:
         phi_max = 0.3
         phi = (knobs.momentum - 0.5) * 2.0 * phi_max
         skew = float(np.clip(self.base_skew, -1.5, 1.5))
-        # Clip kurtosis to keep GC approximation stable
-        kurt = float(np.clip(self.base_kurt * knobs.fat_tails, 0.0, 10.0))
+        # Kurtosis cap disabled per request
+        kurt = float(self.base_kurt * knobs.fat_tails)
 
         rng = np.random.default_rng(seed)
 
@@ -229,8 +228,7 @@ class GCGarchGenerator:
 
             z = float(sample_gc_z(rng, 1, skew, kurt)[0])
             r_t = mu + phi * r_prev + sigma * z
-            # Cap returns to avoid explosive paths when kurtosis is large
-            r_t = float(np.clip(r_t, -0.08, 0.08))
+            r_t = float(r_t)
 
             returns[t] = r_t
             sigmas[t] = sigma
