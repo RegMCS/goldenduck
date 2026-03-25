@@ -9,7 +9,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import logging
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List
 
 from worker.GARCH.models.schemas import (
@@ -119,7 +119,7 @@ async def generate_synthetic_data(
             "status": "initializing",
             "progress": 0,
             "total": request.num_scenarios,
-            "created_at": datetime.now().isoformat(),
+            "created_at": datetime.now(tz=timezone(timedelta(hours=8))).isoformat(),
             "model_type": "standard_garch",  # NEW: Track model type
             "parameters": None,
             "error": None,
@@ -270,7 +270,7 @@ async def generate_garchfx_data(
             "status": "initializing",
             "progress": 0,
             "total": request.num_scenarios,
-            "created_at": datetime.now().isoformat(),
+            "created_at": datetime.now(tz=timezone(timedelta(hours=8))).isoformat(),
             "model_type": "garch_fx",
             "scenario_type": request.scenario_type,
             "theta": request.theta,

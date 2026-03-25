@@ -27,10 +27,10 @@ class AIModelJob(Base):
     )
 
     requested_at = Column(
-        DateTime,
+        DateTime(timezone=True),
         nullable=False,
         default=func.now(),
     )
 
     s3_url = Column(Text)
-    completed_at = Column(DateTime)
+    completed_at = Column(DateTime(timezone=True))
