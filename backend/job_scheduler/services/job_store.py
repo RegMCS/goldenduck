@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from job_scheduler.redis_client import redis_client
@@ -18,7 +18,7 @@ class JobStore:
             "user_id": user_id,
             "status": status,
             "parameters": parameters,
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": datetime.now(tz=timezone(timedelta(hours=8))).isoformat(),
         }
 
         redis_client.set(f"job:{job_id}:job", json.dumps(job))

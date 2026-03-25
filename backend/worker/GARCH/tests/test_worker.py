@@ -74,7 +74,7 @@ class TestJobProcessing:
         assert int(req.get("p", 1)) == 2
         assert int(req.get("q", 1)) == 2
         assert int(req.get("num_scenarios", 100)) == 200
-        assert int(req.get("horizon", 252)) == 500
+        assert int(req.get("horizon", 500)) == 500
         assert float(req.get("volatility_multiplier", 1.0)) == 1.5
 
         # Test with default parameters
@@ -84,7 +84,7 @@ class TestJobProcessing:
         assert int(req_minimal.get("p", 1)) == 1
         assert int(req_minimal.get("q", 1)) == 1
         assert int(req_minimal.get("num_scenarios", 100)) == 100
-        assert int(req_minimal.get("horizon", 252)) == 252
+        assert int(req_minimal.get("horizon", 500)) == 500
         assert float(req_minimal.get("volatility_multiplier", 1.0)) == 1.0
 
     def test_job_metadata_json_serialization(self):
@@ -95,7 +95,7 @@ class TestJobProcessing:
                 "p": 1,
                 "q": 1,
                 "num_scenarios": 50,
-                "horizon": 100,
+                "horizon": 500,
             }
         }
 
@@ -286,19 +286,19 @@ class TestErrorHandling:
     def test_parameter_validation(self):
         """Test that parameters are properly validated"""
         # Valid parameters
-        req = {"ticker": "AAPL", "p": 1, "q": 1, "num_scenarios": 100, "horizon": 252}
+        req = {"ticker": "AAPL", "p": 1, "q": 1, "num_scenarios": 100, "horizon": 500}
 
         ticker = req["ticker"]
         p = int(req.get("p", 1))
         q = int(req.get("q", 1))
         num_scenarios = int(req.get("num_scenarios", 100))
-        horizon = int(req.get("horizon", 252))
+        horizon = int(req.get("horizon", 500))
 
         assert ticker == "AAPL"
         assert p == 1
         assert q == 1
         assert num_scenarios == 100
-        assert horizon == 252
+        assert horizon == 500
 
 
 class TestEnvironmentConfiguration:

@@ -63,6 +63,7 @@ def find_optimal_parameters(historical_returns, user_knobs, method="grid_search"
                     beta=beta,
                     horizon=252,
                     num_paths=10,  # Use 10 paths for speed
+                    distribution="t",  # Match inference engine (t-distributed shocks)
                 )
 
                 # Score quality
@@ -114,10 +115,13 @@ def garch_fx_simulate(
         last_vol = np.std(historical_returns)
 
     # 2) Apply delta as a level modifier on omega
+    # nu=6.0 matches the floor applied in garch_service.py at inference;
+    # t(6) has excess kurtosis=3 — fat-tailed but numerically stable.
     params = {
         "alpha": float(alpha),
         "beta": float(beta),
         "omega": float(omega * delta),  # delta modulates base variance level
+        "nu": 6.0,
     }
 
     # 3) Create engine
