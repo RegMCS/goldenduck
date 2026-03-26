@@ -90,6 +90,17 @@ export interface GeneratedData {
   selectionObjective?: string
   selectionTarget?: number
   selectionValue?: number
+  desiredVolatility?: number
+  volatilityFan?: VolatilityFanPoint[]
+}
+
+export interface VolatilityFanPoint {
+  date: string
+  timestamp: number
+  historical: number
+  p10: number
+  p50: number
+  p90: number
 }
 
 export interface JobParameters {

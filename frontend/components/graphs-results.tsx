@@ -6,6 +6,7 @@ import { CandlestickChart } from "@/components/charts/candlestick-chart"
 import { PriceOverlayChart } from "@/components/charts/price-overlay-chart"
 import { CumulativeReturnChart } from "@/components/charts/cumulative-return-chart"
 import { DrawdownChart } from "@/components/charts/drawdown-chart"
+import { VolatilityFanChart } from "@/components/charts/volatility-fan-chart"
 import { StatsPanel } from "@/components/charts/stats-panel"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
@@ -99,6 +100,15 @@ function DualMetricCard({
 }
 
 export function VisualizationResults({ data }: VisualizationResultsProps) {
+  // Guard against missing stats
+  if (!data.stats || !data.stats.historical || !data.stats.synthetic) {
+    return (
+      <div className="text-center py-12">
+        <p className="text-muted-foreground">Data is loading or unavailable.</p>
+      </div>
+    )
+  }
+
   const h = data.stats.historical
   const s = data.stats.synthetic
 
@@ -130,7 +140,17 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
       ? "Trend target"
       : data.selectionObjective === "momentum_acf1"
         ? "Momentum target (ACF1)"
-        : "Default fallback"
+        : data.selectionObjective === "fat_tails_extreme_events"
+          ? "Fat Tails target (extreme events)"
+          : "Default fallback"
+  const extremeEventsValue =
+    data.selectionObjective === "fat_tails_extreme_events" && data.selectionValue !== undefined
+      ? Math.round(data.selectionValue)
+      : null
+  const extremeEventsTarget =
+    data.selectionObjective === "fat_tails_extreme_events" && data.selectionTarget !== undefined
+      ? Math.round(data.selectionTarget)
+      : null
 
   return (
     <div className="space-y-8">
@@ -144,6 +164,12 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
           </p>
           <p className="mt-1 text-lg font-bold tabular-nums text-foreground">{selectedPathLabel}</p>
           <p className="text-[11px] text-muted-foreground">{objectiveLabel}</p>
+          {extremeEventsValue !== null && (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Extreme events: <span className="font-semibold text-foreground">{extremeEventsValue}</span>
+              {extremeEventsTarget !== null ? ` (target ${extremeEventsTarget})` : ""}
+            </p>
+          )}
         </div>
         <DualMetricCard
           label="Ann. Return"
@@ -206,10 +232,11 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
       <section className="space-y-4">
         <h3 className="text-base font-semibold text-foreground">Analytics</h3>
         <Tabs defaultValue="overlay">
-          <TabsList className="grid w-full max-w-md grid-cols-3">
+          <TabsList className={`grid w-full ${data.desiredVolatility !== 1.0 ? "max-w-2xl grid-cols-4" : "max-w-md grid-cols-3"}`}>
             <TabsTrigger value="overlay">Price Overlay</TabsTrigger>
             <TabsTrigger value="returns">Cum. Returns</TabsTrigger>
             <TabsTrigger value="drawdown">Drawdowns</TabsTrigger>
+            {data.desiredVolatility !== 1.0 && <TabsTrigger value="volatility">Volatility Fan</TabsTrigger>}
           </TabsList>
           <TabsContent value="overlay" className="mt-4">
             <div className="rounded-xl border border-border bg-card p-5">
@@ -226,6 +253,17 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
               <DrawdownChart data={data.drawdowns} height={420} />
             </div>
           </TabsContent>
+          {data.desiredVolatility !== 1.0 && (
+            <TabsContent value="volatility" className="mt-4">
+              <div className="rounded-xl border border-border bg-card p-5">
+                {data.volatilityFan && data.volatilityFan.length > 0 ? (
+                  <VolatilityFanChart data={data.volatilityFan} height={420} />
+                ) : (
+                  <p className="text-sm text-muted-foreground">Volatility fan data not available</p>
+                )}
+              </div>
+            </TabsContent>
+          )}
         </Tabs>
       </section>
 

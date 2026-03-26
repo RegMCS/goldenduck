@@ -153,7 +153,7 @@ def _series_stats(prices: list, returns_arr: np.ndarray) -> dict:
     }
 
 
-def compute_chart_data(historical_df: pd.DataFrame, scenario: pd.DataFrame) -> dict:
+def compute_chart_data(historical_df: pd.DataFrame, scenario: pd.DataFrame, all_scenarios: list = None) -> dict:
     df = historical_df.copy()
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
@@ -260,6 +260,41 @@ def compute_chart_data(historical_df: pd.DataFrame, scenario: pd.DataFrame) -> d
         "synthetic": _series_stats(synth_closes[:min_len], np.array(s_ret_list)),
     }
 
+    # Compute volatility fan chart (percentiles across all scenarios)
+    volatility_fan = []
+    if all_scenarios and len(all_scenarios) > 0:
+        # Extract closes from all scenarios, normalize to index 100
+        prices_matrix = []
+        for s in all_scenarios:
+            s_df = s.reset_index(drop=True)
+            closes = [float(s_df.iloc[i].get("Close", s_df.iloc[i].get("close", 0))) for i in range(len(s_df))]
+            if len(closes) > 0:
+                start_price = closes[0] or 1.0
+                normalized = [round(c / start_price * 100, 4) for c in closes]
+                prices_matrix.append(normalized)
+
+        if prices_matrix:
+            prices_matrix = np.array(prices_matrix)
+            # Compute percentiles at each timestep
+            p10 = np.percentile(prices_matrix, 10, axis=0)
+            p50 = np.percentile(prices_matrix, 50, axis=0)
+            p90 = np.percentile(prices_matrix, 90, axis=0)
+
+            # Align with historical dates (use same date range as synthetic)
+            for i in range(min(len(synth_dates), len(p10), len(p50), len(p90))):
+                date_str = str(synth_dates[i])[:10]
+                ts = int(date_str.replace("-", "")) * 10000
+                volatility_fan.append(
+                    {
+                        "date": date_str,
+                        "timestamp": ts,
+                        "historical": round(hist_closes[i] / h_start * 100, 4) if i < len(hist_closes) else None,
+                        "p10": round(float(p10[i]), 4),
+                        "p50": round(float(p50[i]), 4),
+                        "p90": round(float(p90[i]), 4),
+                    }
+                )
+
     return {
         "historical": historical,
         "synthetic": synthetic,
@@ -267,6 +302,7 @@ def compute_chart_data(historical_df: pd.DataFrame, scenario: pd.DataFrame) -> d
         "returns": returns_data,
         "drawdowns": drawdowns,
         "stats": stats,
+        "volatilityFan": volatility_fan,
     }
 
 
@@ -306,6 +342,23 @@ def _get_log_returns_from_scenario(scenario: pd.DataFrame) -> np.ndarray:
     return np.log(close[1:] / close[:-1])
 
 
+def _count_extreme_events(returns: np.ndarray, threshold: float = 2.5) -> int:
+    """
+    Count number of returns exceeding threshold in standard deviations.
+    Used for fat_tails knob selection.
+    """
+    if len(returns) < 2:
+        return 0
+    
+    std = float(np.std(returns))
+    if std < 1e-12:
+        return 0
+    
+    normalized = np.abs(returns) / std
+    count = int(np.sum(normalized > threshold))
+    return count
+
+
 def _select_best_display_scenario(
     scenarios: list[pd.DataFrame], user_knobs: dict
 ) -> tuple[int, str, float, float]:
@@ -315,6 +368,7 @@ def _select_best_display_scenario(
     Rules (single-knob assumption):
       - Trend knob active: choose path with mean log return closest to target mean.
       - Momentum knob active: choose path with lag-1 ACF closest to target ACF.
+      - Fat Tails knob active: choose path with extreme event count closest to target.
       - Otherwise: fallback to first path.
 
     Returns:
@@ -392,6 +446,39 @@ def _select_best_display_scenario(
                 best_val = val
 
         return best_idx, "momentum_acf1", float(target_acf), float(best_val)
+
+    if (
+        fat_tails_active
+        and not trend_active
+        and not momentum_active
+        and not volatility_active
+    ):
+        # Map desired_fat_tails to target extreme event count using requested anchors:
+        #   fat_tails=0.5 -> 2 events
+        #   fat_tails=1.5 -> 8 events
+        #   fat_tails=2.0 -> 16 events
+        fat = float(np.clip(desired_fat_tails, 0.5, 2.0))
+        if fat <= 1.5:
+            # Linear: [0.5, 1.5] -> [2, 8]
+            target_events = 2.0 + (fat - 0.5) * 6.0
+        else:
+            # Linear: (1.5, 2.0] -> (8, 16]
+            target_events = 8.0 + (fat - 1.5) * 16.0
+
+        best_idx = 0
+        best_err = float("inf")
+        best_val = 0.0
+
+        for i, scenario in enumerate(scenarios):
+            r = _get_log_returns_from_scenario(scenario)
+            count = _count_extreme_events(r, threshold=2.5)
+            err = abs(float(count) - target_events)
+            if err < best_err:
+                best_err = err
+                best_idx = i
+                best_val = float(count)
+
+        return best_idx, "fat_tails_extreme_events", float(target_events), float(best_val)
 
     return 0, "fallback", 0.0, 0.0
 
@@ -553,8 +640,22 @@ while True:
             historical_returns=returns, user_knobs=user_knobs
         )
 
-        logger.info(f"  Delta (ML): {pred_params['delta']:.4f}")
-        logger.info(f"  Theta (heuristic): {pred_params['theta']:.6f}")
+        # TEMPORARY: Bypass RF predictor and use desired_volatility directly as delta
+        desired_vol = user_knobs.get("desired_volatility", 1.0)
+        pred_params["delta"] = desired_vol
+        pred_params["delta_confidence"] = 1.0  # High confidence since we're using user input directly
+
+        # Map desired_fat_tails to theta (forecast stochasticity)
+        # Range: 0.5 -> 1e-5, 2.0 -> 1e-2
+        desired_fat_tails = user_knobs.get("desired_fat_tails", 1.0)
+        fat_tails_clipped = float(np.clip(desired_fat_tails, 0.5, 2.0))
+        
+        # Linear interpolation from 1e-5 to 1e-2
+        theta = 1e-5 + (fat_tails_clipped - 0.5) / 1.5 * (1e-2 - 1e-5)
+        pred_params["theta"] = theta
+
+        logger.info(f"  Delta (ML): {pred_params['delta']:.4f} [USING DESIRED_VOLATILITY DIRECTLY]")
+        logger.info(f"  Theta (mapped from fat_tails={desired_fat_tails}): {pred_params['theta']:.6f}")
 
         delta_sequence = np.full(horizon, float(pred_params["delta"]))
         scenarios = garch.generate_scenarios_fx(
@@ -634,12 +735,13 @@ while True:
                 selection_value,
             )
 
-            chart_data = compute_chart_data(data, scenarios[selected_idx])
+            chart_data = compute_chart_data(data, scenarios[selected_idx], all_scenarios=scenarios)
             chart_data["overallMatch"] = float(metrics.get("overall_match", 0.0))
             chart_data["selectedScenarioId"] = int(selected_idx + 1)
             chart_data["selectionObjective"] = selection_objective
             chart_data["selectionTarget"] = float(selection_target)
             chart_data["selectionValue"] = float(selection_value)
+            chart_data["desiredVolatility"] = float(user_knobs.get("desired_volatility", 1.0))
 
             # Override per-scenario kurtosis/skewness/std with values computed
             # across all 100 scenarios (from validation), which are far more
@@ -672,7 +774,7 @@ while True:
             job_store.set_chart_data(job_id, chart_data)
             logger.info("Chart data stored for job %s", job_id)
         except Exception as e:
-            logger.warning("Could not compute chart data for job %s: %s", job_id, e)
+            logger.warning("Could not compute chart data for job %s: %s", job_id, e, exc_info=True)
 
         # Persist results (now including predicted parameters)
         results_with_predictions = {
