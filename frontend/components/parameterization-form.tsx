@@ -125,6 +125,14 @@ function ParameterField({ label, description, tooltip, value, onChange, min, max
   )
 }
 
+const countCsvRows = (text: string): number => {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+  return Math.max(lines.length - 1, 0)
+}
+
 interface TradeoffRule {
   condition: (p: MarketParameters) => boolean
   message: string
@@ -190,7 +198,7 @@ export function ParameterizationForm() {
         const hasAllHeaders = REQUIRED_CSV_HEADERS.every((required) =>
           headers.includes(required)
         )
-        const rowCount = Math.max(lines.length - 1, 0)
+        const rowCount = countCsvRows(text)
         resolve({ validHeaders: hasAllHeaders, rowCount })
       }
       reader.onerror = () => resolve({ validHeaders: false, rowCount: 0 })
@@ -223,6 +231,7 @@ export function ParameterizationForm() {
 
     setFileError(null)
     updateParameter("inputFile", file)
+    updateParameter("timeHorizon", Math.min(MAX_HORIZON_DAYS, rowCount))
   }
 
   const handleRemoveFile = () => {
