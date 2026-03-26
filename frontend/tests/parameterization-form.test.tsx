@@ -52,7 +52,7 @@ describe("ParameterizationForm", () => {
     expect(screen.getAllByText("Volatility").length).toBeGreaterThan(0)
     expect(screen.getAllByText("Trend").length).toBeGreaterThan(0)
     expect(screen.getAllByText("Fat Tails").length).toBeGreaterThan(0)
-    expect(screen.getAllByText("V Momentum").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("Momentum").length).toBeGreaterThan(0)
     expect(screen.getAllByText("Time Horizon").length).toBeGreaterThan(0)
   })
 

@@ -134,12 +134,12 @@ const TRADEOFF_RULES: TradeoffRule[] = [
   {
     condition: (p) => p.momentum > 0.7,
     message:
-      "Setting V Momentum > 0.7 will also increase tail thickness (kurtosis +1.5 to +2.0) as a natural side effect of return persistence.",
+      "Setting Momentum > 0.7 will also increase tail thickness (kurtosis +1.5 to +2.0) as a natural side effect of return persistence.",
   },
   {
     condition: (p) => p.fatTails > 1.5 && p.momentum > 0.7,
     message:
-      "Combining Fat Tails > 1.5 with V Momentum > 0.7 will cause kurtosis to hit the model ceiling (~8.0) — expect extreme tail behaviour.",
+      "Combining Fat Tails > 1.5 with Momentum > 0.7 will cause kurtosis to hit the model ceiling (~8.0) — expect extreme tail behaviour.",
   },
   {
     condition: (p) => p.trend > 0.7 || p.trend < -0.7,
@@ -376,7 +376,7 @@ export function ParameterizationForm() {
               step={0.01}
             />
             <ParameterField
-              label="V Momentum"
+              label="Momentum"
               description="Volatility momentum / persistence"
               tooltip={[
                 "Controls return persistence.",
@@ -498,7 +498,7 @@ export function ParameterizationForm() {
                 { label: "Volatility", value: parameters.volatility.toFixed(2) },
                 { label: "Trend", value: parameters.trend.toFixed(2) },
                 { label: "Fat Tails", value: parameters.fatTails.toFixed(2) },
-                { label: "V Momentum", value: parameters.momentum.toFixed(2) },
+                { label: "Momentum", value: parameters.momentum.toFixed(2) },
                 { label: "Time Horizon", value: `${parameters.timeHorizon} days` },
                 { label: "Time Series", value: parameters.inputFile?.name ?? "Not uploaded" },
               ].map((item) => (
