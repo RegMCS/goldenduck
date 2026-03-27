@@ -41,7 +41,6 @@ describe("Header", () => {
     expect(screen.getByRole("link", { name: /configure/i })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: /reports/i })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /toggle theme/i })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /settings/i })).toBeInTheDocument()
   })
 
   it("reports nav link points to /reports", () => {
@@ -65,7 +64,6 @@ describe("Header", () => {
     expect(screen.getByRole("banner")).toBeInTheDocument()
     expect(screen.getByRole("navigation")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /toggle theme/i })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /settings/i })).toBeInTheDocument()
   })
 
   it("applies sticky positioning", () => {

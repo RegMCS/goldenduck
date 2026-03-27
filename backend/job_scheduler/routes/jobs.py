@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from pathlib import Path
 from typing import Optional
@@ -148,14 +149,30 @@ async def get_job_history(
 ):
     if user_id != str(current_user.id):
         raise HTTPException(status_code=403, detail="Not authorized")
-    query = db.query(AIModelJob).filter(AIModelJob.requestor == user_id)
+    base_query = db.query(AIModelJob).filter(AIModelJob.requestor == user_id)
 
+    status_counts: dict[str, int] = {
+        row.status: row.count
+        for row in db.query(AIModelJob.status, func.count().label("count"))
+        .filter(AIModelJob.requestor == user_id)
+        .group_by(AIModelJob.status)
+        .all()
+    }
+    total_completed = status_counts.get(JobStatus.completed, 0)
+    total_running = status_counts.get(JobStatus.running, 0)
+    total_failed = status_counts.get(JobStatus.failed, 0)
+    total_queued = status_counts.get(JobStatus.queued, 0)
+
+    filtered_query = base_query
     if status is not None:
-        query = query.filter(AIModelJob.status == status)
+        filtered_query = filtered_query.filter(AIModelJob.status == status)
 
-    total = query.count()
+    total = filtered_query.count()
     jobs = (
-        query.order_by(AIModelJob.requested_at.desc()).offset(offset).limit(limit).all()
+        filtered_query.order_by(AIModelJob.requested_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
     )
 
     return JobHistoryResponse(
@@ -171,4 +188,8 @@ async def get_job_history(
             for job in jobs
         ],
         total=total,
+        total_completed=total_completed,
+        total_running=total_running,
+        total_failed=total_failed,
+        total_queued=total_queued,
     )

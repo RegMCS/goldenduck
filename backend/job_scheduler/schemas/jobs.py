@@ -50,3 +50,7 @@ class JobHistoryItem(BaseModel):
 class JobHistoryResponse(BaseModel):
     jobs: List[JobHistoryItem]
     total: int
+    total_completed: int = 0
+    total_running: int = 0
+    total_failed: int = 0
+    total_queued: int = 0
