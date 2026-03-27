@@ -173,7 +173,8 @@ export function ParameterizationForm() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const activeWarnings = TRADEOFF_RULES.filter((r) => r.condition(parameters)).map((r) => r.message)
+  // Removing tradeoff warnings (uncomment if needed subsequently)
+  // const activeWarnings = TRADEOFF_RULES.filter((r) => r.condition(parameters)).map((r) => r.message)
 
   const updateParameter = <K extends keyof MarketParameters>(
     key: K,
@@ -412,7 +413,7 @@ export function ParameterizationForm() {
           </CardContent>
         </Card>
 
-        {activeWarnings.length > 0 && (
+        {/* {activeWarnings.length > 0 && (
           <div className="rounded-lg border border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 px-4 py-3 space-y-2">
             <div className="flex items-center gap-2">
               <TriangleAlert className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
@@ -428,7 +429,7 @@ export function ParameterizationForm() {
               ))}
             </ul>
           </div>
-        )}
+        )} */}
 
         <Card>
           <CardHeader>
