@@ -105,4 +105,8 @@ export interface JobHistoryItem {
 export interface JobHistoryResponse {
   jobs: JobHistoryItem[]
   total: number
+  total_completed: number
+  total_running: number
+  total_failed: number
+  total_queued: number
 }

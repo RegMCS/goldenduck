@@ -261,20 +261,24 @@ export default function ReportsPage() {
                     <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
                         {(
                             [
-                                { label: "Total", value: data.total, color: "text-foreground" },
+                                {
+                                    label: "Total",
+                                    value: data.total_completed + data.total_running + data.total_failed + data.total_queued,
+                                    color: "text-foreground",
+                                },
                                 {
                                     label: "Completed",
-                                    value: data.jobs.filter((j) => j.status === "completed").length,
+                                    value: data.total_completed,
                                     color: "text-emerald-600 dark:text-emerald-400",
                                 },
                                 {
                                     label: "Running",
-                                    value: data.jobs.filter((j) => j.status === "running").length,
+                                    value: data.total_running,
                                     color: "text-blue-600 dark:text-blue-400",
                                 },
                                 {
                                     label: "Failed",
-                                    value: data.jobs.filter((j) => j.status === "failed").length,
+                                    value: data.total_failed,
                                     color: "text-red-600 dark:text-red-400",
                                 },
                             ] as { label: string; value: number; color: string }[]

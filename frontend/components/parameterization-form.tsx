@@ -577,6 +577,7 @@ export function ParameterizationForm() {
                 onClick={handleReset}
                 className="w-full gap-2 bg-transparent"
                 size="sm"
+                disabled={isGenerating}
               >
                 <RotateCcw className="h-4 w-4" />
                 Reset
