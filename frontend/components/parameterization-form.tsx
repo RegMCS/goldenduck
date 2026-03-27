@@ -337,6 +337,69 @@ export function ParameterizationForm() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base font-semibold text-foreground">
+              Input Time Series
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Upload a CSV file with OHLCV headers (Open, High, Low, Close, Volume)
+              </p>
+
+              {parameters.inputFile ? (
+                <div className="flex items-center justify-between rounded-lg border border-border bg-secondary/50 px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <FileText className="h-5 w-5 text-primary" />
+                    <div>
+                      <p className="text-sm font-medium text-foreground">
+                        {parameters.inputFile.name}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {(parameters.inputFile.size / 1024).toFixed(1)} KB
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleRemoveFile}
+                    className="text-muted-foreground hover:text-destructive"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ) : (
+                <label className="flex cursor-pointer flex-col items-center gap-2 rounded-lg border-2 border-dashed border-border px-6 py-8 transition-colors hover:border-primary/50 hover:bg-secondary/30">
+                  <Upload className="h-8 w-8 text-muted-foreground" />
+                  <span className="text-sm font-medium text-foreground">
+                    Click to upload CSV
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    .csv files only
+                  </span>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                </label>
+              )}
+
+              {fileError && (
+                <div className="flex items-start gap-2 text-sm text-destructive">
+                  <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                  <span>{fileError}</span>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base font-semibold text-foreground">
               Model Parameters
             </CardTitle>
           </CardHeader>
@@ -431,68 +494,6 @@ export function ParameterizationForm() {
           </div>
         )} */}
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base font-semibold text-foreground">
-              Input Time Series
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                Upload a CSV file with OHLCV headers (Open, High, Low, Close, Volume)
-              </p>
-
-              {parameters.inputFile ? (
-                <div className="flex items-center justify-between rounded-lg border border-border bg-secondary/50 px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <FileText className="h-5 w-5 text-primary" />
-                    <div>
-                      <p className="text-sm font-medium text-foreground">
-                        {parameters.inputFile.name}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {(parameters.inputFile.size / 1024).toFixed(1)} KB
-                      </p>
-                    </div>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={handleRemoveFile}
-                    className="text-muted-foreground hover:text-destructive"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-              ) : (
-                <label className="flex cursor-pointer flex-col items-center gap-2 rounded-lg border-2 border-dashed border-border px-6 py-8 transition-colors hover:border-primary/50 hover:bg-secondary/30">
-                  <Upload className="h-8 w-8 text-muted-foreground" />
-                  <span className="text-sm font-medium text-foreground">
-                    Click to upload CSV
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    .csv files only
-                  </span>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".csv"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                  />
-                </label>
-              )}
-
-              {fileError && (
-                <div className="flex items-start gap-2 text-sm text-destructive">
-                  <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-                  <span>{fileError}</span>
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
       <div className="lg:block">
