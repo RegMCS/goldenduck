@@ -347,12 +347,12 @@ export function CandlestickChart({
               strokeWidth={1.5}
               dot={false}
               isAnimationActive={false}
-              name={`MA ${maPeriod}`}
+              name="MA"
               label={(props: { x?: number; y?: number; index?: number }) => {
                 if (props.index !== displayData.length - 1) return <g />
                 return (
                   <text
-                    x={(props.x ?? 0) + 63}
+                    x={(props.x ?? 0) + 20}
                     y={props.y ?? 0}
                     textAnchor="end"
                     fill="#f59e0b"
@@ -360,7 +360,7 @@ export function CandlestickChart({
                     fontWeight={600}
                     dominantBaseline="middle"
                   >
-                    MA {maPeriod}
+                    MA
                   </text>
                 )
               }}

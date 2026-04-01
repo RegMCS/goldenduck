@@ -1,7 +1,7 @@
 "use client"
 
-import { useMemo } from "react"
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Area, AreaChart, ComposedChart } from "recharts"
+import { useMemo, useCallback } from "react"
+import { Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, ComposedChart, Brush } from "recharts"
 
 interface VolatilityFanPoint {
   date: string
@@ -17,11 +17,19 @@ interface VolatilityFanChartProps {
   height?: number
 }
 
+const SERIES = [
+  { key: "p50", label: "Median (50th)", color: "#f59e0b" },
+  { key: "p10", label: "10th percentile", color: "#f59e0b" },
+  { key: "p90", label: "90th percentile", color: "#f59e0b" },
+  { key: "historical", label: "Historical", color: "#3b82f6" },
+]
+
 export function VolatilityFanChart({ data, height = 420 }: VolatilityFanChartProps) {
   const processedData = useMemo(() => {
     if (!data || data.length === 0) return []
 
-    return data.map((point) => ({
+    return data.map((point, i) => ({
+      idx: i + 1,
       timestamp: point.timestamp,
       date: point.date,
       historical: parseFloat(point.historical.toFixed(2)),
@@ -37,6 +45,40 @@ export function VolatilityFanChart({ data, height = 420 }: VolatilityFanChartPro
     return (lastPoint.p90 - lastPoint.p10).toFixed(2)
   }, [processedData])
 
+  const CustomTooltip = useCallback(({
+    active,
+    payload,
+    label,
+  }: {
+    active?: boolean
+    payload?: Array<{ value: number; name: string }>
+    label?: string
+  }) => {
+    if (!active || !payload?.length) return null
+    return (
+      <div className="rounded-lg border border-border bg-card/95 backdrop-blur p-3 shadow-xl">
+        <p className="mb-2 text-xs font-mono text-muted-foreground">{label}</p>
+        <div className="space-y-1.5">
+          {SERIES.map(({ key, label: seriesLabel, color }) => {
+            const entry = payload.find((p) => p.name === seriesLabel)
+            if (!entry) return null
+            return (
+              <div key={key} className="flex items-center justify-between gap-8 text-xs">
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+                  <span className="text-muted-foreground">{seriesLabel}</span>
+                </span>
+                <span className="font-mono font-semibold text-foreground">
+                  {entry.value.toFixed(2)}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }, [])
+
   return (
     <div className="w-full space-y-4">
       <div className="flex items-start justify-between">
@@ -47,10 +89,29 @@ export function VolatilityFanChart({ data, height = 420 }: VolatilityFanChartPro
           Band width at horizon: <span className="font-mono font-semibold">{bandWidth}</span>
         </div>
       </div>
+      {/* Custom legend */}
+      <div className="flex flex-wrap items-center gap-4 text-xs">
+        <div className="flex items-center gap-1.5">
+          <span className="inline-block w-5 border-t-2 border-amber-500" />
+          <span className="text-muted-foreground">Median (50th)</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="inline-block w-5 border-t border-dashed border-amber-500" />
+          <span className="text-muted-foreground">10th percentile</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="inline-block w-5 border-t border-dashed border-amber-500" />
+          <span className="text-muted-foreground">90th percentile</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="inline-block h-2.5 w-2.5 rounded-full bg-blue-500" />
+          <span className="text-muted-foreground">Historical</span>
+        </div>
+      </div>
       <ResponsiveContainer width="100%" height={height}>
         <ComposedChart
           data={processedData}
-          margin={{ top: 5, right: 30, left: 0, bottom: 5 }}
+          margin={{ top: 5, right: 30, left: 10, bottom: 29 }}
         >
           <defs>
             <linearGradient id="bandGradient" x1="0" y1="0" x2="0" y2="1">
@@ -60,30 +121,21 @@ export function VolatilityFanChart({ data, height = 420 }: VolatilityFanChartPro
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
           <XAxis
-            dataKey="date"
-            tick={{ fontSize: 12 }}
-            stroke="var(--muted-foreground)"
-            interval={Math.max(0, Math.floor(processedData.length / 10))}
+            dataKey="idx"
+            tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+            tickLine={false}
+            axisLine={{ stroke: "var(--border)" }}
+            interval={Math.max(1, Math.floor(processedData.length / 8))}
+            label={{ value: "Data points", position: "insideBottomRight", offset: 0, dy: 18, fontSize: 9, fill: "var(--muted-foreground)" }}
           />
           <YAxis
-            tick={{ fontSize: 12 }}
-            stroke="var(--muted-foreground)"
-            label={{ value: "Price (indexed to 100)", angle: -90, position: "insideLeft" }}
+            tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
+            tickLine={false}
+            axisLine={{ stroke: "var(--border)" }}
+            width={52}
+            label={{ value: "Price (indexed to 100)", angle: -90, position: "insideLeft", offset: 10, fontSize: 10, fill: "var(--muted-foreground)" }}
           />
-          <Tooltip
-            contentStyle={{
-              backgroundColor: "var(--background)",
-              border: "1px solid var(--border)",
-              borderRadius: "0.5rem",
-            }}
-            formatter={(value: number) => value.toFixed(2)}
-            labelStyle={{ color: "var(--foreground)" }}
-          />
-          <Legend
-            wrapperStyle={{ fontSize: 12 }}
-            verticalAlign="bottom"
-            height={36}
-          />
+          <Tooltip content={<CustomTooltip />} />
 
           {/* 10th-90th percentile band */}
           <Area
@@ -140,9 +192,16 @@ export function VolatilityFanChart({ data, height = 420 }: VolatilityFanChartPro
             isAnimationActive={false}
             name="Historical"
           />
+          <Brush
+            dataKey="idx"
+            height={28}
+            stroke="var(--border)"
+            fill="var(--card)"
+            travellerWidth={8}
+          />
         </ComposedChart>
       </ResponsiveContainer>
-      <p className="-mt-3 text-center text-[10px] text-muted-foreground/60">Drag handles to zoom · scroll to pan</p>
+      <p className="-mt-6 text-center text-[10px] text-muted-foreground/60">Drag handles to zoom · scroll to pan</p>
       <div className="text-xs text-muted-foreground space-y-1">
         <p>
           <span className="font-semibold">Fan interpretation:</span> Wider band indicates higher volatility. Compare historical price (blue) to synthetic paths (orange band).
