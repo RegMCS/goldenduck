@@ -188,6 +188,26 @@ export function ParameterizationForm() {
     setParameters((prev) => ({ ...prev, [key]: value }))
   }
 
+  const applyBullRunPreset = () => {
+    setParameters((prev) => ({
+      ...prev,
+      volatility: 0.5,
+      trend: 1.0,
+      fatTails: 0.6,
+      momentum: 0.85,
+    }))
+  }
+
+  const applyFlashCrashPreset = () => {
+    setParameters((prev) => ({
+      ...prev,
+      volatility: 1.5,
+      trend: -0.2,
+      fatTails: 2.0,
+      momentum: 0.5,
+    }))
+  }
+
   const validateCsvStructure = (
     file: File
   ): Promise<{ validHeaders: boolean; rowCount: number }> => {
@@ -412,11 +432,36 @@ export function ParameterizationForm() {
             </div>
           </CardContent>
         </Card>
+        
         <Card>
           <CardHeader>
-            <CardTitle className="text-base font-semibold text-foreground">
-              Model Parameters
-            </CardTitle>
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle className="text-base font-semibold text-foreground">
+                Model Parameters
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  onClick={applyBullRunPreset}
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Bull Run Preset
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  onClick={applyFlashCrashPreset}
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Flash Crash Preset
+                </Button>
+              </div>
+            </div>
           </CardHeader>
           <CardContent className="grid gap-6 sm:grid-cols-2">
             <ParameterField

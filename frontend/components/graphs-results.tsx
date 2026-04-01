@@ -1,8 +1,7 @@
 "use client"
 
 import { useMemo } from "react"
-import { type GeneratedData, type JobParameters } from "@/lib/types"
-import { InfoTooltip } from "@/components/info-tooltip"
+import { type GeneratedData } from "@/lib/types"
 import { CandlestickChart } from "@/components/charts/candlestick-chart"
 import { PriceOverlayChart } from "@/components/charts/price-overlay-chart"
 import { CumulativeReturnChart } from "@/components/charts/cumulative-return-chart"
@@ -13,7 +12,67 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 interface VisualizationResultsProps {
   data: GeneratedData
-  jobParams?: JobParameters | null
+}
+
+function quantile(values: number[], q: number): number {
+  if (values.length === 0) return 0
+  const sorted = [...values].sort((a, b) => a - b)
+  const pos = (sorted.length - 1) * q
+  const base = Math.floor(pos)
+  const rest = pos - base
+  const next = sorted[base + 1] ?? sorted[base]
+  return sorted[base] + rest * (next - sorted[base])
+}
+
+function hurstMomentum(values: number[]): number {
+  if (values.length < 20) return 0.5
+
+  const mean = values.reduce((a, b) => a + b, 0) / values.length
+  const y: number[] = new Array(values.length)
+  let csum = 0
+  for (let i = 0; i < values.length; i++) {
+    csum += values[i] - mean
+    y[i] = csum
+  }
+
+  const maxLag = Math.floor(y.length / 2)
+  const baseLags = [2, 4, 8, 16, 32, 64]
+  const lags = baseLags.filter((lag) => lag < maxLag)
+  if (lags.length < 2) return 0.5
+
+  const logLags: number[] = []
+  const logTau: number[] = []
+  for (const lag of lags) {
+    const diffs: number[] = []
+    for (let i = lag; i < y.length; i++) {
+      diffs.push(y[i] - y[i - lag])
+    }
+    if (diffs.length < 2) continue
+    const dMean = diffs.reduce((a, b) => a + b, 0) / diffs.length
+    const dVar = diffs.reduce((a, b) => a + (b - dMean) * (b - dMean), 0) / (diffs.length - 1)
+    const tau = Math.sqrt(Math.max(dVar, 0))
+    if (tau > 1e-12 && Number.isFinite(tau)) {
+      logLags.push(Math.log(lag))
+      logTau.push(Math.log(tau))
+    }
+  }
+
+  if (logLags.length < 2) return 0.5
+
+  const xMean = logLags.reduce((a, b) => a + b, 0) / logLags.length
+  const yMean = logTau.reduce((a, b) => a + b, 0) / logTau.length
+  let num = 0
+  let den = 0
+  for (let i = 0; i < logLags.length; i++) {
+    const dx = logLags[i] - xMean
+    num += dx * (logTau[i] - yMean)
+    den += dx * dx
+  }
+  if (den <= 1e-12) return 0.5
+
+  const hurst = num / den
+  if (!Number.isFinite(hurst)) return 0.5
+  return Math.max(0, Math.min(1, hurst))
 }
 
 function FidelityGauge({ score }: { score: number }) {
@@ -101,7 +160,7 @@ function DualMetricCard({
   )
 }
 
-export function VisualizationResults({ data, jobParams }: VisualizationResultsProps) {
+export function VisualizationResults({ data }: VisualizationResultsProps) {
   // Guard against missing stats
   if (!data.stats || !data.stats.historical || !data.stats.synthetic) {
     return (
@@ -113,6 +172,40 @@ export function VisualizationResults({ data, jobParams }: VisualizationResultsPr
 
   const h = data.stats.historical
   const s = data.stats.synthetic
+
+  const enrichedStats = useMemo(() => {
+    const hReturns = data.returns.map((r) => r.historicalReturn).filter((v) => Number.isFinite(v))
+    const sReturns = data.returns.map((r) => r.syntheticReturn).filter((v) => Number.isFinite(v))
+
+    const hVar95 = Math.max(0, -quantile(hReturns, 0.05))
+    const sVar95 = Math.max(0, -quantile(sReturns, 0.05))
+    const hHurstMomentum = hurstMomentum(hReturns)
+    const sHurstMomentum = hurstMomentum(sReturns)
+    const hLegacyMappedMomentum =
+      typeof data.stats.historical.acfLag1 === "number"
+        ? Math.max(0, Math.min(1, 0.5 + 0.5 * data.stats.historical.acfLag1))
+        : hHurstMomentum
+    const sLegacyMappedMomentum =
+      typeof data.stats.synthetic.acfLag1 === "number"
+        ? Math.max(0, Math.min(1, 0.5 + 0.5 * data.stats.synthetic.acfLag1))
+        : sHurstMomentum
+
+    return {
+      ...data.stats,
+      historical: {
+        ...data.stats.historical,
+        var95: data.stats.historical.var95 ?? hVar95,
+        hurstMomentum: data.stats.historical.hurstMomentum ?? hLegacyMappedMomentum,
+        numDataPoints: data.historical.length,
+      },
+      synthetic: {
+        ...data.stats.synthetic,
+        var95: data.stats.synthetic.var95 ?? sVar95,
+        hurstMomentum: data.stats.synthetic.hurstMomentum ?? sLegacyMappedMomentum,
+        numDataPoints: data.synthetic.length,
+      },
+    }
+  }, [data.stats, data.returns, data.historical.length, data.synthetic.length])
 
   const fidelityScore = useMemo(() => {
     if (data.overallMatch !== undefined) {
@@ -140,10 +233,22 @@ export function VisualizationResults({ data, jobParams }: VisualizationResultsPr
   const objectiveLabel =
     data.selectionObjective === "trend_mean"
       ? "Trend target"
-      : data.selectionObjective === "momentum_acf1"
-        ? "Momentum target (ACF1)"
+      : data.selectionObjective === "momentum_hurst"
+        ? "Momentum target (Hurst)"
+        : data.selectionObjective === "momentum_acf1"
+          ? "Momentum target (legacy ACF1)"
         : data.selectionObjective === "fat_tails_extreme_events"
           ? "Fat Tails target (extreme events)"
+          : data.selectionObjective === "volatility_std"
+            ? "Volatility target (std scaling)"
+            : data.selectionObjective === "baseline_composite_match"
+              ? "Default mode (best input match)"
+          : data.selectionObjective === "volatility_tortuosity"
+            ? "Volatility target (path roughness)"
+          : data.selectionObjective === "bull_run_composite"
+            ? "Bull Run preset (composite score)"
+            : data.selectionObjective === "flash_crash_composite"
+              ? "Flash Crash preset (composite score)"
           : "Default fallback"
   const extremeEventsValue =
     data.selectionObjective === "fat_tails_extreme_events" && data.selectionValue !== undefined
@@ -153,40 +258,39 @@ export function VisualizationResults({ data, jobParams }: VisualizationResultsPr
     data.selectionObjective === "fat_tails_extreme_events" && data.selectionTarget !== undefined
       ? Math.round(data.selectionTarget)
       : null
+  const volatilityRatioValue =
+    data.selectionObjective === "volatility_tortuosity" && typeof data.selectionValue === "number" && Number.isFinite(data.selectionValue)
+      ? data.selectionValue.toFixed(2)
+      : null
+  const volatilityRatioTarget =
+    data.selectionObjective === "volatility_tortuosity" && typeof data.selectionTarget === "number" && Number.isFinite(data.selectionTarget)
+      ? data.selectionTarget.toFixed(2)
+      : null
+  const volatilityStdValue =
+    data.selectionObjective === "volatility_std" && typeof data.selectionValue === "number" && Number.isFinite(data.selectionValue)
+      ? `${(data.selectionValue * Math.sqrt(252) * 100).toFixed(2)}%`
+      : null
+  const volatilityStdTarget =
+    data.selectionObjective === "volatility_std" && typeof data.selectionTarget === "number" && Number.isFinite(data.selectionTarget)
+      ? `${(data.selectionTarget * Math.sqrt(252) * 100).toFixed(2)}%`
+      : null
+  const presetCompositeScore =
+    (data.selectionObjective === "bull_run_composite" ||
+      data.selectionObjective === "flash_crash_composite") &&
+    typeof data.selectionValue === "number" &&
+    Number.isFinite(data.selectionValue)
+      ? data.selectionValue.toFixed(3)
+      : null
+  const baselineCompositeDistance =
+    data.selectionObjective === "baseline_composite_match" &&
+    typeof data.selectionValue === "number" &&
+    Number.isFinite(data.selectionValue)
+      ? data.selectionValue.toFixed(3)
+      : null
 
   return (
     <div className="space-y-3">
-      {/* Row 1: Input parameters + Fidelity gauge */}
-      <div className="flex gap-3 items-stretch">
-        {jobParams && (
-          <div className="flex-1 rounded-xl border border-border bg-card px-4 py-3">
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-2">Input Parameters</p>
-            <div className="flex justify-between gap-2">
-              {[
-                { label: "Volatility", value: jobParams.volatility.toFixed(2), range: "Range: 0.5 – 2.0" },
-                { label: "Trend", value: jobParams.trend.toFixed(2), range: "Range: −1.0 – 1.0" },
-                { label: "Fat Tails", value: jobParams.fatTails.toFixed(2), range: "Range: 0.5 – 2.0" },
-                { label: "Momentum", value: jobParams.momentum.toFixed(2), range: "Range: 0.0 – 1.0" },
-                { label: "Time Horizon", value: `${jobParams.timeHorizon}d`, range: "Range: 500 – 2600 days" },
-                ...(jobParams.fileName ? [{ label: "File", value: jobParams.fileName, range: "" }] : []),
-              ].map((item) => (
-                <div key={item.label} className="space-y-0.5 min-w-0">
-                  <div className="flex items-center gap-1">
-                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">{item.label}</p>
-                    {item.range && <InfoTooltip content={item.range} />}
-                  </div>
-                  <p className="text-sm font-mono font-bold tabular-nums text-foreground truncate">{item.value}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        <div className="rounded-xl border border-border bg-card px-4 py-3 flex items-center shrink-0">
-          <FidelityGauge score={fidelityScore} />
-        </div>
-      </div>
-
-      {/* Row 2: Path info + all metric cards */}
+      {/* Row: Path info + all metric cards */}
       <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
         <div className="rounded-xl border border-border bg-card p-4 space-y-3 min-w-0">
           <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest truncate">
@@ -194,6 +298,34 @@ export function VisualizationResults({ data, jobParams }: VisualizationResultsPr
           </p>
           <p className="text-sm font-mono font-bold tabular-nums text-foreground">{selectedPathLabel}</p>
           <p className="text-[10px] text-muted-foreground truncate">{objectiveLabel}{extremeEventsValue !== null ? ` · ${extremeEventsValue}${extremeEventsTarget !== null ? ` / ${extremeEventsTarget}` : ""}` : ""}</p>
+          {extremeEventsValue !== null && (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Extreme events: <span className="font-semibold text-foreground">{extremeEventsValue}</span>
+              {extremeEventsTarget !== null ? ` (target ${extremeEventsTarget})` : ""}
+            </p>
+          )}
+          {volatilityRatioValue !== null && (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Roughness ratio: <span className="font-semibold text-foreground">{volatilityRatioValue}</span>
+              {volatilityRatioTarget !== null ? ` (target ${volatilityRatioTarget})` : ""}
+            </p>
+          )}
+          {volatilityStdValue !== null && (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Annualised vol: <span className="font-semibold text-foreground">{volatilityStdValue}</span>
+              {volatilityStdTarget !== null ? ` (target ${volatilityStdTarget})` : ""}
+            </p>
+          )}
+          {presetCompositeScore !== null && (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Composite score: <span className="font-semibold text-foreground">{presetCompositeScore}</span>
+            </p>
+          )}
+          {baselineCompositeDistance !== null && (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Composite distance: <span className="font-semibold text-foreground">{baselineCompositeDistance}</span>
+            </p>
+          )}
         </div>
         <DualMetricCard
           label="Ann. Return"
@@ -303,17 +435,7 @@ export function VisualizationResults({ data, jobParams }: VisualizationResultsPr
       <section>
         <h3 className="mb-4 text-base font-semibold text-foreground">Statistical Comparison</h3>
           <StatsPanel
-          stats={{
-            ...data.stats,
-            historical: {
-              ...data.stats.historical,
-              numDataPoints: data.historical.length,
-            },
-            synthetic: {
-              ...data.stats.synthetic,
-              numDataPoints: data.synthetic.length,
-            },
-          }}
+          stats={enrichedStats}
         />
 
       </section>

@@ -16,6 +16,7 @@ from goldenduck_core.redis_client import redis_client
 from goldenduck_core.services.job_store import job_store
 from goldenduck_core.models.enums import JobStatus
 from worker.GARCH.services.garch_service import GARCHService
+from worker.GARCH.services.scenarios import generate_scenario, get_scenario_knobs
 from goldenduck_core.db.session import SessionLocal
 from goldenduck_core.services.job_service import update_job_status
 
@@ -114,6 +115,8 @@ def _series_stats(prices: list, returns_arr: np.ndarray) -> dict:
             "std": 0.0,
             "skewness": 0.0,
             "kurtosis": 0.0,
+            "var95": 0.0,
+            "hurstMomentum": 0.5,
             "maxDrawdown": 0.0,
             "sharpe": 0.0,
             "annualizedReturn": 0.0,
@@ -139,11 +142,20 @@ def _series_stats(prices: list, returns_arr: np.ndarray) -> dict:
 
     total_return = (prices[-1] - prices[0]) / prices[0] if prices[0] != 0 else 0.0
 
+    # Daily VaR (95%) reported as positive loss magnitude.
+    q05 = float(np.quantile(returns_arr, 0.05))
+    var95 = max(0.0, -q05)
+
+    # Hurst-based momentum score in [0, 1] (0.5 is near-random neutral).
+    hurst_momentum = _safe_hurst_momentum(returns_arr)
+
     return {
         "mean": round(mean_r, 6),
         "std": round(std_r, 6),
         "skewness": round(float(scipy_stats.skew(returns_arr)), 4),
         "kurtosis": round(float(scipy_stats.kurtosis(returns_arr)), 4),
+        "var95": round(var95, 6),
+        "hurstMomentum": round(hurst_momentum, 4),
         "maxDrawdown": round(max_dd, 6),
         "sharpe": round(sharpe, 4),
         "annualizedReturn": round(ann_return, 6),
@@ -306,27 +318,75 @@ def compute_chart_data(historical_df: pd.DataFrame, scenario: pd.DataFrame, all_
     }
 
 
-def _safe_lag1_acf(returns_arr: np.ndarray) -> float:
+def _safe_hurst_momentum(returns_arr: np.ndarray) -> float:
     """
-    Compute lag-1 autocorrelation safely.
-    Returns 0.0 if series is too short or degenerate.
+    Estimate Hurst exponent from returns and map to momentum score in [0, 1].
+    Neutral/noise-like behavior is around 0.5.
     """
     x = np.asarray(returns_arr).ravel()
     x = x[np.isfinite(x)]
-    if len(x) < 3:
-        return 0.0
+    if len(x) < 20:
+        return 0.5
 
-    x0 = x[:-1]
-    x1 = x[1:]
-    s0 = float(np.std(x0))
-    s1 = float(np.std(x1))
-    if s0 < 1e-12 or s1 < 1e-12:
-        return 0.0
+    # Use cumulative demeaned series for robust scaling estimate.
+    y = np.cumsum(x - float(np.mean(x)))
+    if float(np.std(y)) < 1e-12:
+        return 0.5
 
-    corr = float(np.corrcoef(x0, x1)[0, 1])
-    if not np.isfinite(corr):
-        return 0.0
-    return corr
+    lags = np.array([2, 4, 8, 16, 32, 64], dtype=int)
+    lags = lags[lags < (len(y) // 2)]
+    if len(lags) < 2:
+        return 0.5
+
+    log_lags = []
+    log_tau = []
+    for lag in lags:
+        diff = y[lag:] - y[:-lag]
+        tau = float(np.std(diff))
+        if tau > 1e-12 and np.isfinite(tau):
+            log_lags.append(np.log(float(lag)))
+            log_tau.append(np.log(tau))
+
+    if len(log_lags) < 2:
+        return 0.5
+
+    try:
+        hurst = float(np.polyfit(np.array(log_lags), np.array(log_tau), 1)[0])
+    except Exception:
+        return 0.5
+
+    if not np.isfinite(hurst):
+        return 0.5
+    return float(np.clip(hurst, 0.0, 1.0))
+
+
+def _target_hurst_from_momentum_knob(
+    desired_momentum: float,
+    input_hurst: float,
+    low_anchor: float = 0.15,
+    high_anchor: float = 0.85,
+) -> float:
+    """
+    Map momentum knob to target H with anchors:
+      - knob=0.5 preserves input_hurst
+      - knob=0.0 targets low_anchor  (~0.1-0.2)
+      - knob=1.0 targets high_anchor (~0.8-0.9)
+    """
+    m = float(np.clip(desired_momentum, 0.0, 1.0))
+    h_in = float(np.clip(input_hurst, 0.0, 1.0))
+    lo = float(np.clip(low_anchor, 0.0, 1.0))
+    hi = float(np.clip(high_anchor, 0.0, 1.0))
+
+    if m <= 0.5:
+        # Linear from (0, lo) to (0.5, h_in)
+        t = m / 0.5 if 0.5 > 0 else 0.0
+        target = lo + t * (h_in - lo)
+    else:
+        # Linear from (0.5, h_in) to (1, hi)
+        t = (m - 0.5) / 0.5
+        target = h_in + t * (hi - h_in)
+
+    return float(np.clip(target, 0.0, 1.0))
 
 
 def _get_log_returns_from_scenario(scenario: pd.DataFrame) -> np.ndarray:
@@ -359,15 +419,281 @@ def _count_extreme_events(returns: np.ndarray, threshold: float = 2.5) -> int:
     return count
 
 
+def _baseline_match_distance(
+    scenario: pd.DataFrame,
+    historical_returns: np.ndarray,
+) -> float:
+    """
+    Composite distance between one synthetic path and input returns.
+    Lower is better.
+    """
+    h = np.asarray(historical_returns).ravel()
+    h = h[np.isfinite(h)]
+    s = _get_log_returns_from_scenario(scenario)
+    s = s[np.isfinite(s)]
+
+    if len(h) < 2 or len(s) < 2:
+        return float("inf")
+
+    # Input stats
+    h_mean = float(np.mean(h))
+    h_std = float(np.std(h, ddof=1)) if len(h) > 1 else 0.0
+    h_ann_vol = float(h_std * np.sqrt(252.0))
+    h_hurst = _safe_hurst_momentum(h)
+    h_kurt = float(stats.kurtosis(h))
+    h_skew = float(stats.skew(h))
+
+    # Scenario stats
+    s_mean = float(np.mean(s))
+    s_std = float(np.std(s, ddof=1)) if len(s) > 1 else 0.0
+    s_ann_vol = float(s_std * np.sqrt(252.0))
+    s_hurst = _safe_hurst_momentum(s)
+    s_kurt = float(stats.kurtosis(s))
+    s_skew = float(stats.skew(s))
+
+    if not all(
+        np.isfinite(v)
+        for v in [
+            h_mean,
+            h_ann_vol,
+            h_hurst,
+            h_kurt,
+            h_skew,
+            s_mean,
+            s_ann_vol,
+            s_hurst,
+            s_kurt,
+            s_skew,
+        ]
+    ):
+        return float("inf")
+
+    # Weighted normalized Euclidean distance.
+    # Prioritize realized volatility and Hurst for visual/path-shape fidelity.
+    w_mean = 0.20
+    w_vol = 0.35
+    w_hurst = 0.25
+    w_kurt = 0.15
+    w_skew = 0.05
+
+    d_mean = (s_mean - h_mean) / max(abs(h_mean), 1e-4)
+    d_vol = (s_ann_vol - h_ann_vol) / max(abs(h_ann_vol), 1e-6)
+    d_hurst = (s_hurst - h_hurst)  # already naturally scaled in [0, 1]
+    d_kurt = (s_kurt - h_kurt) / max(abs(h_kurt), 1.0)
+    d_skew = (s_skew - h_skew) / max(abs(h_skew), 0.25)
+
+    return float(
+        np.sqrt(
+            w_mean * d_mean * d_mean
+            + w_vol * d_vol * d_vol
+            + w_hurst * d_hurst * d_hurst
+            + w_kurt * d_kurt * d_kurt
+            + w_skew * d_skew * d_skew
+        )
+    )
+
+
+def _path_tortuosity_ratio(scenario: pd.DataFrame) -> float:
+    """
+    Volatility path roughness heuristic:
+      ratio = total path length / net displacement
+
+    Low-vol path: ratio ~ 1 (straighter)
+    High-vol path: ratio >> 1 (more winding)
+    """
+    close = scenario["Close"].values.astype(float)
+    if len(close) < 2:
+        return 1.0
+
+    diffs = np.diff(close)
+    path_length = float(np.sum(np.abs(diffs)))
+    net_displacement = float(abs(close[-1] - close[0]))
+
+    # Avoid division blow-ups when start/end are very close.
+    denom = max(net_displacement, 1e-8)
+    ratio = path_length / denom
+    if not np.isfinite(ratio):
+        return 1e6
+    return float(ratio)
+
+
+def _is_flash_crash_preset(user_knobs: dict, eps: float = 1e-9) -> bool:
+    """Check whether current knobs match flash-crash preset values."""
+    preset = get_scenario_knobs("flash_crash")
+    return (
+        abs(float(user_knobs.get("desired_trend", 0.0)) - float(preset.get("desired_trend", 0.0))) <= eps
+        and abs(float(user_knobs.get("desired_volatility", 1.0)) - float(preset.get("desired_volatility", 1.0))) <= eps
+        and abs(float(user_knobs.get("desired_fat_tails", 1.0)) - float(preset.get("desired_fat_tails", 1.0))) <= eps
+        and abs(float(user_knobs.get("desired_momentum", 0.5)) - float(preset.get("desired_momentum", 0.5))) <= eps
+    )
+
+
+def _target_mean_from_desired_trend(desired_trend: float) -> float:
+    """
+    Map desired trend knob to target DAILY mean log return.
+    Piecewise annual drift mapping:
+      0.25 -> 10%/yr, 0.50 -> 25%/yr, 1.00 -> 50%/yr (signed).
+    """
+    trend_mag = float(np.clip(abs(desired_trend), 0.0, 1.0))
+    if trend_mag <= 0.25:
+        annual_drift_mag = 0.40 * trend_mag
+    elif trend_mag <= 0.50:
+        annual_drift_mag = 0.10 + 0.60 * (trend_mag - 0.25)
+    else:
+        annual_drift_mag = 0.25 + 0.50 * (trend_mag - 0.50)
+
+    annual_drift = np.sign(desired_trend) * annual_drift_mag
+    return float(annual_drift / 252.0)
+
+
+def _score_bull_run_path(
+    scenario: pd.DataFrame,
+    target_mean: float,
+    target_vol: float,
+    max_dd_threshold: float = 0.20,
+) -> float:
+    """
+    Composite score for bull-run preset path selection.
+    Hard disqualifiers:
+      - Negative net return
+      - Max drawdown > max_dd_threshold
+    """
+    close = scenario["Close"].values.astype(float)
+    close = np.clip(close, 1e-12, None)
+    if len(close) < 2:
+        return float("-inf")
+
+    r = np.log(close[1:] / close[:-1])
+
+    net_return = (close[-1] - close[0]) / close[0]
+    if net_return < 0:
+        return float("-inf")
+
+    peak = np.maximum.accumulate(close)
+    drawdown = (close - peak) / peak
+    max_dd = abs(float(np.min(drawdown)))
+    if max_dd > max_dd_threshold:
+        return float("-inf")
+
+    mean_r = float(np.mean(r)) if len(r) > 0 else 0.0
+    std_r = float(np.std(r, ddof=1)) if len(r) > 1 else 0.0
+
+    trend_score = 1.0 - abs(mean_r - target_mean) / (abs(target_mean) + 1e-6)
+    vol_score = 1.0 - abs(std_r - target_vol) / (abs(target_vol) + 1e-6)
+    dd_score = 1.0 - (max_dd / max_dd_threshold)
+
+    # Clamp to keep each component in [0, 1] range when possible.
+    trend_score = float(np.clip(trend_score, 0.0, 1.0))
+    vol_score = float(np.clip(vol_score, 0.0, 1.0))
+    dd_score = float(np.clip(dd_score, 0.0, 1.0))
+
+    return float(0.5 * trend_score + 0.3 * dd_score + 0.2 * vol_score)
+
+
+def _is_valid_flash_crash(
+    prices: np.ndarray, crash_start: int, crash_days: int = 5
+) -> bool:
+    """
+    Hard filters for flash-crash shape:
+      - crash depth >= 15%
+      - recovery >= 50%
+      - end price >= start price (no full-period decline)
+    """
+    p = np.asarray(prices, dtype=float)
+    if len(p) < 3:
+        return False
+
+    crash_start = int(np.clip(crash_start, 1, max(len(p) - 2, 1)))
+    crash_end = min(crash_start + max(int(crash_days), 1), len(p))
+    if crash_end <= crash_start:
+        return False
+
+    pre_crash = float(p[crash_start - 1])
+    crash_low = float(np.min(p[crash_start:crash_end]))
+    end_price = float(p[-1])
+
+    if pre_crash <= 1e-12:
+        return False
+
+    crash_depth = (pre_crash - crash_low) / pre_crash
+    denom = (pre_crash - crash_low)
+    if denom <= 1e-12:
+        return False
+    recovery = (end_price - crash_low) / denom
+
+    if crash_depth < 0.15:
+        return False
+    if recovery < 0.50:
+        return False
+    if end_price < float(p[0]):
+        return False
+    return True
+
+
+def _score_flash_crash_path(
+    prices: np.ndarray, crash_start: int, crash_days: int = 5
+) -> float:
+    """
+    Composite score for flash-crash path quality.
+    Assumes hard filters are already satisfied.
+    """
+    p = np.asarray(prices, dtype=float)
+    if len(p) < 3:
+        return float("-inf")
+
+    crash_start = int(np.clip(crash_start, 1, max(len(p) - 2, 1)))
+    crash_end = min(crash_start + max(int(crash_days), 1), len(p))
+    if crash_end <= crash_start:
+        return float("-inf")
+
+    pre_crash_prices = p[:crash_start]
+    if len(pre_crash_prices) < 2:
+        return float("-inf")
+
+    local_window = p[crash_start:crash_end]
+    if len(local_window) == 0:
+        return float("-inf")
+
+    crash_low_local_idx = int(np.argmin(local_window))
+    crash_low_idx = crash_start + crash_low_local_idx
+    crash_low = float(p[crash_low_idx])
+    pre_crash = float(p[crash_start - 1])
+    end_price = float(p[-1])
+
+    pre_crash_returns = np.diff(np.log(np.clip(pre_crash_prices, 1e-12, None)))
+    calm_score = 1.0 - min(float(np.std(pre_crash_returns)) / 0.015, 1.0)
+
+    crash_depth = (pre_crash - crash_low) / max(pre_crash, 1e-12)
+    crash_score = min(crash_depth / 0.30, 1.0)
+
+    denom = max(pre_crash - crash_low, 1e-12)
+    recovery = (end_price - crash_low) / denom
+    recovery_score = min(recovery, 1.0)
+
+    post_crash = p[crash_low_idx:]
+    if len(post_crash) >= 2:
+        post_returns = np.diff(np.log(np.clip(post_crash, 1e-12, None)))
+        vshape_score = 1.0 if float(np.mean(post_returns)) > 0 else 0.0
+    else:
+        vshape_score = 0.0
+
+    return float(
+        0.25 * calm_score
+        + 0.35 * crash_score
+        + 0.25 * recovery_score
+        + 0.15 * vshape_score
+    )
+
+
 def _select_best_display_scenario(
-    scenarios: list[pd.DataFrame], user_knobs: dict
+    scenarios: list[pd.DataFrame], user_knobs: dict, historical_returns: np.ndarray | None = None
 ) -> tuple[int, str, float, float]:
     """
     Select one scenario path for frontend display using a single-knob visual objective.
 
     Rules (single-knob assumption):
       - Trend knob active: choose path with mean log return closest to target mean.
-      - Momentum knob active: choose path with lag-1 ACF closest to target ACF.
+            - Momentum knob active: choose path with Hurst momentum closest to target [0, 1].
       - Fat Tails knob active: choose path with extreme event count closest to target.
       - Otherwise: fallback to first path.
 
@@ -389,6 +715,125 @@ def _select_best_display_scenario(
     volatility_active = abs(desired_volatility - 1.0) > eps
     fat_tails_active = abs(desired_fat_tails - 1.0) > eps
 
+    # Bull-run preset (temporary testing mode):
+    # volatility=0.5, fat_tails=0.6, trend=1.0, momentum=0.85
+    bull_run_preset = (
+        abs(desired_volatility - 0.5) <= 1e-9
+        and abs(desired_fat_tails - 0.6) <= 1e-9
+        and abs(desired_trend - 1.0) <= 1e-9
+        and abs(desired_momentum - 0.85) <= 1e-9
+    )
+
+    if bull_run_preset:
+        target_mean = _target_mean_from_desired_trend(desired_trend)
+        hist = np.asarray(historical_returns).ravel() if historical_returns is not None else np.array([])
+        hist = hist[np.isfinite(hist)] if len(hist) > 0 else hist
+        hist_std = float(np.std(hist, ddof=1)) if len(hist) > 1 else 0.01
+        target_vol = max(1e-8, hist_std * desired_volatility)
+
+        best_idx = 0
+        best_score = float("-inf")
+        for i, scenario in enumerate(scenarios):
+            score = _score_bull_run_path(
+                scenario=scenario,
+                target_mean=target_mean,
+                target_vol=target_vol,
+                max_dd_threshold=0.20,
+            )
+            if score > best_score:
+                best_score = score
+                best_idx = i
+
+        if not np.isfinite(best_score):
+            # No path passed hard filters; keep objective tag but return finite score.
+            return 0, "bull_run_composite", 1.0, 0.0
+        return best_idx, "bull_run_composite", 1.0, float(best_score)
+
+    if _is_flash_crash_preset(user_knobs):
+        horizon = len(scenarios[0]) if scenarios else 0
+        crash_start = int(0.60 * horizon)
+        crash_days = 5
+
+        best_idx = 0
+        best_score = float("-inf")
+        for i, scenario in enumerate(scenarios):
+            prices = scenario["Close"].values.astype(float)
+            prices = np.clip(prices, 1e-12, None)
+
+            if not _is_valid_flash_crash(prices, crash_start=crash_start, crash_days=crash_days):
+                score = float("-inf")
+            else:
+                score = _score_flash_crash_path(prices, crash_start=crash_start, crash_days=crash_days)
+
+            if score > best_score:
+                best_score = score
+                best_idx = i
+
+        if not np.isfinite(best_score):
+            # No path passed hard filters; keep objective tag but return finite score.
+            return 0, "flash_crash_composite", 1.0, 0.0
+        return best_idx, "flash_crash_composite", 1.0, float(best_score)
+
+    if (
+        volatility_active
+        and not trend_active
+        and not momentum_active
+        and not fat_tails_active
+    ):
+        # Volatility-only selection via return standard deviation scaling.
+        # Example: desired_volatility=2.0 -> target path with ~2x historical std.
+        hist = (
+            np.asarray(historical_returns).ravel()
+            if historical_returns is not None
+            else np.array([], dtype=float)
+        )
+        hist = hist[np.isfinite(hist)] if len(hist) > 0 else hist
+        hist_std = float(np.std(hist, ddof=1)) if len(hist) > 1 else 0.0
+
+        if hist_std <= 1e-12:
+            return 0, "volatility_std", 0.0, 0.0
+
+        target_std = float(hist_std * desired_volatility)
+
+        best_idx = 0
+        best_err = float("inf")
+        best_val = 0.0
+
+        for i, scenario in enumerate(scenarios):
+            r = _get_log_returns_from_scenario(scenario)
+            val = float(np.std(r, ddof=1)) if len(r) > 1 else 0.0
+            if not np.isfinite(val):
+                continue
+            err = abs(val - target_std)
+            if err < best_err:
+                best_err = err
+                best_idx = i
+                best_val = val
+
+        return best_idx, "volatility_std", target_std, best_val
+
+    if (
+        not trend_active
+        and not momentum_active
+        and not volatility_active
+        and not fat_tails_active
+    ):
+        # No knob tweaked: choose scenario that best matches input path statistics.
+        if historical_returns is None:
+            return 0, "fallback", 0.0, 0.0
+
+        best_idx = 0
+        best_dist = float("inf")
+        for i, scenario in enumerate(scenarios):
+            dist = _baseline_match_distance(scenario, historical_returns)
+            if dist < best_dist:
+                best_dist = dist
+                best_idx = i
+
+        if not np.isfinite(best_dist):
+            return 0, "fallback", 0.0, 0.0
+        return best_idx, "baseline_composite_match", 0.0, float(best_dist)
+
     # Only act on trend/momentum objectives under the user's one-knob assumption.
     # Exactly one of trend/momentum should be active; otherwise fallback.
     if (
@@ -397,16 +842,7 @@ def _select_best_display_scenario(
         and not volatility_active
         and not fat_tails_active
     ):
-        trend_mag = float(np.clip(abs(desired_trend), 0.0, 1.0))
-        if trend_mag <= 0.25:
-            annual_drift_mag = 0.40 * trend_mag
-        elif trend_mag <= 0.50:
-            annual_drift_mag = 0.10 + 0.60 * (trend_mag - 0.25)
-        else:
-            annual_drift_mag = 0.25 + 0.50 * (trend_mag - 0.50)
-
-        annual_drift = np.sign(desired_trend) * annual_drift_mag
-        target_mean = annual_drift / 252.0
+        target_mean = _target_mean_from_desired_trend(desired_trend)
         best_idx = 0
         best_err = float("inf")
         best_val = 0.0
@@ -428,24 +864,32 @@ def _select_best_display_scenario(
         and not volatility_active
         and not fat_tails_active
     ):
-        # Keep target aligned with existing inference/validation logic.
-        phi = -0.1 + 0.4 * desired_momentum
-        target_acf = phi * 0.9
+        hist_hurst = (
+            _safe_hurst_momentum(np.asarray(historical_returns, dtype=float))
+            if historical_returns is not None
+            else 0.5
+        )
+        target_momentum = _target_hurst_from_momentum_knob(
+            desired_momentum,
+            hist_hurst,
+            low_anchor=0.15,
+            high_anchor=0.85,
+        )
 
         best_idx = 0
         best_err = float("inf")
-        best_val = 0.0
+        best_val = 0.5
 
         for i, scenario in enumerate(scenarios):
             r = _get_log_returns_from_scenario(scenario)
-            val = _safe_lag1_acf(r)
-            err = abs(val - target_acf)
+            val = _safe_hurst_momentum(r)
+            err = abs(val - target_momentum)
             if err < best_err:
                 best_err = err
                 best_idx = i
                 best_val = val
 
-        return best_idx, "momentum_acf1", float(target_acf), float(best_val)
+        return best_idx, "momentum_hurst", float(target_momentum), float(best_val)
 
     if (
         fat_tails_active
@@ -612,6 +1056,25 @@ while True:
         logger.info(f"Predicting GARCH-FX parameters from user knobs...")
         returns = np.log(data["Close"].values[1:] / data["Close"].values[:-1])
 
+        # Momentum control anchor: preserve historical H when knob=0.5,
+        # pull towards low/high H anchors when knob moves to 0/1.
+        historical_hurst = _safe_hurst_momentum(returns)
+        target_hurst = _target_hurst_from_momentum_knob(
+            user_knobs.get("desired_momentum", 0.5),
+            historical_hurst,
+            low_anchor=0.15,
+            high_anchor=0.85,
+        )
+        user_knobs["historical_hurst"] = float(historical_hurst)
+        user_knobs["target_hurst"] = float(target_hurst)
+
+        logger.info(
+            "Momentum mapping: knob=%.3f, H_input=%.4f, H_target=%.4f",
+            float(user_knobs.get("desired_momentum", 0.5)),
+            float(historical_hurst),
+            float(target_hurst),
+        )
+
         # Auto mode for skew flags:
         # If user omits a flag, infer from data skewness.
         auto_enable_skew, skew_meta = _infer_skew_shock_flags(returns)
@@ -657,7 +1120,12 @@ while True:
         logger.info(f"  Delta (ML): {pred_params['delta']:.4f} [USING DESIRED_VOLATILITY DIRECTLY]")
         logger.info(f"  Theta (mapped from fat_tails={desired_fat_tails}): {pred_params['theta']:.6f}")
 
-        delta_sequence = np.full(horizon, float(pred_params["delta"]))
+        if _is_flash_crash_preset(user_knobs):
+            delta_sequence, flash_desc = generate_scenario("flash_crash", horizon)
+            logger.info("Using flash_crash preset delta sequence: %s", flash_desc)
+        else:
+            delta_sequence = np.full(horizon, float(pred_params["delta"]))
+
         scenarios = garch.generate_scenarios_fx(
             num_scenarios=num_scenarios,
             horizon=horizon,
@@ -724,8 +1192,42 @@ while True:
                 selection_objective,
                 selection_target,
                 selection_value,
-            ) = _select_best_display_scenario(scenarios, user_knobs)
+            ) = _select_best_display_scenario(
+                scenarios, user_knobs, historical_returns=returns
+            )
             selected_idx = int(np.clip(selected_idx, 0, max(len(scenarios) - 1, 0)))
+
+            # Recompute knob-level match metrics from the selected display path
+            # (instead of pooled returns across all scenarios).
+            try:
+                from worker.GARCH.services.validation_service import ValidationService
+
+                selected_returns = (
+                    scenarios[selected_idx]["Close"].pct_change().dropna().values
+                )
+                validator = ValidationService(data)
+                selected_metrics = validator.validate_against_desired(
+                    selected_returns, user_knobs
+                )
+
+                for k in ["mean_match", "volatility_match", "kurtosis_match", "acf_match"]:
+                    if k in selected_metrics:
+                        metrics[k] = float(selected_metrics[k])
+
+                metrics["overall_match"] = (
+                    float(metrics.get("mean_match", 0.0))
+                    + float(metrics.get("volatility_match", 0.0))
+                    + float(metrics.get("kurtosis_match", 0.0))
+                    + float(metrics.get("acf_match", 0.0))
+                ) / 4.0
+                metrics["match_metrics_source"] = "selected_path"
+            except Exception as match_exc:
+                logger.warning(
+                    "Could not recompute selected-path match metrics for job %s: %s",
+                    job_id,
+                    match_exc,
+                )
+                metrics["match_metrics_source"] = "all_scenarios"
 
             logger.info(
                 "Display path selection: objective=%s, selected_scenario=%s, target=%.8f, value=%.8f",
@@ -782,6 +1284,8 @@ while True:
             "delta_predicted": float(pred_params["delta"]),
             "theta_predicted": float(pred_params["theta"]),
             "delta_confidence": pred_params["delta_confidence"],
+            "historical_hurst": float(user_knobs.get("historical_hurst", 0.5)),
+            "target_hurst": float(user_knobs.get("target_hurst", 0.5)),
             "historical_skewness": float(skew_meta["historical_skewness"]),
             "historical_skewness_threshold": float(skew_meta["skew_threshold"]),
             "skew_detection_sample_size": int(skew_meta["sample_size"]),

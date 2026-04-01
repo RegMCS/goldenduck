@@ -188,6 +188,12 @@ function DivergingRow({
 
 export function StatsPanel({ stats }: StatsPanelProps) {
   const { historical: h, synthetic: s } = stats
+  const hVar95 = typeof h.var95 === "number" ? h.var95 : 0
+  const sVar95 = typeof s.var95 === "number" ? s.var95 : 0
+  const hLegacyMomentum = typeof h.acfLag1 === "number" ? Math.max(0, Math.min(1, 0.5 + 0.5 * h.acfLag1)) : 0.5
+  const sLegacyMomentum = typeof s.acfLag1 === "number" ? Math.max(0, Math.min(1, 0.5 + 0.5 * s.acfLag1)) : 0.5
+  const hHurstMomentum = typeof h.hurstMomentum === "number" ? h.hurstMomentum : hLegacyMomentum
+  const sHurstMomentum = typeof s.hurstMomentum === "number" ? s.hurstMomentum : sLegacyMomentum
 
   return (
     <div className="grid gap-4 md:grid-cols-2">
@@ -236,10 +242,25 @@ export function StatsPanel({ stats }: StatsPanelProps) {
           <div className="h-3 w-3 rounded-full bg-gradient-to-br from-violet-500 to-pink-500" />
           <h4 className="text-sm font-semibold text-foreground">Distribution</h4>
         </div>
-        <DivergingRow label="Daily Mean Return" historical={h.mean} synthetic={s.mean} fmt={(v) => v.toFixed(4)} />
-        <DivergingRow label="Daily Std Dev" historical={h.std} synthetic={s.std} fmt={(v) => v.toFixed(4)} positiveOnly />
+        <DivergingRow label="Daily Mean Return [Trend]" historical={h.mean} synthetic={s.mean} fmt={(v) => v.toFixed(4)} />
+        <DivergingRow label="Daily Std Dev [Volatility]" historical={h.std} synthetic={s.std} fmt={(v) => v.toFixed(4)} positiveOnly />
         <DivergingRow label="Skewness" historical={h.skewness} synthetic={s.skewness} fmt={(v) => `${v >= 0 ? "+" : ""}${v.toFixed(4)}`} />
-        <DivergingRow label="Excess Kurtosis" historical={h.kurtosis} synthetic={s.kurtosis} fmt={(v) => `${v >= 0 ? "+" : ""}${v.toFixed(4)}`} />
+        <DivergingRow label="Excess Kurtosis [Fat Tails]" historical={h.kurtosis} synthetic={s.kurtosis} fmt={(v) => `${v >= 0 ? "+" : ""}${v.toFixed(4)}`} />
+        <DivergingRow
+          label="Hurst Momentum [Momentum]"
+          historical={hHurstMomentum}
+          synthetic={sHurstMomentum}
+          fmt={(v) => v.toFixed(4)}
+          positiveOnly
+        />
+        <DivergingRow
+          label="Daily VaR (95%)"
+          historical={hVar95}
+          synthetic={sVar95}
+          fmt={(v) => `${(v * 100).toFixed(2)}%`}
+          positiveOnly
+        />
+          
         <div className="py-3">
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs font-medium text-muted-foreground">Data Points</span>

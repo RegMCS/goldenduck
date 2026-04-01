@@ -50,9 +50,10 @@ export function CandlestickChart({
 
   const displayData = useMemo(() => {
     return data.map((d, idx, arr) => {
-      const start = Math.max(0, idx - maPeriod + 1)
-      const slice = arr.slice(start, idx + 1)
-      const ma = slice.reduce((s, x) => s + x.close, 0) / slice.length
+      const maStart = Math.max(0, idx - maPeriod + 1)
+      const maSlice = arr.slice(maStart, idx + 1)
+      const ma = maSlice.reduce((s, x) => s + x.close, 0) / maSlice.length
+
       return {
         date: d.date,
         open: d.open,

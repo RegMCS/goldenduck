@@ -226,9 +226,18 @@ class GARCHFXEngine:
         # ============================================================
 
         if user_knobs is not None:
-            momentum = user_knobs.get("desired_momentum", 0.5)
-            # Map [0, 1] → [-0.1, 0.3]
-            phi = -0.1 + 0.4 * momentum
+            target_hurst = user_knobs.get("target_hurst")
+            if target_hurst is None:
+                # Legacy fallback if target_hurst was not precomputed upstream.
+                momentum = float(user_knobs.get("desired_momentum", 0.5))
+                target_hurst = float(np.clip(momentum, 0.0, 1.0))
+            else:
+                target_hurst = float(np.clip(float(target_hurst), 0.0, 1.0))
+
+            # Derive AR(1) coefficient from target H:
+            # Approximation around fractional-memory behavior: H ≈ 0.5 + phi/2
+            # => phi ≈ 2H - 1 (clipped for stability)
+            phi = float(np.clip(2.0 * target_hurst - 1.0, -0.95, 0.95))
         else:
             phi = 0.0  # No autocorrelation by default
 

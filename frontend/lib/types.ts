@@ -70,6 +70,10 @@ export interface SeriesStats {
   std: number
   skewness: number
   kurtosis: number
+  var95?: number
+  hurstMomentum?: number
+  // Backward compatibility for older jobs
+  acfLag1?: number
   maxDrawdown: number
   sharpe: number
   annualizedReturn: number
