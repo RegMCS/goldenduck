@@ -87,6 +87,105 @@ function ComparisonRow({
   )
 }
 
+function DivergingRow({
+  label,
+  historical,
+  synthetic,
+  fmt,
+  positiveOnly = false,
+}: {
+  label: string
+  historical: number
+  synthetic: number
+  fmt: (v: number) => string
+  positiveOnly?: boolean
+}) {
+  const diff = synthetic - historical
+  const pctDiff = historical !== 0 ? (diff / Math.abs(historical)) * 100 : 0
+  const diffClass =
+    Math.abs(pctDiff) < 5
+      ? "text-emerald-500"
+      : Math.abs(pctDiff) < 20
+        ? "text-amber-500"
+        : "text-red-500"
+
+  // For diverging bars: find the range across both values
+  const maxAbs = positiveOnly
+    ? Math.max(historical, synthetic, 0.0001)
+    : Math.max(Math.abs(historical), Math.abs(synthetic), 0.0001)
+
+  // Bar positioning: left% is where the bar starts, width% is how wide
+  const barProps = (v: number) => {
+    if (positiveOnly) {
+      return { left: "0%", width: `${(v / maxAbs) * 100}%` }
+    }
+    const center = 50
+    const magnitude = (Math.abs(v) / maxAbs) * 50
+    if (v >= 0) return { left: `${center}%`, width: `${magnitude}%` }
+    return { left: `${center - magnitude}%`, width: `${magnitude}%` }
+  }
+
+  const hBar = barProps(historical)
+  const sBar = barProps(synthetic)
+
+  return (
+    <div className="py-3 border-b border-border/50 last:border-0">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-medium text-muted-foreground">{label}</span>
+        <span className={`text-[10px] font-mono font-semibold tabular-nums ${diffClass}`}>
+          Δ {pctDiff >= 0 ? "+" : ""}{pctDiff.toFixed(1)}%
+        </span>
+      </div>
+      <div className="space-y-1.5">
+        {/* Historical */}
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-medium text-blue-500 w-10 shrink-0">Hist</span>
+          <div className="flex-1 relative h-1.5 bg-border/40 rounded-full overflow-hidden">
+            {!positiveOnly && (
+              <div className="absolute inset-y-0 left-1/2 w-px bg-border/80" />
+            )}
+            <div
+              className="absolute inset-y-0 bg-blue-500 rounded-full"
+              style={{ left: hBar.left, width: hBar.width }}
+            />
+          </div>
+          <span className="text-xs font-mono tabular-nums text-foreground w-20 text-right shrink-0">
+            {fmt(historical)}
+          </span>
+        </div>
+        {/* Synthetic */}
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-medium text-amber-500 w-10 shrink-0">Synth</span>
+          <div className="flex-1 relative h-1.5 bg-border/40 rounded-full overflow-hidden">
+            {!positiveOnly && (
+              <div className="absolute inset-y-0 left-1/2 w-px bg-border/80" />
+            )}
+            <div
+              className="absolute inset-y-0 bg-amber-500 rounded-full"
+              style={{ left: sBar.left, width: sBar.width }}
+            />
+          </div>
+          <span className="text-xs font-mono tabular-nums text-foreground w-20 text-right shrink-0">
+            {fmt(synthetic)}
+          </span>
+        </div>
+        {/* X-axis for diverging rows */}
+        {!positiveOnly && (
+          <div className="flex items-center gap-2 mt-1">
+            <div className="w-10 shrink-0" />
+            <div className="flex-1 relative flex items-center justify-between">
+              <span className="text-[9px] text-muted-foreground/60">← Negative</span>
+              <span className="text-[9px] text-muted-foreground/80 font-mono absolute left-1/2 -translate-x-1/2">0</span>
+              <span className="text-[9px] text-muted-foreground/60">Positive →</span>
+            </div>
+            <div className="w-20 shrink-0" />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export function StatsPanel({ stats }: StatsPanelProps) {
   const { historical: h, synthetic: s } = stats
 
@@ -137,29 +236,11 @@ export function StatsPanel({ stats }: StatsPanelProps) {
           <div className="h-3 w-3 rounded-full bg-gradient-to-br from-violet-500 to-pink-500" />
           <h4 className="text-sm font-semibold text-foreground">Distribution</h4>
         </div>
-        <ComparisonRow
-          label="Daily Mean Return"
-          historical={h.mean}
-          synthetic={s.mean}
-        />
-        <ComparisonRow
-          label="Daily Std Dev"
-          historical={h.std}
-          synthetic={s.std}
-          lowerIsBetter
-        />
-        <ComparisonRow
-          label="Skewness"
-          historical={h.skewness}
-          synthetic={s.skewness}
-          showSign
-        />
-        <ComparisonRow
-          label="Excess Kurtosis"
-          historical={h.kurtosis}
-          synthetic={s.kurtosis}
-        />
-        <div className="py-3 border-b border-border/50 last:border-0">
+        <DivergingRow label="Daily Mean Return" historical={h.mean} synthetic={s.mean} fmt={(v) => v.toFixed(4)} />
+        <DivergingRow label="Daily Std Dev" historical={h.std} synthetic={s.std} fmt={(v) => v.toFixed(4)} positiveOnly />
+        <DivergingRow label="Skewness" historical={h.skewness} synthetic={s.skewness} fmt={(v) => `${v >= 0 ? "+" : ""}${v.toFixed(4)}`} />
+        <DivergingRow label="Excess Kurtosis" historical={h.kurtosis} synthetic={s.kurtosis} fmt={(v) => `${v >= 0 ? "+" : ""}${v.toFixed(4)}`} />
+        <div className="py-3">
           <div className="flex items-center justify-between mb-1">
             <span className="text-xs font-medium text-muted-foreground">Data Points</span>
           </div>

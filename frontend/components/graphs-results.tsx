@@ -1,7 +1,8 @@
 "use client"
 
 import { useMemo } from "react"
-import { type GeneratedData } from "@/lib/types"
+import { type GeneratedData, type JobParameters } from "@/lib/types"
+import { InfoTooltip } from "@/components/info-tooltip"
 import { CandlestickChart } from "@/components/charts/candlestick-chart"
 import { PriceOverlayChart } from "@/components/charts/price-overlay-chart"
 import { CumulativeReturnChart } from "@/components/charts/cumulative-return-chart"
@@ -12,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 interface VisualizationResultsProps {
   data: GeneratedData
+  jobParams?: JobParameters | null
 }
 
 function FidelityGauge({ score }: { score: number }) {
@@ -99,7 +101,7 @@ function DualMetricCard({
   )
 }
 
-export function VisualizationResults({ data }: VisualizationResultsProps) {
+export function VisualizationResults({ data, jobParams }: VisualizationResultsProps) {
   // Guard against missing stats
   if (!data.stats || !data.stats.historical || !data.stats.synthetic) {
     return (
@@ -153,23 +155,45 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
       : null
 
   return (
-    <div className="space-y-8">
-      <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
-        <div className="rounded-xl border border-border bg-card px-5 py-4 col-span-2 md:col-span-1 flex items-center">
+    <div className="space-y-3">
+      {/* Row 1: Input parameters + Fidelity gauge */}
+      <div className="flex gap-3 items-stretch">
+        {jobParams && (
+          <div className="flex-1 rounded-xl border border-border bg-card px-4 py-3">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest mb-2">Input Parameters</p>
+            <div className="flex justify-between gap-2">
+              {[
+                { label: "Volatility", value: jobParams.volatility.toFixed(2), range: "Range: 0.5 – 2.0" },
+                { label: "Trend", value: jobParams.trend.toFixed(2), range: "Range: −1.0 – 1.0" },
+                { label: "Fat Tails", value: jobParams.fatTails.toFixed(2), range: "Range: 0.5 – 2.0" },
+                { label: "Momentum", value: jobParams.momentum.toFixed(2), range: "Range: 0.0 – 1.0" },
+                { label: "Time Horizon", value: `${jobParams.timeHorizon}d`, range: "Range: 500 – 2600 days" },
+                ...(jobParams.fileName ? [{ label: "File", value: jobParams.fileName, range: "" }] : []),
+              ].map((item) => (
+                <div key={item.label} className="space-y-0.5 min-w-0">
+                  <div className="flex items-center gap-1">
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">{item.label}</p>
+                    {item.range && <InfoTooltip content={item.range} />}
+                  </div>
+                  <p className="text-sm font-mono font-bold tabular-nums text-foreground truncate">{item.value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="rounded-xl border border-border bg-card px-4 py-3 flex items-center shrink-0">
           <FidelityGauge score={fidelityScore} />
         </div>
-        <div className="rounded-xl border border-border bg-card px-5 py-4 col-span-2 md:col-span-1 lg:col-span-1 flex flex-col justify-center">
-          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">
-            Selected Display Path
+      </div>
+
+      {/* Row 2: Path info + all metric cards */}
+      <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="rounded-xl border border-border bg-card p-4 space-y-3 min-w-0">
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest truncate">
+            Display Path
           </p>
-          <p className="mt-1 text-lg font-bold tabular-nums text-foreground">{selectedPathLabel}</p>
-          <p className="text-[11px] text-muted-foreground">{objectiveLabel}</p>
-          {extremeEventsValue !== null && (
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              Extreme events: <span className="font-semibold text-foreground">{extremeEventsValue}</span>
-              {extremeEventsTarget !== null ? ` (target ${extremeEventsTarget})` : ""}
-            </p>
-          )}
+          <p className="text-sm font-mono font-bold tabular-nums text-foreground">{selectedPathLabel}</p>
+          <p className="text-[10px] text-muted-foreground truncate">{objectiveLabel}{extremeEventsValue !== null ? ` · ${extremeEventsValue}${extremeEventsTarget !== null ? ` / ${extremeEventsTarget}` : ""}` : ""}</p>
         </div>
         <DualMetricCard
           label="Ann. Return"
@@ -202,6 +226,14 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
           histClass="text-red-500"
           synthClass="text-red-500"
           delta={`${((s.maxDrawdown - h.maxDrawdown) * 100).toFixed(2)}pp`}
+        />
+        <DualMetricCard
+          label="Total Return"
+          histValue={pct(h.totalReturn)}
+          synthValue={pct(s.totalReturn)}
+          histClass={rc(h.totalReturn)}
+          synthClass={rc(s.totalReturn)}
+          delta={`${((s.totalReturn - h.totalReturn) * 100).toFixed(2)}pp`}
         />
       </div>
 

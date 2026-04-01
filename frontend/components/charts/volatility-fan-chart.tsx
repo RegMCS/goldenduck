@@ -39,9 +39,11 @@ export function VolatilityFanChart({ data, height = 420 }: VolatilityFanChartPro
 
   return (
     <div className="w-full space-y-4">
-      <div className="flex items-center justify-between">
-        <h4 className="text-sm font-semibold text-foreground">Volatility Fan Chart</h4>
-        <div className="text-xs text-muted-foreground">
+      <div className="flex items-start justify-between">
+        <div>
+          <h4 className="text-sm font-semibold text-foreground">Volatility Fan Chart</h4>
+        </div>
+        <div className="text-xs text-muted-foreground shrink-0">
           Band width at horizon: <span className="font-mono font-semibold">{bandWidth}</span>
         </div>
       </div>
@@ -140,6 +142,7 @@ export function VolatilityFanChart({ data, height = 420 }: VolatilityFanChartPro
           />
         </ComposedChart>
       </ResponsiveContainer>
+      <p className="-mt-3 text-center text-[10px] text-muted-foreground/60">Drag handles to zoom · scroll to pan</p>
       <div className="text-xs text-muted-foreground space-y-1">
         <p>
           <span className="font-semibold">Fan interpretation:</span> Wider band indicates higher volatility. Compare historical price (blue) to synthetic paths (orange band).

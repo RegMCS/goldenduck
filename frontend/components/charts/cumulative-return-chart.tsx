@@ -20,8 +20,9 @@ interface CumulativeReturnChartProps {
 }
 
 export function CumulativeReturnChart({ data, height = 400 }: CumulativeReturnChartProps) {
-  const displayData = useMemo(() => data.map((d) => ({
+  const displayData = useMemo(() => data.map((d, i) => ({
     ...d,
+    idx: i + 1,
     historicalCumPct: d.historicalCumReturn * 100,
     syntheticCumPct: d.syntheticCumReturn * 100,
   })), [data])
@@ -39,12 +40,6 @@ export function CumulativeReturnChart({ data, height = 400 }: CumulativeReturnCh
       trackingError: Math.sqrt(teVariance * 252) * 100,
     }
   }, [data])
-
-  const formatDate = useCallback((value: string) => {
-    if (!value) return ""
-    const parts = value.split("-")
-    return `${parts[1]}/${parts[2]}`
-  }, [])
 
   const CustomTooltip = useCallback(
     ({
@@ -109,7 +104,7 @@ export function CumulativeReturnChart({ data, height = 400 }: CumulativeReturnCh
         <div>
           <h4 className="text-sm font-semibold text-foreground">Cumulative Returns</h4>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Compounded return over time · drag the brush below to zoom
+            Compounded return over time
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3 text-xs shrink-0">
@@ -139,7 +134,7 @@ export function CumulativeReturnChart({ data, height = 400 }: CumulativeReturnCh
       </div>
 
       <ResponsiveContainer width="100%" height={height}>
-        <AreaChart data={displayData} margin={{ top: 8, right: 12, bottom: 0, left: 10 }}>
+        <AreaChart data={displayData} margin={{ top: 8, right: 12, bottom: 29, left: 10 }}>
           <defs>
             <linearGradient id="histCumGrad" x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
@@ -152,12 +147,12 @@ export function CumulativeReturnChart({ data, height = 400 }: CumulativeReturnCh
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" opacity={0.4} />
           <XAxis
-            dataKey="date"
-            tickFormatter={formatDate}
+            dataKey="idx"
             tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
             tickLine={false}
             axisLine={{ stroke: "var(--border)" }}
             interval={Math.max(1, Math.floor(displayData.length / 8))}
+            label={{ value: "Data points", position: "insideBottomRight", offset: 0, dy: 18, fontSize: 9, fill: "var(--muted-foreground)" }}
           />
           <YAxis
             tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
@@ -174,12 +169,11 @@ export function CumulativeReturnChart({ data, height = 400 }: CumulativeReturnCh
             opacity={0.5}
           />
           <Brush
-            dataKey="date"
+            dataKey="idx"
             height={28}
             stroke="var(--border)"
             fill="var(--card)"
             travellerWidth={8}
-            tickFormatter={formatDate}
           />
           <Area
             type="monotone"
@@ -202,6 +196,7 @@ export function CumulativeReturnChart({ data, height = 400 }: CumulativeReturnCh
           />
         </AreaChart>
       </ResponsiveContainer>
+      <p className="-mt-3 text-center text-[10px] text-muted-foreground/60">Drag handles to zoom · scroll to pan</p>
     </div>
   )
 }
