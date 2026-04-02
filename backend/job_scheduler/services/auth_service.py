@@ -67,6 +67,7 @@ def get_current_user(
                 hashed_password=get_password_hash("admin"),
                 first_name=None,
                 last_name=None,
+                is_admin=True,
             )
             db.add(user)
             db.commit()

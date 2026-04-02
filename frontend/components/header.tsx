@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
-import { Activity, Sun, Moon, History, LogOut, User, BrainCircuit, Sliders } from "lucide-react"
+import { Activity, Sun, Moon, History, LogOut, User, BrainCircuit, Sliders, Shield } from "lucide-react"
 import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/components/auth-provider"
@@ -65,7 +65,7 @@ export function Header() {
                 Reports
               </Link>
             </Button>
-            {user && (
+            {user?.is_admin && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -79,6 +79,22 @@ export function Header() {
                 <Link href="/training">
                   <BrainCircuit className="h-4 w-4" />
                   Training
+                </Link>
+              </Button>
+            )}
+            {user?.is_admin && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className={`gap-1.5 ${pathname === "/admin/users"
+                  ? "text-foreground font-semibold bg-muted"
+                  : "text-muted-foreground hover:text-foreground"
+                  }`}
+                asChild
+              >
+                <Link href="/admin/users">
+                  <Shield className="h-4 w-4" />
+                  Users
                 </Link>
               </Button>
             )}

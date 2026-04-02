@@ -193,12 +193,15 @@ while True:
         if src.exists():
             import boto3
             import os
+
             try:
                 s3_client = boto3.client("s3")
                 bucket_name = os.environ["S3_BUCKET_NAME"]
                 s3_key = f"models/{versioned_name}"
                 s3_client.upload_file(str(src), bucket_name, s3_key)
-                logger.info("Versioned model uploaded to S3: s3://%s/%s", bucket_name, s3_key)
+                logger.info(
+                    "Versioned model uploaded to S3: s3://%s/%s", bucket_name, s3_key
+                )
             except Exception as e:
                 logger.error("Failed to upload versioned model to S3: %s", e)
         else:

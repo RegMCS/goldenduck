@@ -232,7 +232,8 @@ def activate_model(
         except Exception as e:
             logger.error("Failed to download model %s from S3: %s", model_name, e)
             raise HTTPException(
-                status_code=404, detail=f"Model file not found locally or on S3: {model_name}"
+                status_code=404,
+                detail=f"Model file not found locally or on S3: {model_name}",
             )
 
     logger.info(
