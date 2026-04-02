@@ -2,10 +2,12 @@
 
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
-import { Activity, Sun, Moon, History, LogOut, User } from "lucide-react"
+import { Activity, Sun, Moon, History, LogOut, User, BrainCircuit, Sliders } from "lucide-react"
 import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/components/auth-provider"
+
+
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -43,7 +45,10 @@ export function Header() {
                 }`}
               asChild
             >
-              <Link href="/">Configure</Link>
+              <Link href="/">
+                <Sliders className="h-4 w-4" />
+                Configure
+              </Link>
             </Button>
             <Button
               variant="ghost"
@@ -60,7 +65,25 @@ export function Header() {
                 Reports
               </Link>
             </Button>
+            {user && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className={`gap-1.5 ${pathname === "/training"
+                  ? "text-foreground font-semibold bg-muted"
+                  : "text-muted-foreground hover:text-foreground"
+                  }`}
+                asChild
+                id="nav-training-link"
+              >
+                <Link href="/training">
+                  <BrainCircuit className="h-4 w-4" />
+                  Training
+                </Link>
+              </Button>
+            )}
           </nav>
+
         </div>
         <div className="flex items-center gap-1">
           {!loading && (
@@ -74,9 +97,9 @@ export function Header() {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem asChild>
+                    {/* <DropdownMenuItem asChild>
                       <Link href="/profile">Profile</Link>
-                    </DropdownMenuItem>
+                    </DropdownMenuItem> */}
                     <DropdownMenuItem onClick={async () => { await logout(); router.push("/login") }}>
                       <LogOut className="h-4 w-4" />
                       Log out
