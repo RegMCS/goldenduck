@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import React, { useCallback, useEffect, useState } from "react"
 import {
   RefreshCw,
   CheckCircle2,
@@ -231,9 +231,8 @@ export function TrainingRunTable({ refreshTrigger }: Props) {
                   const deltaR2 = run.evaluation_report?.direct_metrics?.delta?.r2
 
                   return (
-                    <>
+                    <React.Fragment key={run.id}>
                       <tr
-                        key={run.id}
                         className="border-b border-border/60 transition-colors hover:bg-muted/20 last:border-0"
                       >
                         {/* Run ID */}
@@ -341,7 +340,7 @@ export function TrainingRunTable({ refreshTrigger }: Props) {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </React.Fragment>
                   )
                 })}
             </tbody>

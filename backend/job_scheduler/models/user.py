@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Text
+from sqlalchemy import Column, Text, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
 
@@ -13,3 +13,4 @@ class User(Base):
     hashed_password = Column(Text)
     first_name = Column(Text)
     last_name = Column(Text)
+    is_admin = Column(Boolean, nullable=False, default=False)
