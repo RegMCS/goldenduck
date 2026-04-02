@@ -20,6 +20,7 @@ export default function AdminUsersPage() {
   
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
+  const [updating, setUpdating] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     // If auth loaded and user not logged in, redirect
@@ -54,31 +55,25 @@ export default function AdminUsersPage() {
   }, [user, toast])
 
   const toggleAdmin = async (userId: string, currentStatus: boolean) => {
+    if (updating.has(userId)) return
     const newStatus = !currentStatus
-    // Optimistic update
-    setUsers(users.map(u => u.id === userId ? { ...u, is_admin: newStatus } : u))
-    
+
+    setUpdating((prev) => new Set(prev).add(userId))
+    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, is_admin: newStatus } : u)))
+
     try {
       const res = await fetch(`/api/users/${userId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ is_admin: newStatus })
+        body: JSON.stringify({ is_admin: newStatus }),
       })
-      
       if (!res.ok) throw new Error("Failed to update user")
-      
-      toast({
-        title: "Success",
-        description: "User permissions updated successfully.",
-      })
-    } catch (e) {
-      // Revert on failure
-      setUsers(users.map(u => u.id === userId ? { ...u, is_admin: currentStatus } : u))
-      toast({
-        title: "Error",
-        description: "Failed to update user permissions.",
-        variant: "destructive"
-      })
+      toast({ title: "Success", description: "User permissions updated successfully." })
+    } catch {
+      setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, is_admin: currentStatus } : u)))
+      toast({ title: "Error", description: "Failed to update user permissions.", variant: "destructive" })
+    } finally {
+      setUpdating((prev) => { const next = new Set(prev); next.delete(userId); return next })
     }
   }
 
@@ -137,10 +132,11 @@ export default function AdminUsersPage() {
                     <TableCell>{u.first_name || "-"}</TableCell>
                     <TableCell>{u.last_name || "-"}</TableCell>
                     <TableCell>
-                      <Switch 
-                        checked={!!u.is_admin} 
+                      <Switch
+                        checked={!!u.is_admin}
                         onCheckedChange={() => toggleAdmin(u.id, !!u.is_admin)}
-                        disabled={u.id === user.id} // Prevent removing own admin rights
+                        disabled={u.id === user.id}
+                        aria-busy={updating.has(u.id)}
                       />
                     </TableCell>
                   </TableRow>
