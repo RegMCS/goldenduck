@@ -42,6 +42,7 @@ ACTIVE_MODEL_NAME = "rf_delta.pkl"
 
 # ─── Schemas ─────────────────────────────────────────────────────────────────
 
+
 class StartTrainingRequest(BaseModel):
     testing_mode: bool = True
     n_assets: int = Field(50, ge=5, le=500)
@@ -73,6 +74,7 @@ class TrainingRunsListResponse(BaseModel):
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
+
 def _build_run_response(run: TrainingJob, run_id_str: str) -> TrainingRunResponse:
     """
     Merge DB row with live Redis progress so the frontend always sees
@@ -101,6 +103,7 @@ def _build_run_response(run: TrainingJob, run_id_str: str) -> TrainingRunRespons
 
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
+
 
 @router.post("/start", response_model=TrainingRunResponse)
 def start_training(
@@ -141,11 +144,7 @@ def list_runs(
     admin: User = Depends(require_admin),
 ):
     """Return all training runs, newest first."""
-    runs = (
-        db.query(TrainingJob)
-        .order_by(TrainingJob.started_at.desc())
-        .all()
-    )
+    runs = db.query(TrainingJob).order_by(TrainingJob.started_at.desc()).all()
     items = [_build_run_response(r, str(r.id)) for r in runs]
     return TrainingRunsListResponse(runs=items, total=len(items))
 
@@ -158,6 +157,7 @@ def get_run(
 ):
     """Return status + live progress for a single run. Used by the progress poller."""
     import uuid as _uuid
+
     try:
         run_uuid = _uuid.UUID(run_id)
     except ValueError:
@@ -169,7 +169,10 @@ def get_run(
 
     # If the worker has finished and we haven't synced back to DB yet, do it now
     live_status = training_store.get_status(run_id)
-    if live_status in ("completed", "failed") and run.status not in ("completed", "failed"):
+    if live_status in ("completed", "failed") and run.status not in (
+        "completed",
+        "failed",
+    ):
         run.status = live_status
         run.model_name = training_store.get_model_name(run_id) or run.model_name
         run.error = training_store.get_error(run_id) or run.error
@@ -199,6 +202,8 @@ def activate_model(
     Also marks all other runs as is_active=False and this run as is_active=True.
     """
     import shutil
+    import os
+    import boto3
 
     # Sanitise the model_name to prevent path traversal
     if "/" in model_name or "\\" in model_name or ".." in model_name:
@@ -207,24 +212,45 @@ def activate_model(
     src = MODEL_SAVE_DIR / model_name
     dst = MODEL_SAVE_DIR / ACTIVE_MODEL_NAME
 
-    if not src.exists():
-        raise HTTPException(status_code=404, detail=f"Model file not found: {model_name}")
-
     # Only allow if there's a matching training run
     run = db.query(TrainingJob).filter(TrainingJob.model_name == model_name).first()
     if not run:
-        raise HTTPException(status_code=404, detail="No training run associated with this model")
+        raise HTTPException(
+            status_code=404, detail="No training run associated with this model"
+        )
 
-    # Swap model file
-    shutil.copy2(src, dst)
-    logger.info("Admin %s activated model %s → %s", admin.username, model_name, ACTIVE_MODEL_NAME)
+    if src.exists():
+        # Swap model file
+        shutil.copy2(src, dst)
+    else:
+        # Download from S3
+        try:
+            s3_client = boto3.client("s3")
+            bucket_name = os.environ["S3_BUCKET_NAME"]
+            s3_key = f"models/{model_name}"
+            s3_client.download_file(bucket_name, s3_key, str(dst))
+        except Exception as e:
+            logger.error("Failed to download model %s from S3: %s", model_name, e)
+            raise HTTPException(
+                status_code=404, detail=f"Model file not found locally or on S3: {model_name}"
+            )
+
+    logger.info(
+        "Admin %s activated model %s → %s",
+        admin.username,
+        model_name,
+        ACTIVE_MODEL_NAME,
+    )
 
     # Update is_active flags in DB
     db.query(TrainingJob).update({"is_active": False})
     run.is_active = True
     db.commit()
 
-    return {"message": f"Model {model_name} is now active", "active_model": ACTIVE_MODEL_NAME}
+    return {
+        "message": f"Model {model_name} is now active",
+        "active_model": ACTIVE_MODEL_NAME,
+    }
 
 
 @router.get("/active-model/evaluation")

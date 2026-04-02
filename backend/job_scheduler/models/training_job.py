@@ -14,7 +14,9 @@ class TrainingJob(Base):
     status = Column(Text, nullable=False, default="queued")
     triggered_by = Column(UUID(as_uuid=True), nullable=False)
 
-    started_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    started_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
     completed_at = Column(DateTime(timezone=True))
 
     # JSON blob: testing_mode, n_assets, n_scenarios, run_evaluation

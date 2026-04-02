@@ -49,6 +49,7 @@ sys.path.insert(0, str(ML_TRAINING_DIR))
 
 # ─── Script loader ────────────────────────────────────────────────────────────
 
+
 def _run_script_main(script_path: Path) -> None:
     """
     Dynamically import a script module and call its main() function.
@@ -63,9 +64,11 @@ def _run_script_main(script_path: Path) -> None:
 
 # ─── DB helpers ───────────────────────────────────────────────────────────────
 
+
 def _db_update(run_id_str: str, **kwargs) -> None:
     """Update a training_job row without holding the session open."""
     import uuid as _uuid
+
     run_uuid = _uuid.UUID(run_id_str)
     db = SessionLocal()
     try:
@@ -79,6 +82,7 @@ def _db_update(run_id_str: str, **kwargs) -> None:
 
 def _db_get_config(run_id_str: str) -> dict:
     import uuid as _uuid
+
     run_uuid = _uuid.UUID(run_id_str)
     db = SessionLocal()
     try:
@@ -89,6 +93,7 @@ def _db_get_config(run_id_str: str) -> dict:
 
 
 # ─── Step helpers ─────────────────────────────────────────────────────────────
+
 
 def _set_step(run_id: str, index: int, label: str) -> None:
     msg = f"Step {index} of 4: {label}"
@@ -123,6 +128,7 @@ while True:
 
         # ── Patch training config to respect the UI settings ─────────────────
         from config import training_config as tc
+
         tc.TESTING_MODE = testing_mode
         tc.N_ASSETS = n_assets
         tc.N_SCENARIOS_PER_ASSET = n_scenarios
@@ -139,6 +145,7 @@ while True:
         # In testing mode we may have fewer, so we build the split ourselves.
         from config.training_config import PROCESSED_DATA_DIR
         import numpy as np
+
         assets_split_path = Path(PROCESSED_DATA_DIR) / "assets_split.json"
         downloaded_assets_path = Path(PROCESSED_DATA_DIR) / "downloaded_assets.json"
 
@@ -148,7 +155,9 @@ while True:
                 dl_info = json.load(f)
             assets = dl_info.get("assets", [])
             if not assets:
-                raise RuntimeError("No assets were downloaded — cannot proceed to step 2")
+                raise RuntimeError(
+                    "No assets were downloaded — cannot proceed to step 2"
+                )
             np.random.seed(42)
             shuffled = assets.copy()
             np.random.shuffle(shuffled)
@@ -156,20 +165,21 @@ while True:
             n_val = max(1, int(0.15 * len(shuffled)))
             split = {
                 "train": shuffled[:n_train],
-                "val": shuffled[n_train: n_train + n_val],
-                "test": shuffled[n_train + n_val:],
+                "val": shuffled[n_train : n_train + n_val],
+                "test": shuffled[n_train + n_val :],
             }
             with open(assets_split_path, "w") as f:
                 json.dump(split, f, indent=2)
             logger.info(
                 "Fallback split created: %d train / %d val / %d test",
-                len(split["train"]), len(split["val"]), len(split["test"]),
+                len(split["train"]),
+                len(split["val"]),
+                len(split["test"]),
             )
 
         # ── Step 2: Generate training samples ────────────────────────────────
         _set_step(run_id, 2, "Generating training samples (grid search)")
         _run_script_main(SCRIPTS_DIR / "02_generate_training_data.py")
-
 
         # ── Step 3: Train Random Forest ───────────────────────────────────────
         _set_step(run_id, 3, "Training Random Forest model")
@@ -179,13 +189,22 @@ while True:
         ts = datetime.now(tz=timezone(timedelta(hours=8))).strftime("%Y%m%d_%H%M%S")
         versioned_name = f"rf_delta_{ts}.pkl"
         src = MODEL_SAVE_DIR / "rf_delta.pkl"
-        dst = MODEL_SAVE_DIR / versioned_name
 
         if src.exists():
-            shutil.copy2(src, dst)
-            logger.info("Versioned model saved as %s", versioned_name)
+            import boto3
+            import os
+            try:
+                s3_client = boto3.client("s3")
+                bucket_name = os.environ["S3_BUCKET_NAME"]
+                s3_key = f"models/{versioned_name}"
+                s3_client.upload_file(str(src), bucket_name, s3_key)
+                logger.info("Versioned model uploaded to S3: s3://%s/%s", bucket_name, s3_key)
+            except Exception as e:
+                logger.error("Failed to upload versioned model to S3: %s", e)
         else:
-            logger.warning("rf_delta.pkl not found after training — skipping versioning")
+            logger.warning(
+                "rf_delta.pkl not found after training — skipping versioning"
+            )
             versioned_name = "rf_delta.pkl"
 
         training_store.set_model_name(run_id, versioned_name)
@@ -210,6 +229,7 @@ while True:
         try:
             db.query(TrainingJob).update({"is_active": False})
             import uuid as _uuid
+
             run_uuid = _uuid.UUID(run_id)
             run = db.query(TrainingJob).filter(TrainingJob.id == run_uuid).first()
             if run:
