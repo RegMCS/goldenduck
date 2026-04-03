@@ -69,16 +69,16 @@ export function Header() {
               <Button
                 variant="ghost"
                 size="sm"
-                className={`gap-1.5 ${pathname === "/training"
+                className={`gap-1.5 ${pathname === "/models"
                   ? "text-foreground font-semibold bg-muted"
                   : "text-muted-foreground hover:text-foreground"
                   }`}
                 asChild
-                id="nav-training-link"
+                id="nav-models-link"
               >
-                <Link href="/training">
+                <Link href="/models">
                   <BrainCircuit className="h-4 w-4" />
-                  Training
+                  Models
                 </Link>
               </Button>
             )}

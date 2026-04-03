@@ -10,6 +10,7 @@ import {
   ArrowLeft,
   Lock,
   Loader2,
+  Upload,
 } from "lucide-react"
 import { Header } from "@/components/header"
 import { Button } from "@/components/ui/button"
@@ -17,19 +18,24 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { TrainingTriggerPanel } from "@/components/training/training-trigger-panel"
 import { TrainingRunTable } from "@/components/training/training-run-table"
 import { EvaluationReportCard } from "@/components/training/evaluation-report-card"
+import { ModelUploadPanel } from "@/components/training/model-upload-panel"
 import { useAuth } from "@/components/auth-provider"
 import { type TrainingRun } from "@/lib/types"
 
-export default function TrainingPage() {
+export default function ModelsPage() {
   const { user, loading } = useAuth()
   // Bump this to tell the run table to re-fetch after a new run starts
   const [tableRefreshTrigger, setTableRefreshTrigger] = useState(0)
   const [evaluationRefreshKey, setEvaluationRefreshKey] = useState(0)
+  const [uploadsRefreshKey, setUploadsRefreshKey] = useState(0)
   const [activeTab, setActiveTab] = useState("trigger")
 
   useEffect(() => {
     if (activeTab === "evaluation") {
       setEvaluationRefreshKey((k) => k + 1)
+    }
+    if (activeTab === "upload") {
+      setUploadsRefreshKey((k) => k + 1)
     }
   }, [activeTab])
 
@@ -126,7 +132,7 @@ export default function TrainingPage() {
               </div>
               <div>
                 <h2 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
-                  ML Training Monitor
+                  ML Dashboard
                 </h2>
                 <p className="text-sm text-muted-foreground mt-0.5">
                   Trigger training runs, manage model versions, and review evaluation reports.
@@ -144,7 +150,7 @@ export default function TrainingPage() {
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-5">
-          <TabsList className="h-10 gap-0.5 p-1" id="training-tabs">
+          <TabsList className="h-10 gap-0.5 p-1" id="models-tabs">
             <TabsTrigger value="trigger" className="gap-1.5 text-sm" id="tab-trigger">
               <Play className="h-3.5 w-3.5" />
               Trigger Training
@@ -152,6 +158,10 @@ export default function TrainingPage() {
             <TabsTrigger value="history" className="gap-1.5 text-sm" id="tab-history">
               <History className="h-3.5 w-3.5" />
               Past Runs
+            </TabsTrigger>
+            <TabsTrigger value="upload" className="gap-1.5 text-sm" id="tab-upload">
+              <Upload className="h-3.5 w-3.5" />
+              Upload Model
             </TabsTrigger>
             <TabsTrigger value="evaluation" className="gap-1.5 text-sm" id="tab-evaluation">
               <BarChart3 className="h-3.5 w-3.5" />
@@ -203,11 +213,24 @@ export default function TrainingPage() {
           <TabsContent value="history" className="mt-0">
             <TrainingRunTable
               refreshTrigger={tableRefreshTrigger}
-              onActiveModelChanged={() => setEvaluationRefreshKey((k) => k + 1)}
+              onActiveModelChanged={() => {
+                setEvaluationRefreshKey((k) => k + 1)
+                setUploadsRefreshKey((k) => k + 1)
+              }}
             />
           </TabsContent>
 
-          {/* ── Tab 3: Model evaluation ── */}
+          <TabsContent value="upload" className="mt-0">
+            <ModelUploadPanel
+              refreshKey={uploadsRefreshKey}
+              onActiveModelChanged={() => {
+                setEvaluationRefreshKey((k) => k + 1)
+                setTableRefreshTrigger((k) => k + 1)
+              }}
+            />
+          </TabsContent>
+
+          {/* ── Tab: Model evaluation ── */}
           <TabsContent value="evaluation" className="mt-0">
             <EvaluationReportCard refreshKey={evaluationRefreshKey} />
           </TabsContent>

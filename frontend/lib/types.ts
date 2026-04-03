@@ -174,3 +174,19 @@ export interface TrainingModel {
   is_active: boolean
   run_id?: string
 }
+
+/** Row from GET /api/training/uploads (manual S3 uploads) */
+export interface UploadedModelRow {
+  id: string
+  model_name: string
+  s3_key: string
+  uploaded_by: string
+  created_at: string
+  file_size_bytes: number | null
+  is_active: boolean
+}
+
+export interface UploadedModelsListResponse {
+  uploads: UploadedModelRow[]
+  total: number
+}
