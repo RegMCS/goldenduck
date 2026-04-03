@@ -118,7 +118,7 @@ REGIME_DEFINITIONS = {
     }
 }
 
-PATHS_PER_REGIME = 500
+PATHS_PER_REGIME = 200
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # EVALUATION

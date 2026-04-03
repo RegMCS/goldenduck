@@ -8,6 +8,7 @@ from .conditioning import (
     compute_acf,
     detect_regime,
 )
+from .inference import InferenceService
 
 __all__ = [
     "DataProcessor",
@@ -16,4 +17,5 @@ __all__ = [
     "compute_conditioning_batch",
     "compute_acf",
     "detect_regime",
+    "InferenceService",
 ]
