@@ -10,6 +10,7 @@ from .conditioning import (
 )
 from .inference import InferenceService
 from .validation import DDPMValidationService
+from .ddpm_service import DDPMService
 
 __all__ = [
     "DataProcessor",
@@ -20,4 +21,5 @@ __all__ = [
     "detect_regime",
     "InferenceService",
     "DDPMValidationService",
+    "DDPMService",
 ]
