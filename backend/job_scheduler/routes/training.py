@@ -76,29 +76,20 @@ class TrainingRunsListResponse(BaseModel):
 
 
 def _build_run_response(run: TrainingJob, run_id_str: str) -> TrainingRunResponse:
-    """
-    Merge DB row with live Redis progress so the frontend always sees
-    the freshest step/status without us having to write back to DB on every step.
-    """
-    live_status = training_store.get_status(run_id_str)
-    live_step = training_store.get_step(run_id_str)
-    live_step_index = training_store.get_step_index(run_id_str)
-    live_model_name = training_store.get_model_name(run_id_str)
-    live_error = training_store.get_error(run_id_str)
-
+    """API payload from the persisted `training_jobs` row only (no Redis overlay)."""
     return TrainingRunResponse(
         id=run_id_str,
-        status=live_status or run.status,
+        status=run.status,
         config=run.config or {},
         triggered_by=str(run.triggered_by),
         started_at=run.started_at.isoformat(),
         completed_at=run.completed_at.isoformat() if run.completed_at else None,
-        step=live_step or run.step,
-        step_index=live_step_index or run.step_index,
-        model_name=live_model_name or run.model_name,
+        step=run.step,
+        step_index=run.step_index,
+        model_name=run.model_name,
         is_active=run.is_active,
         evaluation_report=run.evaluation_report,
-        error=live_error or run.error,
+        error=run.error,
     )
 
 
