@@ -21,8 +21,9 @@ def ensure_tables():
 
 @pytest.fixture
 def clean_users():
-    """Delete jobs then users before the test runs (respects FK constraint)."""
+    """Delete dependent jobs, then users, before the test runs."""
     with SessionLocal() as db:
+        db.execute(text("DELETE FROM training_jobs"))
         db.execute(text("DELETE FROM ai_model_jobs"))
         db.execute(text("DELETE FROM users"))
         db.commit()

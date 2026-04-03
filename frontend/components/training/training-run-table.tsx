@@ -112,7 +112,7 @@ function EvalSummaryRow({ report }: { report: EvaluationReport }) {
 function SkeletonRow() {
   return (
     <tr className="border-b border-border animate-pulse">
-      {Array.from({ length: 6 }).map((_, i) => (
+      {Array.from({ length: 7 }).map((_, i) => (
         <td key={i} className="px-4 py-4">
           <div className="h-4 w-full rounded-md bg-muted" />
         </td>

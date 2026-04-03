@@ -27,4 +27,3 @@ tqdm
 
 # Training-specific tracking
 mlflow
-mlflow-skinny

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import {
   Play,
   Loader2,
@@ -47,6 +47,14 @@ export function TrainingTriggerPanel({ onRunStarted }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [activeRun, setActiveRun] = useState<TrainingRun | null>(null)
 
+  const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (pollTimeoutRef.current !== null) clearTimeout(pollTimeoutRef.current)
+    }
+  }, [])
+
   const estimated = estimateDuration(nAssets, nScenarios, testingMode)
 
   async function handleStart() {
@@ -81,21 +89,26 @@ export function TrainingTriggerPanel({ onRunStarted }: Props) {
     }
   }
 
-  async function pollProgress(runId: string) {
-    const interval = setInterval(async () => {
+  function pollProgress(runId: string) {
+    async function tick() {
       try {
         const res = await fetch(`/api/training/runs/${runId}`)
-        if (!res.ok) return
-        const run: TrainingRun = await res.json()
-        setActiveRun(run)
-        if (run.status === "completed" || run.status === "failed") {
-          clearInterval(interval)
-          onRunStarted(run)
+        if (res.ok) {
+          const run: TrainingRun = await res.json()
+          setActiveRun(run)
+          if (run.status === "completed" || run.status === "failed") {
+            onRunStarted(run)
+            return // terminal state — stop polling
+          }
         }
       } catch {
-        // ignore transient errors
+        // ignore transient network errors, reschedule below
       }
-    }, 5_000)
+      // Schedule the next tick only after this one finishes (no overlap)
+      pollTimeoutRef.current = setTimeout(tick, 5_000)
+    }
+
+    pollTimeoutRef.current = setTimeout(tick, 5_000)
   }
 
   const currentStepIndex = activeRun?.step_index ?? 0

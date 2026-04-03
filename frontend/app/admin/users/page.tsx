@@ -9,23 +9,21 @@ import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/components/ui/use-toast"
 import { Loader2, Shield } from "lucide-react"
 
-interface User extends AuthUser {
-  is_admin?: boolean
-}
-
 export default function AdminUsersPage() {
   const { user, loading: authLoading } = useAuth()
   const router = useRouter()
   const { toast } = useToast()
   
-  const [users, setUsers] = useState<User[]>([])
+  const [users, setUsers] = useState<AuthUser[]>([])
   const [loading, setLoading] = useState(true)
   const [updating, setUpdating] = useState<Set<string>>(new Set())
 
   useEffect(() => {
-    // If auth loaded and user not logged in, redirect
-    if (!authLoading && !user) {
+    if (authLoading) return
+    if (!user) {
       router.push("/login")
+    } else if (!user.is_admin) {
+      router.push("/")
     }
   }, [user, authLoading, router])
 
@@ -49,7 +47,7 @@ export default function AdminUsersPage() {
       }
     }
     
-    if (user) {
+    if (user?.is_admin) {
       fetchUsers()
     }
   }, [user, toast])
@@ -88,7 +86,7 @@ export default function AdminUsersPage() {
     )
   }
 
-  if (!user) return null
+  if (!user || !user.is_admin) return null
 
   return (
     <div className="min-h-screen bg-background flex flex-col">

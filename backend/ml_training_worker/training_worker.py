@@ -186,32 +186,73 @@ while True:
         _run_script_main(SCRIPTS_DIR / "03_train_models.py")
 
         # ── Version the trained model ─────────────────────────────────────────
+        # Order: copy locally → upload to S3 → record name → delete local copy.
+        # model_name is only set to the versioned filename after both the local
+        # copy and the S3 upload succeed, so a failed upload never leaves the
+        # run pointing at a model file that doesn't exist.
+        import boto3
+        import os
+
         ts = datetime.now(tz=timezone(timedelta(hours=8))).strftime("%Y%m%d_%H%M%S")
         versioned_name = f"rf_delta_{ts}.pkl"
         src = MODEL_SAVE_DIR / "rf_delta.pkl"
+        local_versioned = MODEL_SAVE_DIR / versioned_name
 
-        if src.exists():
-            import boto3
-            import os
-
-            try:
-                s3_client = boto3.client("s3")
-                bucket_name = os.environ["S3_BUCKET_NAME"]
-                s3_key = f"models/{versioned_name}"
-                s3_client.upload_file(str(src), bucket_name, s3_key)
-                logger.info(
-                    "Versioned model uploaded to S3: s3://%s/%s", bucket_name, s3_key
-                )
-            except Exception as e:
-                logger.error("Failed to upload versioned model to S3: %s", e)
-        else:
+        if not src.exists():
             logger.warning(
                 "rf_delta.pkl not found after training — skipping versioning"
             )
             versioned_name = "rf_delta.pkl"
+        else:
+            # Step 1: write local versioned copy (atomic on most filesystems)
+            try:
+                shutil.copy2(src, local_versioned)
+                logger.info("Local versioned copy written: %s", local_versioned)
+            except Exception as copy_exc:
+                logger.error(
+                    "Failed to write local versioned copy for run %s: %s",
+                    run_id,
+                    copy_exc,
+                )
+                raise  # propagate — model_name stays unset rather than pointing nowhere
 
-        training_store.set_model_name(run_id, versioned_name)
-        _db_update(run_id, model_name=versioned_name)
+            # Step 2: upload the local copy to S3
+            try:
+                s3_client = boto3.client("s3")
+                bucket_name = os.environ["S3_BUCKET_NAME"]
+                s3_key = f"models/{versioned_name}"
+                s3_client.upload_file(str(local_versioned), bucket_name, s3_key)
+                logger.info(
+                    "Versioned model uploaded to S3: s3://%s/%s", bucket_name, s3_key
+                )
+            except Exception as upload_exc:
+                logger.error(
+                    "S3 upload failed for run %s — keeping local copy, "
+                    "model_name will not be updated: %s",
+                    run_id,
+                    upload_exc,
+                )
+                raise  # propagate — model_name stays unset rather than pointing nowhere
+
+            # Step 3: record versioned name only after both steps succeeded
+            training_store.set_model_name(run_id, versioned_name)
+            _db_update(run_id, model_name=versioned_name)
+
+            # Step 4: remove the local versioned copy (S3 is the source of truth)
+            try:
+                local_versioned.unlink()
+                logger.info("Local versioned copy removed: %s", local_versioned)
+            except Exception as unlink_exc:
+                logger.warning(
+                    "Could not remove local versioned copy %s: %s",
+                    local_versioned,
+                    unlink_exc,
+                )
+
+        if versioned_name == "rf_delta.pkl":
+            # Fallback path: src was missing, record the unversioned name
+            training_store.set_model_name(run_id, versioned_name)
+            _db_update(run_id, model_name=versioned_name)
 
         # ── Step 4: Evaluate (optional but auto by default) ───────────────────
         evaluation_report = None

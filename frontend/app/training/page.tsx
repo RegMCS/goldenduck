@@ -27,8 +27,13 @@ export default function TrainingPage() {
   const [activeTab, setActiveTab] = useState("trigger")
 
   function handleRunStarted(run: TrainingRun) {
-    // If a run just finished or was submitted, refresh the history table
-    if (run.status === "completed" || run.status === "failed") {
+    // If a run was submitted, is actively processing, or has finished, refresh the history table
+    if (
+      run.status === "queued" ||
+      run.status === "running" ||
+      run.status === "completed" ||
+      run.status === "failed"
+    ) {
       setTableRefreshTrigger((n) => n + 1)
     }
   }
@@ -66,6 +71,26 @@ export default function TrainingPage() {
     )
   }
 
+  // ── Not an admin ──────────────────────────────────────────────────────────
+  if (!user.is_admin) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header />
+        <main className="container mx-auto max-w-4xl px-4 py-20 text-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted mx-auto mb-4">
+            <Lock className="h-8 w-8 text-muted-foreground" />
+          </div>
+          <h2 className="text-xl font-bold text-foreground">Access Denied</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            You must be logged in as an admin to access the training dashboard.
+          </p>
+          <Button asChild className="mt-6" variant="outline">
+            <Link href="/">Return home</Link>
+          </Button>
+        </main>
+      </div>
+    )
+  }
   // ── Main page ─────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-background">
