@@ -1,0 +1,29 @@
+# Combined dependencies for ML Training Worker
+
+# Base dependencies from job_scheduler (for DB, Redis, APIs, etc)
+fastapi
+uvicorn
+sqlalchemy
+psycopg2-binary
+bcrypt>=4.0.0
+PyJWT
+redis
+boto3
+python-multipart
+
+# ML dependencies from worker
+arch>=5.3.0
+numpy>=1.24.0
+pandas>=2.0.0
+scipy>=1.10.0
+yfinance>=0.2.0
+joblib
+scikit-learn
+pycatch22
+matplotlib>=3.5.0
+seaborn>=0.12.0
+statsmodels>=0.14.0
+tqdm
+
+# Training-specific tracking
+mlflow

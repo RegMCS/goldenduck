@@ -73,6 +73,28 @@ services:
     depends_on:
       - db
 
+  ml-training-worker:
+    build:
+      context: .
+      dockerfile: ./ml_training_worker/Dockerfile
+    container_name: ml-training-worker
+    command: python -m ml_training_worker.training_worker
+    restart: unless-stopped
+    volumes:
+      - .:/app                          # full backend mount (shares ml_training/)
+      - ./output:/app/output
+    environment:
+      PYTHONPATH: /app
+      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME}
+    depends_on:
+      - redis
+      - db
+
 volumes:
   postgres_data:
   redis_data:

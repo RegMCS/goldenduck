@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from job_scheduler.routes import jobs, health, auth
+from job_scheduler.routes import jobs, health, auth, training, users
 
 app = FastAPI(
     title="Job Scheduler",
@@ -9,6 +9,8 @@ app = FastAPI(
 app.include_router(auth.router)
 app.include_router(jobs.router)
 app.include_router(health.router)
+app.include_router(training.router)
+app.include_router(users.router)
 
 
 @app.get("/")

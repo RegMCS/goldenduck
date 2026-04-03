@@ -67,6 +67,7 @@ def get_current_user(
                 hashed_password=get_password_hash("admin"),
                 first_name=None,
                 last_name=None,
+                is_admin=True,
             )
             db.add(user)
             db.commit()
@@ -101,3 +102,18 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     return user
+
+
+def require_admin(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """
+    FastAPI dependency: raises 403 if the current user is not an admin.
+    Use this on any training route you want to protect.
+    """
+    if not getattr(current_user, "is_admin", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required.",
+        )
+    return current_user
