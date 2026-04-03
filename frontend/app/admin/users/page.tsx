@@ -1,13 +1,15 @@
 "use client"
 
 import React, { useEffect, useState } from "react"
+import Link from "next/link"
 import { useAuth, AuthUser } from "@/components/auth-provider"
 import { useRouter } from "next/navigation"
 import { Header } from "@/components/header"
+import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/components/ui/use-toast"
-import { Loader2, Shield } from "lucide-react"
+import { ArrowLeft, Loader2, Lock, Shield } from "lucide-react"
 
 export default function AdminUsersPage() {
   const { user, loading: authLoading } = useAuth()
@@ -80,7 +82,7 @@ export default function AdminUsersPage() {
       <div className="min-h-screen bg-background flex flex-col">
         <Header />
         <div className="flex-1 flex items-center justify-center">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
         </div>
       </div>
     )
@@ -91,21 +93,43 @@ export default function AdminUsersPage() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <Header />
-      <main className="container mx-auto max-w-5xl px-4 py-8">
-        <div className="mb-6 flex items-center gap-3">
-          <div className="p-2 bg-primary/10 rounded-lg">
-            <Shield className="w-6 h-6 text-primary" />
-          </div>
+      <main className="container mx-auto max-w-7xl px-4 py-6 sm:py-8">
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-              User Access Management
-            </h1>
-            <p className="text-sm text-muted-foreground sm:text-base mt-1">
-              Control user permissions and administrator access across the platform.
-            </p>
+            <div className="mb-1 flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 gap-1.5 -ml-2 text-muted-foreground hover:text-foreground"
+                asChild
+              >
+                <Link href="/">
+                  <ArrowLeft className="h-4 w-4" />
+                  Back
+                </Link>
+              </Button>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-primary/10 shadow-sm">
+                <Shield className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
+                  User Access Management
+                </h1>
+                <p className="mt-0.5 text-sm text-muted-foreground">
+                  Control user permissions and administrator access across the platform.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="inline-flex items-center gap-1.5 self-start rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
+            <Lock className="h-3 w-3" />
+            Admin Only
           </div>
         </div>
-        
+
         <div className="rounded-md border bg-card">
           <Table>
             <TableHeader>
