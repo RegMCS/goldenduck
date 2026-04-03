@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
 import {
   BrainCircuit,
@@ -24,7 +24,14 @@ export default function TrainingPage() {
   const { user, loading } = useAuth()
   // Bump this to tell the run table to re-fetch after a new run starts
   const [tableRefreshTrigger, setTableRefreshTrigger] = useState(0)
+  const [evaluationRefreshKey, setEvaluationRefreshKey] = useState(0)
   const [activeTab, setActiveTab] = useState("trigger")
+
+  useEffect(() => {
+    if (activeTab === "evaluation") {
+      setEvaluationRefreshKey((k) => k + 1)
+    }
+  }, [activeTab])
 
   function handleRunStarted(run: TrainingRun) {
     // If a run was submitted, is actively processing, or has finished, refresh the history table
@@ -194,12 +201,15 @@ export default function TrainingPage() {
 
           {/* ── Tab 2: Past runs ── */}
           <TabsContent value="history" className="mt-0">
-            <TrainingRunTable refreshTrigger={tableRefreshTrigger} />
+            <TrainingRunTable
+              refreshTrigger={tableRefreshTrigger}
+              onActiveModelChanged={() => setEvaluationRefreshKey((k) => k + 1)}
+            />
           </TabsContent>
 
           {/* ── Tab 3: Model evaluation ── */}
           <TabsContent value="evaluation" className="mt-0">
-            <EvaluationReportCard />
+            <EvaluationReportCard refreshKey={evaluationRefreshKey} />
           </TabsContent>
         </Tabs>
       </main>

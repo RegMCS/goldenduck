@@ -123,9 +123,11 @@ function SkeletonRow() {
 
 interface Props {
   refreshTrigger: number
+  /** Called after a different model is activated (so evaluation tab can refetch). */
+  onActiveModelChanged?: () => void
 }
 
-export function TrainingRunTable({ refreshTrigger }: Props) {
+export function TrainingRunTable({ refreshTrigger, onActiveModelChanged }: Props) {
   const [runs, setRuns] = useState<TrainingRun[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -160,6 +162,7 @@ export function TrainingRunTable({ refreshTrigger }: Props) {
       })
       if (!res.ok) throw new Error("Failed to activate model")
       await fetchRuns()
+      onActiveModelChanged?.()
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to activate")
     } finally {

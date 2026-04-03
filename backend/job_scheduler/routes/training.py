@@ -256,19 +256,26 @@ def activate_model(
 
 @router.get("/active-model/evaluation")
 def get_active_model_evaluation(
+    db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
     """
-    Return the evaluation_report.json for the currently active model.
-    This file is written by the training worker after script 04 completes.
+    Return the evaluation report for the training run marked is_active.
+
+    Prefer the JSON stored on that TrainingJob row (captured when the run
+    completed). The shared evaluation_report.json on disk always reflects the
+    *last* worker run, so it would be wrong after activating an older model.
     """
-    report_path = EVALUATION_DIR / "evaluation_report.json"
-    if not report_path.exists():
+    run = db.query(TrainingJob).filter(TrainingJob.is_active.is_(True)).first()
+    if not run:
         raise HTTPException(
             status_code=404,
-            detail="No evaluation report found. Train a model first.",
+            detail="No active model. Activate a completed training run first.",
         )
-    try:
-        return json.loads(report_path.read_text())
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to read report: {exc}")
+    if run.evaluation_report:
+        return run.evaluation_report
+
+    raise HTTPException(
+        status_code=404,
+        detail="No evaluation report stored for the active model.",
+    )
