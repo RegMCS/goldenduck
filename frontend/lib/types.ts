@@ -72,6 +72,7 @@ export interface SeriesStats {
   kurtosis: number
   var95?: number
   hurstMomentum?: number
+  klDivergence?: number
   // Backward compatibility for older jobs
   acfLag1?: number
   maxDrawdown: number

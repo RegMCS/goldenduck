@@ -24,6 +24,45 @@ function quantile(values: number[], q: number): number {
   return sorted[base] + rest * (next - sorted[base])
 }
 
+function klDivergenceFromReturns(pSamples: number[], qSamples: number[], bins = 40): number {
+  if (pSamples.length < 20 || qSamples.length < 20) return 0
+
+  const all = [...pSamples, ...qSamples].filter((v) => Number.isFinite(v))
+  if (all.length < 40) return 0
+
+  const minV = Math.min(...all)
+  const maxV = Math.max(...all)
+  if (!Number.isFinite(minV) || !Number.isFinite(maxV) || maxV <= minV) return 0
+
+  const pCounts = new Array(bins).fill(0)
+  const qCounts = new Array(bins).fill(0)
+  const width = (maxV - minV) / bins
+
+  const toBin = (v: number) => {
+    if (v <= minV) return 0
+    if (v >= maxV) return bins - 1
+    return Math.min(bins - 1, Math.max(0, Math.floor((v - minV) / width)))
+  }
+
+  for (const v of pSamples) pCounts[toBin(v)] += 1
+  for (const v of qSamples) qCounts[toBin(v)] += 1
+
+  // Additive smoothing to avoid log(0)
+  const eps = 1e-8
+  const pDen = pSamples.length + eps * bins
+  const qDen = qSamples.length + eps * bins
+
+  let kl = 0
+  for (let i = 0; i < bins; i++) {
+    const p = (pCounts[i] + eps) / pDen
+    const q = (qCounts[i] + eps) / qDen
+    kl += p * Math.log(p / q)
+  }
+
+  if (!Number.isFinite(kl)) return 0
+  return Math.max(0, kl)
+}
+
 function hurstMomentum(values: number[]): number {
   if (values.length < 20) return 0.5
 
@@ -189,6 +228,10 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
       typeof data.stats.synthetic.acfLag1 === "number"
         ? Math.max(0, Math.min(1, 0.5 + 0.5 * data.stats.synthetic.acfLag1))
         : sHurstMomentum
+    const shouldShowKLDivergence = data.selectionObjective === "baseline_composite_match"
+    const klDivergence = shouldShowKLDivergence
+      ? klDivergenceFromReturns(hReturns, sReturns)
+      : undefined
 
     return {
       ...data.stats,
@@ -202,10 +245,20 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
         ...data.stats.synthetic,
         var95: data.stats.synthetic.var95 ?? sVar95,
         hurstMomentum: data.stats.synthetic.hurstMomentum ?? sLegacyMappedMomentum,
+        klDivergence:
+          typeof data.stats.synthetic.klDivergence === "number"
+            ? data.stats.synthetic.klDivergence
+            : klDivergence,
         numDataPoints: data.synthetic.length,
       },
     }
-  }, [data.stats, data.returns, data.historical.length, data.synthetic.length])
+  }, [
+    data.stats,
+    data.returns,
+    data.historical.length,
+    data.synthetic.length,
+    data.selectionObjective,
+  ])
 
   const fidelityScore = useMemo(() => {
     if (data.overallMatch !== undefined) {

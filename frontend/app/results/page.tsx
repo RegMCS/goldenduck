@@ -10,11 +10,55 @@ import { InfoTooltip } from "@/components/info-tooltip"
 import { type GeneratedData, type JobParameters } from "@/lib/types"
 import { useAuth } from "@/components/auth-provider"
 
-interface JobMetrics {
-  mean_match?: number
-  volatility_match?: number
-  kurtosis_match?: number
-  acf_match?: number
+function FidelityCard({ score }: { score: number }) {
+  const r = 28
+  const circ = 2 * Math.PI * r
+  const safeScore = Math.max(0, Math.min(100, Math.round(score)))
+  const offset = circ * (1 - safeScore / 100)
+  const color = safeScore >= 75 ? "#22c55e" : safeScore >= 50 ? "#f59e0b" : "#ef4444"
+  const label = safeScore >= 75 ? "Excellent match" : safeScore >= 50 ? "Moderate match" : "Low match"
+
+  return (
+    <div className="h-full rounded-xl border border-border bg-card px-5 py-4">
+      <div className="flex h-full flex-col justify-center gap-1">
+        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Fidelity</p>
+        <div className="flex items-center gap-3 py-1">
+          <div className="relative h-16 w-16 shrink-0">
+            <svg viewBox="0 0 64 64" className="h-16 w-16 -rotate-90">
+              <circle cx="32" cy="32" r={r} fill="none" stroke="var(--border)" strokeWidth="6" />
+              <circle
+                cx="32"
+                cy="32"
+                r={r}
+                fill="none"
+                stroke={color}
+                strokeWidth="6"
+                strokeDasharray={circ}
+                strokeDashoffset={offset}
+                strokeLinecap="round"
+                style={{ transition: "stroke-dashoffset 1.2s ease-out" }}
+              />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <span className="text-sm font-bold tabular-nums leading-none" style={{ color }}>
+                {safeScore}
+              </span>
+              <span className="text-[8px] text-muted-foreground uppercase tracking-wider mt-0.5">
+                score
+              </span>
+            </div>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-foreground">Fidelity</p>
+            <p className="text-[11px] font-medium" style={{ color }}>
+              {label}
+            </p>
+            <p className="text-[10px] text-muted-foreground">vs. desired</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function ResultsContent() {
@@ -28,15 +72,8 @@ function ResultsContent() {
 
   const [data, setData] = useState<GeneratedData | null>(null)
   const [jobParams, setJobParams] = useState<JobParameters | null>(null)
-  const [jobMetrics, setJobMetrics] = useState<JobMetrics | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-
-  const fmtMatch = (v?: number) => {
-    if (typeof v !== "number" || !Number.isFinite(v)) return null
-    const pct = Math.max(0, Math.min(1, v)) * 100
-    return `${pct.toFixed(1)}%`
-  }
 
   useEffect(() => {
     if (jobId) {
@@ -47,7 +84,6 @@ function ResultsContent() {
         .then((d) => {
           if (d.chart_data) {
             setData(d.chart_data as GeneratedData)
-            setJobMetrics((d.metrics ?? null) as JobMetrics | null)
             const raw = localStorage.getItem(`goldenduck_job_params_${jobId}`)
             if (raw) setJobParams(JSON.parse(raw) as JobParameters)
           } else {
@@ -117,31 +153,38 @@ function ResultsContent() {
         {!loading && !error && data && (
           <>
             {jobParams && (
-              <div className="mb-6 rounded-xl border border-border bg-card px-5 py-4">
-                <h3 className="text-sm font-semibold text-foreground mb-3">Input Parameters</h3>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-                  {[
-                    { label: "Volatility", value: jobParams.volatility.toFixed(2), range: "Range: 0.5 – 2.0", match: fmtMatch(jobMetrics?.volatility_match) },
-                    { label: "Trend", value: jobParams.trend.toFixed(2), range: "Range: −1.0 – 1.0", match: fmtMatch(jobMetrics?.mean_match) },
-                    { label: "Fat Tails", value: jobParams.fatTails.toFixed(2), range: "Range: 0.5 – 2.0", match: fmtMatch(jobMetrics?.kurtosis_match) },
-                    { label: "V Momentum", value: jobParams.momentum.toFixed(2), range: "Range: 0.0 – 1.0", match: fmtMatch(jobMetrics?.acf_match) },
-                    { label: "Time Horizon", value: `${jobParams.timeHorizon} days`, range: "Range: 500 – 2600 days" },
-                    ...(jobParams.fileName ? [{ label: "Input File", value: jobParams.fileName, range: "" }] : []),
-                  ].map((item) => (
-                    <div key={item.label}>
-                      <div className="flex items-center gap-1 mb-0.5">
-                        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest">{item.label}</p>
-                        {item.match && (
-                          <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
-                            ({item.match})
-                          </span>
-                        )}
-                        {item.range && <InfoTooltip content={item.range} />}
+              <div className="mb-6 grid gap-4 lg:grid-cols-[1fr_240px] lg:items-stretch">
+                <div className="rounded-xl border border-border bg-card px-5 py-4">
+                  <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-foreground">Input Parameters</h3>
+                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+                    {[
+                      { label: "Volatility", value: jobParams.volatility.toFixed(2), range: "Range: 0.5 – 2.0" },
+                      { label: "Trend", value: jobParams.trend.toFixed(2), range: "Range: −1.0 – 1.0" },
+                      { label: "Fat Tails", value: jobParams.fatTails.toFixed(2), range: "Range: 0.5 – 2.0" },
+                      { label: "Momentum", value: jobParams.momentum.toFixed(2), range: "Range: 0.0 – 1.0" },
+                      { label: "Time Horizon", value: `${jobParams.timeHorizon}d`, range: "Range: 500 – 2600 days" },
+                      { label: "File", value: jobParams.fileName ?? "—", range: "" },
+                    ].map((item) => (
+                      <div key={item.label}>
+                        <div className="mb-0.5 flex items-center gap-1">
+                          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">{item.label}</p>
+                          {item.range && <InfoTooltip content={item.range} />}
+                        </div>
+                        <p className="truncate font-mono text-sm font-medium text-foreground" title={item.value}>
+                          {item.value}
+                        </p>
                       </div>
-                      <p className="text-sm font-mono font-medium text-foreground truncate" title={item.value}>{item.value}</p>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
+
+                <FidelityCard
+                  score={
+                    typeof data.overallMatch === "number" && Number.isFinite(data.overallMatch)
+                      ? data.overallMatch * 100
+                      : 0
+                  }
+                />
               </div>
             )}
             <VisualizationResults data={data} />

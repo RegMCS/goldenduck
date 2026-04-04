@@ -110,6 +110,10 @@ export function StatsPanel({ stats }: StatsPanelProps) {
   const { historical: h, synthetic: s } = stats
   const hVar95 = typeof h.var95 === "number" ? h.var95 : 0
   const sVar95 = typeof s.var95 === "number" ? s.var95 : 0
+  const klDivergence =
+    typeof s.klDivergence === "number" && Number.isFinite(s.klDivergence)
+      ? s.klDivergence
+      : null
   const hLegacyMomentum = typeof h.acfLag1 === "number" ? Math.max(0, Math.min(1, 0.5 + 0.5 * h.acfLag1)) : 0.5
   const sLegacyMomentum = typeof s.acfLag1 === "number" ? Math.max(0, Math.min(1, 0.5 + 0.5 * s.acfLag1)) : 0.5
   const hHurstMomentum = typeof h.hurstMomentum === "number" ? h.hurstMomentum : hLegacyMomentum
@@ -181,6 +185,21 @@ export function StatsPanel({ stats }: StatsPanelProps) {
           fmt={(v) => `${(v * 100).toFixed(2)}%`}
           positiveOnly
         />
+
+        {klDivergence !== null && (
+          <div className="py-3 border-b border-border/50">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-xs font-medium text-muted-foreground">KL Divergence [Similarity]</span>
+              <span className="text-[10px] text-muted-foreground">Lower is better</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-amber-500">Hist vs Synth</span>
+              <span className="text-xs font-mono font-semibold tabular-nums text-foreground">
+                {klDivergence.toFixed(4)}
+              </span>
+            </div>
+          </div>
+        )}
           
         <div className="py-3">
           <div className="flex items-center justify-between mb-1">
