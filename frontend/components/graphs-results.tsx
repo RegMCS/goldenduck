@@ -7,6 +7,7 @@ import { PriceOverlayChart } from "@/components/charts/price-overlay-chart"
 import { CumulativeReturnChart } from "@/components/charts/cumulative-return-chart"
 import { DrawdownChart } from "@/components/charts/drawdown-chart"
 import { VolatilityFanChart } from "@/components/charts/volatility-fan-chart"
+import { DistributionOverlayChart } from "@/components/charts/distribution-overlay-chart"
 import { StatsPanel } from "@/components/charts/stats-panel"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
@@ -292,6 +293,8 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
           ? "Momentum target (legacy ACF1)"
         : data.selectionObjective === "fat_tails_extreme_events"
           ? "Fat Tails target (extreme events)"
+        : data.selectionObjective === "fat_tails_kurtosis"
+          ? "Fat Tails target (kurtosis)"
           : data.selectionObjective === "volatility_std"
             ? "Volatility target (std scaling)"
             : data.selectionObjective === "baseline_composite_match"
@@ -310,6 +313,14 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
   const extremeEventsTarget =
     data.selectionObjective === "fat_tails_extreme_events" && data.selectionTarget !== undefined
       ? Math.round(data.selectionTarget)
+      : null
+  const fatKurtosisValue =
+    data.selectionObjective === "fat_tails_kurtosis" && typeof data.selectionValue === "number" && Number.isFinite(data.selectionValue)
+      ? data.selectionValue.toFixed(3)
+      : null
+  const fatKurtosisTarget =
+    data.selectionObjective === "fat_tails_kurtosis" && typeof data.selectionTarget === "number" && Number.isFinite(data.selectionTarget)
+      ? data.selectionTarget.toFixed(3)
       : null
   const volatilityRatioValue =
     data.selectionObjective === "volatility_tortuosity" && typeof data.selectionValue === "number" && Number.isFinite(data.selectionValue)
@@ -340,6 +351,26 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
     Number.isFinite(data.selectionValue)
       ? data.selectionValue.toFixed(3)
       : null
+  const weightedSelectionScore =
+    typeof data.selectionScore === "number" && Number.isFinite(data.selectionScore)
+      ? data.selectionScore.toFixed(3)
+      : baselineCompositeDistance
+  const isWeightedObjective =
+    data.selectionObjective === "baseline_composite_match" ||
+    data.selectionObjective === "volatility_std" ||
+    data.selectionObjective === "trend_mean" ||
+    data.selectionObjective === "momentum_hurst" ||
+    data.selectionObjective === "fat_tails_extreme_events" ||
+    data.selectionObjective === "fat_tails_kurtosis"
+  const showVolatilityTab = data.desiredVolatility !== 1.0
+  const showFatTailsDistributionTab =
+    data.selectionObjective === "fat_tails_kurtosis" ||
+    data.selectionObjective === "fat_tails_extreme_events"
+  const analyticsCols = showVolatilityTab && showFatTailsDistributionTab
+    ? "max-w-3xl grid-cols-5"
+    : showVolatilityTab || showFatTailsDistributionTab
+      ? "max-w-2xl grid-cols-4"
+      : "max-w-md grid-cols-3"
 
   return (
     <div className="space-y-3">
@@ -355,6 +386,12 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
             <p className="mt-1 text-[11px] text-muted-foreground">
               Extreme events: <span className="font-semibold text-foreground">{extremeEventsValue}</span>
               {extremeEventsTarget !== null ? ` (target ${extremeEventsTarget})` : ""}
+            </p>
+          )}
+          {fatKurtosisValue !== null && (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Excess kurtosis: <span className="font-semibold text-foreground">{fatKurtosisValue}</span>
+              {fatKurtosisTarget !== null ? ` (target ${fatKurtosisTarget})` : ""}
             </p>
           )}
           {volatilityRatioValue !== null && (
@@ -377,6 +414,11 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
           {baselineCompositeDistance !== null && (
             <p className="mt-1 text-[11px] text-muted-foreground">
               Composite distance: <span className="font-semibold text-foreground">{baselineCompositeDistance}</span>
+            </p>
+          )}
+          {isWeightedObjective && weightedSelectionScore !== null && (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Weighted score: <span className="font-semibold text-foreground">{weightedSelectionScore}</span> (lower is better)
             </p>
           )}
         </div>
@@ -449,11 +491,12 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
       <section className="space-y-4">
         <h3 className="text-base font-semibold text-foreground">Analytics</h3>
         <Tabs defaultValue="overlay">
-          <TabsList className={`grid w-full ${data.desiredVolatility !== 1.0 ? "max-w-2xl grid-cols-4" : "max-w-md grid-cols-3"}`}>
+          <TabsList className={`grid w-full ${analyticsCols}`}>
             <TabsTrigger value="overlay">Price Overlay</TabsTrigger>
             <TabsTrigger value="returns">Cum. Returns</TabsTrigger>
             <TabsTrigger value="drawdown">Drawdowns</TabsTrigger>
-            {data.desiredVolatility !== 1.0 && <TabsTrigger value="volatility">Volatility Fan</TabsTrigger>}
+            {showVolatilityTab && <TabsTrigger value="volatility">Volatility Fan</TabsTrigger>}
+            {showFatTailsDistributionTab && <TabsTrigger value="distribution">Distribution</TabsTrigger>}
           </TabsList>
           <TabsContent value="overlay" className="mt-4">
             <div className="rounded-xl border border-border bg-card p-5">
@@ -470,7 +513,7 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
               <DrawdownChart data={data.drawdowns} height={420} />
             </div>
           </TabsContent>
-          {data.desiredVolatility !== 1.0 && (
+          {showVolatilityTab && (
             <TabsContent value="volatility" className="mt-4">
               <div className="rounded-xl border border-border bg-card p-5">
                 {data.volatilityFan && data.volatilityFan.length > 0 ? (
@@ -478,6 +521,18 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
                 ) : (
                   <p className="text-sm text-muted-foreground">Volatility fan data not available</p>
                 )}
+              </div>
+            </TabsContent>
+          )}
+          {showFatTailsDistributionTab && (
+            <TabsContent value="distribution" className="mt-4">
+              <div className="rounded-xl border border-border bg-card p-5">
+                <DistributionOverlayChart
+                  data={data.returns}
+                  historicalKurtosis={data.stats?.historical?.kurtosis}
+                  syntheticKurtosis={data.stats?.synthetic?.kurtosis}
+                  height={420}
+                />
               </div>
             </TabsContent>
           )}

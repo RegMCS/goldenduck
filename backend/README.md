@@ -123,6 +123,40 @@ Check job status:
 curl http://localhost:8000/api/status/{job_id}
 ```
 
+## Knob Target Reference
+
+The GARCH worker converts the four user knobs into target values before selecting the best display path. Use this reference when you want to understand what each control is trying to match in the generated scenarios.
+
+| Knob | Default | Target used by worker | Interpretation |
+|------|---------|-----------------------|----------------|
+| `volatility` | `1.0` | `hist_std * volatility` | Scales the historical daily return standard deviation |
+| `trend` | `0.0` | Daily mean log return from `_target_mean_from_desired_trend(trend)` | Positive values push the path upward; negative values push it downward |
+| `momentum` | `0.5` | Hurst target from `_target_hurst_from_momentum_knob(momentum, input_hurst)` | `0.5` preserves input Hurst; lower values push toward noisier paths |
+| `fat_tails` | `1.0` | `hist_kurtosis * multiplier` | Scales input excess kurtosis relative to the historical CSV |
+
+### Fat-Tails Multiplier
+
+The fat-tails knob uses a linear multiplier around `1.0`:
+
+| `fat_tails` value | Multiplier | Effect |
+|------------------|------------|--------|
+| `0.5` | `0.925` | Slightly reduces kurtosis |
+| `1.0` | `1.0` | Preserves historical kurtosis |
+| `2.0` | `1.15` | Increases kurtosis by 15% |
+
+Formula:
+
+```text
+k_target = clip(k_hist * (1 + 0.15 * (fat_tails - 1)), -1, 12)
+```
+
+### Quick Examples
+
+- `volatility = 0.5` → target volatility is half the historical standard deviation
+- `trend = 1.0` → strongest upward drift target
+- `momentum = 0.0` → target Hurst leans toward low-momentum / noisier paths
+- `fat_tails = 2.0` → target kurtosis is 15% above the historical input kurtosis
+
 
 ## Evaluation Runner
 

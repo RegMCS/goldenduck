@@ -419,6 +419,21 @@ def _count_extreme_events(returns: np.ndarray, threshold: float = 2.5) -> int:
     return count
 
 
+def _safe_excess_kurtosis(returns: np.ndarray) -> float:
+    """Robust finite excess kurtosis estimate for return series."""
+    x = np.asarray(returns, dtype=float).ravel()
+    x = x[np.isfinite(x)]
+    if len(x) < 4:
+        return 0.0
+    try:
+        k = float(stats.kurtosis(x))
+    except Exception:
+        return 0.0
+    if not np.isfinite(k):
+        return 0.0
+    return k
+
+
 def _baseline_match_distance(
     scenario: pd.DataFrame,
     historical_returns: np.ndarray,
@@ -687,7 +702,7 @@ def _score_flash_crash_path(
 
 def _select_best_display_scenario(
     scenarios: list[pd.DataFrame], user_knobs: dict, historical_returns: np.ndarray | None = None
-) -> tuple[int, str, float, float]:
+) -> tuple[int, str, float, float, float]:
     """
     Select one scenario path for frontend display using a single-knob visual objective.
 
@@ -701,7 +716,7 @@ def _select_best_display_scenario(
       (best_index, objective_name, target_value, best_value)
     """
     if not scenarios:
-        return 0, "fallback", 0.0, 0.0
+        return 0, "fallback", 0.0, 0.0, 0.0
 
     desired_volatility = float(user_knobs.get("desired_volatility", 1.0))
     desired_trend = float(user_knobs.get("desired_trend", 0.0))
@@ -746,8 +761,8 @@ def _select_best_display_scenario(
 
         if not np.isfinite(best_score):
             # No path passed hard filters; keep objective tag but return finite score.
-            return 0, "bull_run_composite", 1.0, 0.0
-        return best_idx, "bull_run_composite", 1.0, float(best_score)
+            return 0, "bull_run_composite", 1.0, 0.0, 0.0
+        return best_idx, "bull_run_composite", 1.0, float(best_score), float(best_score)
 
     if _is_flash_crash_preset(user_knobs):
         horizon = len(scenarios[0]) if scenarios else 0
@@ -771,160 +786,163 @@ def _select_best_display_scenario(
 
         if not np.isfinite(best_score):
             # No path passed hard filters; keep objective tag but return finite score.
-            return 0, "flash_crash_composite", 1.0, 0.0
-        return best_idx, "flash_crash_composite", 1.0, float(best_score)
+            return 0, "flash_crash_composite", 1.0, 0.0, 0.0
+        return best_idx, "flash_crash_composite", 1.0, float(best_score), float(best_score)
 
-    if (
-        volatility_active
-        and not trend_active
-        and not momentum_active
-        and not fat_tails_active
-    ):
-        # Volatility-only selection via return standard deviation scaling.
-        # Example: desired_volatility=2.0 -> target path with ~2x historical std.
-        hist = (
-            np.asarray(historical_returns).ravel()
-            if historical_returns is not None
-            else np.array([], dtype=float)
-        )
-        hist = hist[np.isfinite(hist)] if len(hist) > 0 else hist
-        hist_std = float(np.std(hist, ddof=1)) if len(hist) > 1 else 0.0
+    # Weighted primary + preservation selection against input CSV stats.
+    # If one knob is tweaked: 0.55 weight for active knob target, 0.15 each for
+    # preserving untouched knobs close to historical input stats.
+    # If no knobs are tweaked: equal 0.25 weight across all 4 knobs to preserve input.
+    if historical_returns is None:
+        return 0, "fallback", 0.0, 0.0, 0.0
 
-        if hist_std <= 1e-12:
-            return 0, "volatility_std", 0.0, 0.0
+    hist = np.asarray(historical_returns, dtype=float).ravel()
+    hist = hist[np.isfinite(hist)]
+    if len(hist) < 2:
+        return 0, "fallback", 0.0, 0.0, 0.0
 
-        target_std = float(hist_std * desired_volatility)
+    # Historical/base (input CSV) stats used for preservation terms.
+    hist_mean = float(np.mean(hist))
+    hist_std = float(np.std(hist, ddof=1)) if len(hist) > 1 else 0.0
+    hist_std = max(hist_std, 1e-6)
+    hist_hurst = _safe_hurst_momentum(hist)
+    hist_kurt = _safe_excess_kurtosis(hist)
 
-        best_idx = 0
-        best_err = float("inf")
-        best_val = 0.0
+    # Target values for active knob objectives.
+    target_std = float(hist_std * desired_volatility)
+    target_mean = _target_mean_from_desired_trend(desired_trend)
+    target_momentum = _target_hurst_from_momentum_knob(
+        desired_momentum,
+        hist_hurst,
+        low_anchor=0.15,
+        high_anchor=0.85,
+    )
 
-        for i, scenario in enumerate(scenarios):
-            r = _get_log_returns_from_scenario(scenario)
-            val = float(np.std(r, ddof=1)) if len(r) > 1 else 0.0
-            if not np.isfinite(val):
-                continue
-            err = abs(val - target_std)
-            if err < best_err:
-                best_err = err
-                best_idx = i
-                best_val = val
+    # Multiplicative fat-tails target anchored to input CSV kurtosis.
+    # multiplier = 1.0 at fat_tails=1.0, 1.15 at fat_tails=2.0, 0.925 at fat_tails=0.5.
+    # The target kurtosis is scaled relative to the historical input kurtosis.
+    fat = float(np.clip(desired_fat_tails, 0.5, 2.0))
+    kurt_multiplier = float(1.0 + 0.15 * (fat - 1.0))
+    target_kurt = float(np.clip(hist_kurt * kurt_multiplier, -1.0, 12.0))
 
-        return best_idx, "volatility_std", target_std, best_val
-
-    if (
+    no_knob_active = (
         not trend_active
         and not momentum_active
         and not volatility_active
         and not fat_tails_active
-    ):
-        # No knob tweaked: choose scenario that best matches input path statistics.
-        if historical_returns is None:
-            return 0, "fallback", 0.0, 0.0
+    )
+    vol_only = volatility_active and not trend_active and not momentum_active and not fat_tails_active
+    trend_only = trend_active and not momentum_active and not volatility_active and not fat_tails_active
+    momentum_only = momentum_active and not trend_active and not volatility_active and not fat_tails_active
+    fat_only = fat_tails_active and not trend_active and not momentum_active and not volatility_active
 
-        best_idx = 0
-        best_dist = float("inf")
-        for i, scenario in enumerate(scenarios):
-            dist = _baseline_match_distance(scenario, historical_returns)
-            if dist < best_dist:
-                best_dist = dist
-                best_idx = i
+    # Keep current behavior for unexpected multi-knob states.
+    if not (no_knob_active or vol_only or trend_only or momentum_only or fat_only):
+        return 0, "fallback", 0.0, 0.0, 0.0
 
-        if not np.isfinite(best_dist):
-            return 0, "fallback", 0.0, 0.0
-        return best_idx, "baseline_composite_match", 0.0, float(best_dist)
+    def _norm_err(actual: float, target: float, denom: float) -> float:
+        d = abs(float(actual) - float(target)) / max(float(denom), 1e-12)
+        return float(np.clip(d, 0.0, 1.0))
 
-    # Only act on trend/momentum objectives under the user's one-knob assumption.
-    # Exactly one of trend/momentum should be active; otherwise fallback.
-    if (
-        trend_active
-        and not momentum_active
-        and not volatility_active
-        and not fat_tails_active
-    ):
-        target_mean = _target_mean_from_desired_trend(desired_trend)
-        best_idx = 0
-        best_err = float("inf")
-        best_val = 0.0
+    best_idx = 0
+    best_score = float("inf")
+    best_obj_val = 0.0
 
-        for i, scenario in enumerate(scenarios):
-            r = _get_log_returns_from_scenario(scenario)
-            val = float(np.mean(r)) if len(r) > 0 else 0.0
-            err = abs(val - target_mean)
-            if err < best_err:
-                best_err = err
-                best_idx = i
-                best_val = val
+    # Objective metadata for frontend display.
+    if vol_only:
+        objective_name = "volatility_std"
+        objective_target = float(target_std)
+    elif trend_only:
+        objective_name = "trend_mean"
+        objective_target = float(target_mean)
+    elif momentum_only:
+        objective_name = "momentum_hurst"
+        objective_target = float(target_momentum)
+    elif fat_only:
+        objective_name = "fat_tails_kurtosis"
+        objective_target = float(target_kurt)
+    else:
+        objective_name = "baseline_composite_match"
+        objective_target = 0.0
 
-        return best_idx, "trend_mean", float(target_mean), float(best_val)
+    for i, scenario in enumerate(scenarios):
+        r = _get_log_returns_from_scenario(scenario)
+        r = r[np.isfinite(r)]
+        if len(r) < 2:
+            continue
 
-    if (
-        momentum_active
-        and not trend_active
-        and not volatility_active
-        and not fat_tails_active
-    ):
-        hist_hurst = (
-            _safe_hurst_momentum(np.asarray(historical_returns, dtype=float))
-            if historical_returns is not None
-            else 0.5
-        )
-        target_momentum = _target_hurst_from_momentum_knob(
-            desired_momentum,
-            hist_hurst,
-            low_anchor=0.15,
-            high_anchor=0.85,
-        )
+        s_mean = float(np.mean(r))
+        s_std = float(np.std(r, ddof=1)) if len(r) > 1 else 0.0
+        s_hurst = _safe_hurst_momentum(r)
+        s_kurt = _safe_excess_kurtosis(r)
 
-        best_idx = 0
-        best_err = float("inf")
-        best_val = 0.5
+        if not all(np.isfinite(v) for v in [s_mean, s_std, s_hurst, s_kurt]):
+            continue
 
-        for i, scenario in enumerate(scenarios):
-            r = _get_log_returns_from_scenario(scenario)
-            val = _safe_hurst_momentum(r)
-            err = abs(val - target_momentum)
-            if err < best_err:
-                best_err = err
-                best_idx = i
-                best_val = val
+        # Preservation terms (stay close to input CSV stats).
+        d_vol_preserve = _norm_err(s_std, hist_std, hist_std)
+        d_trend_preserve = _norm_err(s_mean, hist_mean, 0.5 * hist_std)
+        d_momentum_preserve = _norm_err(s_hurst, hist_hurst, 0.5)
+        d_fat_preserve = _norm_err(s_kurt, hist_kurt, max(abs(hist_kurt), 1.0))
 
-        return best_idx, "momentum_hurst", float(target_momentum), float(best_val)
+        # Active-objective terms.
+        d_vol_target = _norm_err(s_std, target_std, hist_std)
+        d_trend_target = _norm_err(s_mean, target_mean, 0.5 * hist_std)
+        d_momentum_target = _norm_err(s_hurst, target_momentum, 0.5)
+        d_fat_target = _norm_err(s_kurt, target_kurt, max(abs(target_kurt), 1.0))
 
-    if (
-        fat_tails_active
-        and not trend_active
-        and not momentum_active
-        and not volatility_active
-    ):
-        # Map desired_fat_tails to target extreme event count using requested anchors:
-        #   fat_tails=0.5 -> 2 events
-        #   fat_tails=1.5 -> 8 events
-        #   fat_tails=2.0 -> 16 events
-        fat = float(np.clip(desired_fat_tails, 0.5, 2.0))
-        if fat <= 1.5:
-            # Linear: [0.5, 1.5] -> [2, 8]
-            target_events = 2.0 + (fat - 0.5) * 6.0
-        else:
-            # Linear: (1.5, 2.0] -> (8, 16]
-            target_events = 8.0 + (fat - 1.5) * 16.0
+        if no_knob_active:
+            score = (
+                0.25 * d_vol_preserve
+                + 0.25 * d_trend_preserve
+                + 0.25 * d_momentum_preserve
+                + 0.25 * d_fat_preserve
+            )
+            obj_val = float(score)
+        elif vol_only:
+            score = (
+                0.55 * d_vol_target
+                + 0.15 * d_trend_preserve
+                + 0.15 * d_momentum_preserve
+                + 0.15 * d_fat_preserve
+            )
+            obj_val = float(s_std)
+        elif trend_only:
+            score = (
+                0.55 * d_trend_target
+                + 0.15 * d_vol_preserve
+                + 0.15 * d_momentum_preserve
+                + 0.15 * d_fat_preserve
+            )
+            obj_val = float(s_mean)
+        elif momentum_only:
+            score = (
+                0.55 * d_momentum_target
+                + 0.15 * d_vol_preserve
+                + 0.15 * d_trend_preserve
+                + 0.15 * d_fat_preserve
+            )
+            obj_val = float(s_hurst)
+        else:  # fat_only
+            score = (
+                0.55 * d_fat_target
+                + 0.15 * d_vol_preserve
+                + 0.15 * d_trend_preserve
+                + 0.15 * d_momentum_preserve
+            )
+            obj_val = float(s_kurt)
 
-        best_idx = 0
-        best_err = float("inf")
-        best_val = 0.0
+        if score < best_score:
+            best_score = float(score)
+            best_idx = i
+            best_obj_val = float(obj_val)
 
-        for i, scenario in enumerate(scenarios):
-            r = _get_log_returns_from_scenario(scenario)
-            count = _count_extreme_events(r, threshold=2.5)
-            err = abs(float(count) - target_events)
-            if err < best_err:
-                best_err = err
-                best_idx = i
-                best_val = float(count)
+    if not np.isfinite(best_score):
+        return 0, objective_name, float(objective_target), 0.0, 0.0
 
-        return best_idx, "fat_tails_extreme_events", float(target_events), float(best_val)
+    return best_idx, objective_name, float(objective_target), float(best_obj_val), float(best_score)
 
-    return 0, "fallback", 0.0, 0.0
+    return 0, "fallback", 0.0, 0.0, 0.0
 
 
 S3_BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "goldenduck-results")
@@ -1156,34 +1174,34 @@ while True:
         s3_url = f"s3://{S3_BUCKET_NAME}/{s3_key}"
 
         # Generate visualization plots
-        try:
-            from worker.GARCH.services.visualization_service import VisualizationService
+        # try:
+        #     from worker.GARCH.services.visualization_service import VisualizationService
 
-            viz_service = VisualizationService(
-                data
-            )  # Use 'data' (historical data downloaded above)
+        #     viz_service = VisualizationService(
+        #         data
+        #     )  # Use 'data' (historical data downloaded above)
 
-            # Plot 1: Price comparison
-            price_plot_path = os.path.join(OUTPUT_DIR, f"{job_id}_prices.png")
-            viz_service.plot_price_comparison(
-                scenarios=scenarios,
-                output_path=price_plot_path,
-                title=f"Historical vs Synthetic Prices - {ticker}",
-                num_scenarios_to_plot=50,
-            )
+        #     # Plot 1: Price comparison
+        #     price_plot_path = os.path.join(OUTPUT_DIR, f"{job_id}_prices.png")
+        #     viz_service.plot_price_comparison(
+        #         scenarios=scenarios,
+        #         output_path=price_plot_path,
+        #         title=f"Historical vs Synthetic Prices - {ticker}",
+        #         num_scenarios_to_plot=50,
+        #     )
 
-            # Plot 2: Statistics comparison
-            stats_plot_path = os.path.join(OUTPUT_DIR, f"{job_id}_stats.png")
-            viz_service.plot_statistics_comparison(
-                scenarios=scenarios,
-                output_path=stats_plot_path,
-                user_knobs=user_knobs,
-                title=f"Synthetic vs Desired Characteristics - {ticker}",
-            )
+        #     # Plot 2: Statistics comparison
+        #     stats_plot_path = os.path.join(OUTPUT_DIR, f"{job_id}_stats.png")
+        #     viz_service.plot_statistics_comparison(
+        #         scenarios=scenarios,
+        #         output_path=stats_plot_path,
+        #         user_knobs=user_knobs,
+        #         title=f"Synthetic vs Desired Characteristics - {ticker}",
+        #     )
 
-            logger.info(f"Generated plots: {price_plot_path}, {stats_plot_path}")
-        except Exception as e:
-            logger.warning(f"Could not generate visualizations: {e}")
+        #     logger.info(f"Generated plots: {price_plot_path}, {stats_plot_path}")
+        # except Exception as e:
+        #     logger.warning(f"Could not generate visualizations: {e}")
 
         # Compute chart data for frontend visualizations
         try:
@@ -1192,6 +1210,7 @@ while True:
                 selection_objective,
                 selection_target,
                 selection_value,
+                selection_score,
             ) = _select_best_display_scenario(
                 scenarios, user_knobs, historical_returns=returns
             )
@@ -1237,25 +1256,81 @@ while True:
                 selection_value,
             )
 
+            # Fidelity metrics aligned with weighted selection logic:
+            # - intent_fidelity: 1 - weighted selection score
+            # - csv_similarity: equal-weight similarity to input CSV stats
+            intent_fidelity = float(np.clip(1.0 - float(selection_score), 0.0, 1.0))
+            csv_similarity = intent_fidelity
+            try:
+                hist_r = np.asarray(returns, dtype=float).ravel()
+                hist_r = hist_r[np.isfinite(hist_r)]
+                sel_r = _get_log_returns_from_scenario(scenarios[selected_idx])
+                sel_r = sel_r[np.isfinite(sel_r)]
+
+                if len(hist_r) >= 2 and len(sel_r) >= 2:
+                    hist_mean = float(np.mean(hist_r))
+                    hist_std = float(np.std(hist_r, ddof=1)) if len(hist_r) > 1 else 0.0
+                    hist_std = max(hist_std, 1e-6)
+                    hist_hurst = _safe_hurst_momentum(hist_r)
+                    hist_kurt = _safe_excess_kurtosis(hist_r)
+
+                    sel_mean = float(np.mean(sel_r))
+                    sel_std = float(np.std(sel_r, ddof=1)) if len(sel_r) > 1 else 0.0
+                    sel_hurst = _safe_hurst_momentum(sel_r)
+                    sel_kurt = _safe_excess_kurtosis(sel_r)
+
+                    def _norm_err(actual: float, target: float, denom: float) -> float:
+                        d = abs(float(actual) - float(target)) / max(float(denom), 1e-12)
+                        return float(np.clip(d, 0.0, 1.0))
+
+                    d_vol = _norm_err(sel_std, hist_std, hist_std)
+                    d_trend = _norm_err(sel_mean, hist_mean, 0.5 * hist_std)
+                    d_momentum = _norm_err(sel_hurst, hist_hurst, 0.5)
+                    d_fat = _norm_err(sel_kurt, hist_kurt, max(abs(hist_kurt), 1.0))
+                    avg_distance = float((d_vol + d_trend + d_momentum + d_fat) / 4.0)
+                    csv_similarity = float(np.clip(1.0 - avg_distance, 0.0, 1.0))
+            except Exception as fidelity_exc:
+                logger.warning(
+                    "Could not compute fidelity decomposition for job %s: %s",
+                    job_id,
+                    fidelity_exc,
+                )
+
             chart_data = compute_chart_data(data, scenarios[selected_idx], all_scenarios=scenarios)
             chart_data["overallMatch"] = float(metrics.get("overall_match", 0.0))
             chart_data["selectedScenarioId"] = int(selected_idx + 1)
             chart_data["selectionObjective"] = selection_objective
             chart_data["selectionTarget"] = float(selection_target)
             chart_data["selectionValue"] = float(selection_value)
+            chart_data["selectionScore"] = float(selection_score)
+            chart_data["intentFidelity"] = float(intent_fidelity)
+            chart_data["csvSimilarity"] = float(csv_similarity)
             chart_data["desiredVolatility"] = float(user_knobs.get("desired_volatility", 1.0))
+
+            # Keep kurtosis stats consistent with display-path selection basis:
+            # use log-return excess kurtosis from input CSV and selected scenario path.
+            try:
+                hist_log_returns = np.asarray(returns, dtype=float).ravel()
+                hist_log_returns = hist_log_returns[np.isfinite(hist_log_returns)]
+                sel_log_returns = _get_log_returns_from_scenario(scenarios[selected_idx])
+                sel_log_returns = sel_log_returns[np.isfinite(sel_log_returns)]
+
+                chart_data["stats"]["historical"]["kurtosis"] = round(
+                    float(_safe_excess_kurtosis(hist_log_returns)), 4
+                )
+                chart_data["stats"]["synthetic"]["kurtosis"] = round(
+                    float(_safe_excess_kurtosis(sel_log_returns)), 4
+                )
+            except Exception as kurt_exc:
+                logger.warning(
+                    "Could not align chart kurtosis to selected path for job %s: %s",
+                    job_id,
+                    kurt_exc,
+                )
 
             # Override per-scenario kurtosis/skewness/std with values computed
             # across all 100 scenarios (from validation), which are far more
             # statistically robust than the single-scenario estimates.
-            if "kurtosis_synthetic" in metrics:
-                chart_data["stats"]["synthetic"]["kurtosis"] = metrics[
-                    "kurtosis_synthetic"
-                ]
-            if "kurtosis_historical" in metrics:
-                chart_data["stats"]["historical"]["kurtosis"] = metrics[
-                    "kurtosis_historical"
-                ]
             if "skewness_synthetic" in metrics:
                 chart_data["stats"]["synthetic"]["skewness"] = metrics[
                     "skewness_synthetic"

@@ -10,7 +10,7 @@ import { InfoTooltip } from "@/components/info-tooltip"
 import { type GeneratedData, type JobParameters } from "@/lib/types"
 import { useAuth } from "@/components/auth-provider"
 
-function FidelityCard({ score }: { score: number }) {
+function FidelityCard({ score, csvSimilarity }: { score: number; csvSimilarity?: number }) {
   const r = 28
   const circ = 2 * Math.PI * r
   const safeScore = Math.max(0, Math.min(100, Math.round(score)))
@@ -54,6 +54,9 @@ function FidelityCard({ score }: { score: number }) {
               {label}
             </p>
             <p className="text-[10px] text-muted-foreground">vs. desired</p>
+            {typeof csvSimilarity === "number" && Number.isFinite(csvSimilarity) && (
+              <p className="text-[10px] text-muted-foreground">CSV sim: {Math.round(csvSimilarity)}%</p>
+            )}
           </div>
         </div>
       </div>
@@ -180,9 +183,18 @@ function ResultsContent() {
 
                 <FidelityCard
                   score={
-                    typeof data.overallMatch === "number" && Number.isFinite(data.overallMatch)
-                      ? data.overallMatch * 100
-                      : 0
+                    typeof data.intentFidelity === "number" && Number.isFinite(data.intentFidelity)
+                      ? data.intentFidelity * 100
+                      : typeof data.selectionScore === "number" && Number.isFinite(data.selectionScore)
+                        ? Math.max(0, Math.min(100, 100 * (1 - data.selectionScore)))
+                        : typeof data.overallMatch === "number" && Number.isFinite(data.overallMatch)
+                          ? data.overallMatch * 100
+                          : 0
+                  }
+                  csvSimilarity={
+                    typeof data.csvSimilarity === "number" && Number.isFinite(data.csvSimilarity)
+                      ? data.csvSimilarity * 100
+                      : undefined
                   }
                 />
               </div>

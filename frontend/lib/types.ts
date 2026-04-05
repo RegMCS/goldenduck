@@ -95,6 +95,9 @@ export interface GeneratedData {
   selectionObjective?: string
   selectionTarget?: number
   selectionValue?: number
+  selectionScore?: number
+  intentFidelity?: number
+  csvSimilarity?: number
   desiredVolatility?: number
   volatilityFan?: VolatilityFanPoint[]
 }
