@@ -7,23 +7,29 @@ Endpoints:
   POST  /api/training/start                        — trigger a new training run
   GET   /api/training/runs                         — list all past runs
   GET   /api/training/runs/{run_id}                — status + live progress for one run
+  GET   /api/training/uploads                      — list manually uploaded models
+  POST  /api/training/models/upload                — upload .pkl, version name, store in S3
   POST  /api/training/models/{model_name}/activate — set a saved model as active
   GET   /api/training/active-model/evaluation      — evaluation report for active model
 """
 
+import asyncio
 import json
 import os
+import tempfile
+import uuid as uuid_lib
 import logging
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, File, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from job_scheduler.db.session import get_db
 from job_scheduler.models.training_job import TrainingJob
+from job_scheduler.models.uploaded_model import UploadedModel
 from job_scheduler.models.user import User
 from job_scheduler.services.auth_service import require_admin
 from job_scheduler.services.training_store import training_store
@@ -38,6 +44,12 @@ ML_TRAINING_DIR = Path(__file__).parent.parent.parent / "ml_training"
 MODEL_SAVE_DIR = ML_TRAINING_DIR / "models" / "saved_models"
 EVALUATION_DIR = ML_TRAINING_DIR / "models" / "evaluation"
 ACTIVE_MODEL_NAME = "rf_delta.pkl"
+
+# Max upload size for manual model files (bytes)
+MAX_MODEL_UPLOAD_BYTES = 256 * 1024 * 1024
+# Read upload in chunks; spool rolls from RAM to disk after this many bytes
+UPLOAD_CHUNK_BYTES = 1024 * 1024
+UPLOAD_SPOOL_MAX_IN_MEMORY = 16 * 1024 * 1024
 
 
 # ─── Schemas ─────────────────────────────────────────────────────────────────
@@ -72,7 +84,64 @@ class TrainingRunsListResponse(BaseModel):
     total: int
 
 
+class UploadedModelResponse(BaseModel):
+    id: str
+    model_name: str
+    s3_key: str
+    uploaded_by: str
+    created_at: str
+    file_size_bytes: Optional[int]
+    is_active: bool
+
+    model_config = {"from_attributes": True}
+
+
+class UploadedModelsListResponse(BaseModel):
+    uploads: List[UploadedModelResponse]
+    total: int
+
+
+class ModelUploadResult(BaseModel):
+    id: str
+    model_name: str
+    s3_key: str
+
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
+
+
+def _allocate_upload_model_name(db: Session) -> str:
+    """
+    Same pattern as training worker: rf_delta_YYYYMMDD_HHMMSS.pkl.
+    If that name is taken (upload or training job), append a short random suffix.
+    """
+    tz = timezone(timedelta(hours=8))
+    ts = datetime.now(tz=tz).strftime("%Y%m%d_%H%M%S")
+    for _ in range(20):
+        suffix = uuid_lib.uuid4().hex[:6] if _ else ""
+        name = f"rf_delta_{ts}.pkl" if not suffix else f"rf_delta_{ts}_{suffix}.pkl"
+        taken_up = (
+            db.query(UploadedModel).filter(UploadedModel.model_name == name).first()
+        )
+        taken_tj = db.query(TrainingJob).filter(TrainingJob.model_name == name).first()
+        if not taken_up and not taken_tj:
+            return name
+    return f"rf_delta_{ts}_{uuid_lib.uuid4().hex}.pkl"
+
+
+def _uploaded_model_to_response(row: UploadedModel) -> UploadedModelResponse:
+    return UploadedModelResponse(
+        id=str(row.id),
+        model_name=row.model_name,
+        s3_key=row.s3_key,
+        uploaded_by=str(row.uploaded_by),
+        created_at=row.created_at.isoformat(),
+        file_size_bytes=row.file_size_bytes,
+        is_active=row.is_active,
+    )
+
+
+# ─── Helpers (runs) ─────────────────────────────────────────────────────────
 
 
 def _build_run_response(run: TrainingJob, run_id_str: str) -> TrainingRunResponse:
@@ -140,6 +209,101 @@ def list_runs(
     return TrainingRunsListResponse(runs=items, total=len(items))
 
 
+@router.get("/uploads", response_model=UploadedModelsListResponse)
+def list_uploads(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Return all manually uploaded model files, newest first."""
+    rows = db.query(UploadedModel).order_by(UploadedModel.created_at.desc()).all()
+    return UploadedModelsListResponse(
+        uploads=[_uploaded_model_to_response(r) for r in rows],
+        total=len(rows),
+    )
+
+
+@router.post("/models/upload", response_model=ModelUploadResult)
+async def upload_model_file(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """
+    Accept a .pkl file, assign rf_delta_YYYYMMDD_HHMMSS(.pkl) (with suffix if needed),
+    upload to S3 under models/, and record in uploaded_models.
+
+    Streams the body in chunks (bounded RAM) and uploads via upload_fileobj so the
+    full file is not loaded into a single bytes object.
+    """
+    import boto3
+
+    spool = None
+    try:
+        if not file.filename or not file.filename.lower().endswith(".pkl"):
+            raise HTTPException(status_code=400, detail="File must be a .pkl file")
+
+        spool = tempfile.SpooledTemporaryFile(
+            max_size=UPLOAD_SPOOL_MAX_IN_MEMORY, mode="w+b"
+        )
+        total = 0
+        await file.seek(0)
+        while True:
+            chunk = await file.read(UPLOAD_CHUNK_BYTES)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_MODEL_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=(
+                        f"File too large (max {MAX_MODEL_UPLOAD_BYTES // (1024 * 1024)} MB)"
+                    ),
+                )
+            spool.write(chunk)
+        spool.seek(0)
+
+        model_name = _allocate_upload_model_name(db)
+        s3_key = f"models/{model_name}"
+        bucket_name = os.environ["S3_BUCKET_NAME"]
+
+        try:
+            s3_client = boto3.client("s3")
+            await asyncio.to_thread(
+                s3_client.upload_fileobj, spool, bucket_name, s3_key
+            )
+        except Exception as e:
+            logger.exception("S3 upload failed for model_name=%s", model_name)
+            raise HTTPException(
+                status_code=502,
+                detail="Storage upload failed. Please try again later.",
+                headers={"X-Error-Code": "STORAGE_UPLOAD_FAILED"},
+            ) from e
+
+        row = UploadedModel(
+            model_name=model_name,
+            s3_key=s3_key,
+            uploaded_by=admin.id,
+            file_size_bytes=total,
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+
+        logger.info(
+            "Admin %s uploaded model %s (%d bytes)",
+            admin.username,
+            model_name,
+            total,
+        )
+        return ModelUploadResult(
+            id=str(row.id), model_name=row.model_name, s3_key=row.s3_key
+        )
+    finally:
+        if spool is not None:
+            spool.close()
+        await file.close()
+
+
 @router.get("/runs/{run_id}", response_model=TrainingRunResponse)
 def get_run(
     run_id: str,
@@ -190,7 +354,8 @@ def activate_model(
 ):
     """
     Copy a versioned model file to the active inference path (rf_delta.pkl).
-    Also marks all other runs as is_active=False and this run as is_active=True.
+    Clears is_active on any currently active training job / upload, then marks
+    the resolved row as active.
     """
     import shutil
     import os
@@ -203,18 +368,23 @@ def activate_model(
     src = MODEL_SAVE_DIR / model_name
     dst = MODEL_SAVE_DIR / ACTIVE_MODEL_NAME
 
-    # Only allow if there's a matching training run
     run = db.query(TrainingJob).filter(TrainingJob.model_name == model_name).first()
-    if not run:
+    upload = (
+        None
+        if run
+        else db.query(UploadedModel)
+        .filter(UploadedModel.model_name == model_name)
+        .first()
+    )
+    if not run and not upload:
         raise HTTPException(
-            status_code=404, detail="No training run associated with this model"
+            status_code=404,
+            detail="No training run or uploaded model with this name",
         )
 
     if src.exists():
-        # Swap model file
         shutil.copy2(src, dst)
     else:
-        # Download from S3
         try:
             s3_client = boto3.client("s3")
             bucket_name = os.environ["S3_BUCKET_NAME"]
@@ -225,7 +395,7 @@ def activate_model(
             raise HTTPException(
                 status_code=404,
                 detail=f"Model file not found locally or on S3: {model_name}",
-            )
+            ) from e
 
     logger.info(
         "Admin %s activated model %s → %s",
@@ -234,9 +404,16 @@ def activate_model(
         ACTIVE_MODEL_NAME,
     )
 
-    # Update is_active flags in DB
-    db.query(TrainingJob).update({"is_active": False})
-    run.is_active = True
+    db.query(TrainingJob).filter(TrainingJob.is_active.is_(True)).update(
+        {"is_active": False}
+    )
+    db.query(UploadedModel).filter(UploadedModel.is_active.is_(True)).update(
+        {"is_active": False}
+    )
+    if run:
+        run.is_active = True
+    else:
+        upload.is_active = True
     db.commit()
 
     return {
@@ -258,15 +435,24 @@ def get_active_model_evaluation(
     *last* worker run, so it would be wrong after activating an older model.
     """
     run = db.query(TrainingJob).filter(TrainingJob.is_active.is_(True)).first()
-    if not run:
+    if run:
+        if run.evaluation_report:
+            return run.evaluation_report
         raise HTTPException(
             status_code=404,
-            detail="No active model. Activate a completed training run first.",
+            detail="No evaluation report stored for the active model.",
         )
-    if run.evaluation_report:
-        return run.evaluation_report
+
+    upload = db.query(UploadedModel).filter(UploadedModel.is_active.is_(True)).first()
+    if upload:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "The active model was uploaded manually; no evaluation report is available."
+            ),
+        )
 
     raise HTTPException(
         status_code=404,
-        detail="No evaluation report stored for the active model.",
+        detail="No active model. Activate a training run or uploaded model first.",
     )

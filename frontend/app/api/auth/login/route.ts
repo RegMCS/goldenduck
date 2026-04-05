@@ -29,6 +29,7 @@ export async function POST(request: NextRequest) {
                   username: data.user.username,
                   first_name: data.user.first_name ?? null,
                   last_name: data.user.last_name ?? null,
+                  is_admin: Boolean(data.user.is_admin),
               }
             : null
 
