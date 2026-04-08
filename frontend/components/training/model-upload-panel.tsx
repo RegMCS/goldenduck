@@ -4,8 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import {
   Loader2,
   Upload,
-  Zap,
-  Star,
   RefreshCw,
   FileText,
   X,
@@ -14,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { type UploadedModelRow, type UploadedModelsListResponse } from "@/lib/types"
+import { fetchTrainingGet } from "@/lib/training-fetch"
 import { useToast } from "@/components/ui/use-toast"
 
 function formatBytes(n: number | null) {
@@ -31,24 +30,23 @@ function formatDate(iso: string) {
 }
 
 interface Props {
-  refreshKey: number
-  onActiveModelChanged?: () => void
+  /** `unified`: no card title / section labels — for Active model tab alongside runs. */
+  variant?: "default" | "unified"
 }
 
-export function ModelUploadPanel({ refreshKey, onActiveModelChanged }: Props) {
+export function ModelUploadPanel({ variant = "default" }: Props) {
   const { toast } = useToast()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploads, setUploads] = useState<UploadedModelRow[]>([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
-  const [activatingId, setActivatingId] = useState<string | null>(null)
   const [file, setFile] = useState<File | null>(null)
   const [fileError, setFileError] = useState<string | null>(null)
 
   const fetchUploads = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch("/api/training/uploads")
+      const res = await fetchTrainingGet("/api/training/uploads")
       if (!res.ok) throw new Error(`Server returned ${res.status}`)
       const data: UploadedModelsListResponse = await res.json()
       setUploads(data.uploads ?? [])
@@ -65,7 +63,7 @@ export function ModelUploadPanel({ refreshKey, onActiveModelChanged }: Props) {
 
   useEffect(() => {
     fetchUploads()
-  }, [fetchUploads, refreshKey])
+  }, [fetchUploads])
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     setFileError(null)
@@ -128,43 +126,24 @@ export function ModelUploadPanel({ refreshKey, onActiveModelChanged }: Props) {
     }
   }
 
-  async function handleActivate(row: UploadedModelRow) {
-    if (activatingId) return
-    setActivatingId(row.id)
-    try {
-      const res = await fetch(`/api/training/models/${encodeURIComponent(row.model_name)}/activate`, {
-        method: "POST",
-      })
-      if (!res.ok) throw new Error("Failed to activate")
-      toast({ title: "Active model updated", description: row.model_name })
-      await fetchUploads()
-      onActiveModelChanged?.()
-    } catch {
-      toast({
-        title: "Error",
-        description: "Could not activate this model.",
-        variant: "destructive",
-      })
-    } finally {
-      setActivatingId(null)
-    }
-  }
+  const uploadIntro =
+    variant === "unified" ? (
+      <p className="text-sm text-muted-foreground">
+        <span className="font-mono text-xs">.pkl</span> files use the same S3 naming as trained artifacts (
+        <span className="font-mono text-xs">rf_delta_YYYYMMDD_HHMMSS.pkl</span>).
+      </p>
+    ) : (
+      <p className="text-sm text-muted-foreground">
+        Stored in S3 as{" "}
+        <span className="font-mono text-xs">rf_delta_YYYYMMDD_HHMMSS.pkl</span> (same naming as trained
+        models). Use the <span className="font-medium text-foreground">Active model</span> tab to set which
+        file is live.
+      </p>
+    )
 
-  return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base font-semibold text-foreground">
-            Upload model file
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              Stored in S3 as{" "}
-              <span className="font-mono text-xs">rf_delta_YYYYMMDD_HHMMSS.pkl</span> (same as trained
-              models). Activate from the table below when ready.
-            </p>
+  const uploadBody = (
+    <div className="space-y-3">
+      {uploadIntro}
 
             {file ? (
               <div className="flex items-center justify-between rounded-lg border border-border bg-secondary/50 px-4 py-3">
@@ -220,22 +199,38 @@ export function ModelUploadPanel({ refreshKey, onActiveModelChanged }: Props) {
                 onClick={handleUploadToS3}
               >
                 {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                {uploading ? "Uploading…" : "Upload to S3"}
+                {uploading ? "Uploading…" : "Upload"}
               </Button>
             )}
-          </div>
-        </CardContent>
-      </Card>
+    </div>
+  )
 
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-foreground">
-          Uploaded models
-          {!loading && (
-            <span className="ml-2 text-muted-foreground font-normal">
-              ({uploads.length} total)
-            </span>
-          )}
-        </h3>
+  return (
+    <div className="space-y-6">
+      {variant === "unified" ? (
+        <div className="rounded-2xl border border-border bg-card shadow-sm p-5">{uploadBody}</div>
+      ) : (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base font-semibold text-foreground">Upload model file</CardTitle>
+          </CardHeader>
+          <CardContent>{uploadBody}</CardContent>
+        </Card>
+      )}
+
+      <div
+        className={
+          variant === "unified" ? "flex justify-end" : "flex items-center justify-between"
+        }
+      >
+        {variant !== "unified" && (
+          <h3 className="text-sm font-semibold text-foreground">
+            Uploaded models
+            {!loading && (
+              <span className="ml-2 text-muted-foreground font-normal">({uploads.length} total)</span>
+            )}
+          </h3>
+        )}
         <Button
           type="button"
           variant="outline"
@@ -266,7 +261,6 @@ export function ModelUploadPanel({ refreshKey, onActiveModelChanged }: Props) {
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">Model name</th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">Size</th>
                   <th className="px-4 py-3 text-left font-medium text-muted-foreground">Uploaded</th>
-                  <th className="px-4 py-3 text-left font-medium text-muted-foreground w-[140px]">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -278,30 +272,6 @@ export function ModelUploadPanel({ refreshKey, onActiveModelChanged }: Props) {
                     </td>
                     <td className="px-4 py-3 text-muted-foreground whitespace-nowrap text-xs">
                       {formatDate(row.created_at)}
-                    </td>
-                    <td className="px-4 py-3">
-                      {row.is_active ? (
-                        <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600 dark:text-amber-400">
-                          <Star className="h-3 w-3 fill-amber-500" />
-                          Active
-                        </span>
-                      ) : (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 gap-1 px-2 text-xs text-primary"
-                          onClick={() => handleActivate(row)}
-                          disabled={activatingId === row.id}
-                        >
-                          {activatingId === row.id ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : (
-                            <Zap className="h-3 w-3" />
-                          )}
-                          Activate
-                        </Button>
-                      )}
                     </td>
                   </tr>
                 ))}

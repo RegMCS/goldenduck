@@ -4,18 +4,18 @@ from sqlalchemy.orm import Session
 from pathlib import Path
 from typing import Optional
 
-from job_scheduler.db.session import get_db
-from job_scheduler.models.user import User
-from job_scheduler.models.ai_model_job import AIModelJob
+from goldenduck_core.db.session import get_db
+from goldenduck_core.models.user import User
+from goldenduck_core.models.ai_model_job import AIModelJob
 from fastapi.responses import FileResponse, RedirectResponse
 import boto3
 import os
 
-from job_scheduler.services.job_service import create_job
-from job_scheduler.models.enums import JobStatus
-from job_scheduler.services.job_store import job_store
-from job_scheduler.services.auth_service import get_current_user
-from job_scheduler.schemas.jobs import (
+from goldenduck_core.services.job_service import create_job
+from goldenduck_core.models.enums import JobStatus
+from goldenduck_core.services.job_store import job_store
+from goldenduck_core.services.auth_service import get_current_user
+from goldenduck_core.schemas.jobs import (
     GenerateRequest,
     GenerateResponse,
     JobHistoryItem,

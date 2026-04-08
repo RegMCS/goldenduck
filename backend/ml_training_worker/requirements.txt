@@ -1,6 +1,6 @@
 # Combined dependencies for ML Training Worker
 
-# Base dependencies from job_scheduler (for DB, Redis, APIs, etc)
+# Base dependencies from goldenduck_core (for DB, Redis, APIs, etc)
 fastapi
 uvicorn
 sqlalchemy

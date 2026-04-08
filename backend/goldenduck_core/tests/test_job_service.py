@@ -1,7 +1,7 @@
 from unittest.mock import Mock
 
-from job_scheduler.models.enums import JobStatus, JobType
-from job_scheduler.services.job_service import create_job, update_job_status
+from goldenduck_core.models.enums import JobStatus, JobType
+from goldenduck_core.services.job_service import create_job, update_job_status
 
 
 def test_create_job_persists_and_returns_job():

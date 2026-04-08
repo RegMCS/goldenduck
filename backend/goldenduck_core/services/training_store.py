@@ -11,7 +11,7 @@ Keys used:
 """
 
 from typing import Optional
-from job_scheduler.redis_client import redis_client
+from goldenduck_core.redis_client import redis_client
 
 _PREFIX = "training"
 

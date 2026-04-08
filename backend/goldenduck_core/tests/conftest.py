@@ -6,11 +6,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from job_scheduler.db.base import Base
-from job_scheduler.db.session import SessionLocal, engine, get_db
-from job_scheduler.main import app
-from job_scheduler.models.user import User
-from job_scheduler.services.auth_service import get_current_user, get_password_hash
+from goldenduck_core.db.base import Base
+from goldenduck_core.db.session import SessionLocal, engine, get_db
+from goldenduck_core.main import app
+from goldenduck_core.models.user import User
+from goldenduck_core.services.auth_service import get_current_user, get_password_hash
 
 
 @pytest.fixture(scope="session", autouse=True)

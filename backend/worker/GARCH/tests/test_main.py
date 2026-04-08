@@ -4,9 +4,9 @@ import tempfile
 import os
 import uuid
 import pytest
-from job_scheduler.db.session import get_db
-from job_scheduler.main import app
-from job_scheduler.services.auth_service import get_current_user
+from goldenduck_core.db.session import get_db
+from goldenduck_core.main import app
+from goldenduck_core.services.auth_service import get_current_user
 
 client = TestClient(app)
 
@@ -38,7 +38,7 @@ def override_auth():
 # Global mock: replace Redis-backed job_store everywhere in routes
 @pytest.fixture(autouse=True)
 def mock_job_store():
-    with patch("job_scheduler.routes.jobs.job_store") as store:
+    with patch("goldenduck_core.routes.jobs.job_store") as store:
         store.create_job.return_value = None
         store.enqueue.return_value = None
 
@@ -149,7 +149,7 @@ def test_status_api_nonexistent_job(mock_job_store):
 def test_download_api_s3_redirect(mock_job_store):
     mock_job_store.get_output_file.return_value = "s3://my-bucket/garch/test-job.csv"
 
-    with patch("job_scheduler.routes.jobs.boto3.client") as mock_boto:
+    with patch("goldenduck_core.routes.jobs.boto3.client") as mock_boto:
         mock_s3 = MagicMock()
         mock_boto.return_value = mock_s3
         mock_s3.generate_presigned_url.return_value = "https://fake-s3-url.com/file.csv"

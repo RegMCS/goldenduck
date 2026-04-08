@@ -2,7 +2,7 @@ from sqlalchemy import Column, Text, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
 
-from job_scheduler.db.base import Base
+from goldenduck_core.db.base import Base
 
 
 class User(Base):

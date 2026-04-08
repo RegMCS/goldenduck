@@ -1,6 +1,6 @@
 import json
 
-from job_scheduler.services import job_store as job_store_module
+from goldenduck_core.services import job_store as job_store_module
 
 
 def test_create_and_enqueue_job(monkeypatch):

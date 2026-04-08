@@ -4,7 +4,7 @@ from sqlalchemy import Column, Text, Boolean, BigInteger, ForeignKey, DateTime
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 
-from job_scheduler.db.base import Base
+from goldenduck_core.db.base import Base
 
 
 class UploadedModel(Base):

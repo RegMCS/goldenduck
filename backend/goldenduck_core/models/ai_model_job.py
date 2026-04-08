@@ -3,8 +3,8 @@ from sqlalchemy import Column, DateTime, Text, ForeignKey, Enum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 
-from job_scheduler.db.base import Base
-from job_scheduler.models.enums import JobStatus, JobType
+from goldenduck_core.db.base import Base
+from goldenduck_core.models.enums import JobStatus, JobType
 
 
 class AIModelJob(Base):

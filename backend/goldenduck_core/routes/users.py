@@ -3,10 +3,10 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from job_scheduler.db.session import get_db
-from job_scheduler.models.user import User
-from job_scheduler.schemas.auth import UserListResponse, UserResponse, UserAdminUpdate
-from job_scheduler.services.auth_service import require_admin
+from goldenduck_core.db.session import get_db
+from goldenduck_core.models.user import User
+from goldenduck_core.schemas.auth import UserListResponse, UserResponse, UserAdminUpdate
+from goldenduck_core.services.auth_service import require_admin
 
 logger = logging.getLogger(__name__)
 

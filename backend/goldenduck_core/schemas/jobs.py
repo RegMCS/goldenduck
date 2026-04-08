@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field, model_validator
 from typing import Optional, Dict, Any, List
 from datetime import datetime
-from job_scheduler.models.enums import JobStatus, JobType
+from goldenduck_core.models.enums import JobStatus, JobType
 
 
 class GenerateRequest(BaseModel):
