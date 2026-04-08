@@ -1,6 +1,7 @@
 # Combined dependencies for ML Training Worker
 
 # Base dependencies from goldenduck_core (for DB, Redis, APIs, etc)
+ddtrace
 fastapi
 uvicorn
 sqlalchemy

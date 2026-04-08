@@ -1,0 +1,34 @@
+# Creates a git tag for each PR merged into the default integration branch (e.g. pr-123).
+# Uses merge_commit_sha so the tag points at the merge commit on the base branch.
+
+name: Tag merged PR
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - dev
+
+jobs:
+  tag:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout merge commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 1
+
+      - name: Create and push tag
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          TAG="pr-${PR_NUMBER}"
+          git tag -a "$TAG" -m "Merged PR #${PR_NUMBER}: ${PR_TITLE}"
+          git push origin "refs/tags/${TAG}"
