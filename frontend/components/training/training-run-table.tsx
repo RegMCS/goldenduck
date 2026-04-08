@@ -8,7 +8,6 @@ import {
   Loader2,
   Clock,
   Calendar,
-  Zap,
   ChevronDown,
   ChevronUp,
   BarChart3,
@@ -16,6 +15,7 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { type TrainingRun, type TrainingStatus, type EvaluationReport } from "@/lib/types"
+import { fetchTrainingGet } from "@/lib/training-fetch"
 
 function formatDate(iso: string) {
   return new Intl.DateTimeFormat("en-SG", {
@@ -123,22 +123,19 @@ function SkeletonRow() {
 
 interface Props {
   refreshTrigger: number
-  /** Called after a different model is activated (so evaluation tab can refetch). */
-  onActiveModelChanged?: () => void
 }
 
-export function TrainingRunTable({ refreshTrigger, onActiveModelChanged }: Props) {
+export function TrainingRunTable({ refreshTrigger }: Props) {
   const [runs, setRuns] = useState<TrainingRun[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [expandedRow, setExpandedRow] = useState<string | null>(null)
-  const [activatingId, setActivatingId] = useState<string | null>(null)
 
   const fetchRuns = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch("/api/training/runs")
+      const res = await fetchTrainingGet("/api/training/runs")
       if (!res.ok) throw new Error(`Server returned ${res.status}`)
       const data = await res.json()
       setRuns(data.runs ?? [])
@@ -153,27 +150,12 @@ export function TrainingRunTable({ refreshTrigger, onActiveModelChanged }: Props
     fetchRuns()
   }, [fetchRuns, refreshTrigger])
 
-  async function handleActivate(run: TrainingRun) {
-    if (!run.model_name) return
-    setActivatingId(run.id)
-    try {
-      const res = await fetch(`/api/training/models/${run.model_name}/activate`, {
-        method: "POST",
-      })
-      if (!res.ok) throw new Error("Failed to activate model")
-      await fetchRuns()
-      onActiveModelChanged?.()
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to activate")
-    } finally {
-      setActivatingId(null)
-    }
-  }
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">{runs.length} training run{runs.length !== 1 ? "s" : ""} total</p>
+        <p className="text-sm text-muted-foreground">
+          {runs.length} training run{runs.length !== 1 ? "s" : ""} total
+        </p>
         <Button
           variant="outline"
           size="sm"
@@ -221,7 +203,7 @@ export function TrainingRunTable({ refreshTrigger, onActiveModelChanged }: Props
                       </div>
                       <h3 className="text-sm font-semibold text-foreground">No training runs yet</h3>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Go to "Trigger Training" to start your first run.
+                        Go to &quot;Train Model&quot; to start your first run.
                       </p>
                     </div>
                   </td>
@@ -288,33 +270,6 @@ export function TrainingRunTable({ refreshTrigger, onActiveModelChanged }: Props
                         {/* Actions */}
                         <td className="px-4 py-3.5">
                           <div className="flex items-center gap-1">
-                            {run.status === "completed" && (
-                              <>
-                                {!run.is_active && run.model_name && (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-7 px-2 text-xs gap-1 text-primary"
-                                    onClick={() => handleActivate(run)}
-                                    disabled={activatingId === run.id}
-                                    id={`activate-btn-${run.id}`}
-                                  >
-                                    {activatingId === run.id ? (
-                                      <Loader2 className="h-3 w-3 animate-spin" />
-                                    ) : (
-                                      <Zap className="h-3 w-3" />
-                                    )}
-                                    Activate
-                                  </Button>
-                                )}
-                                {run.is_active && (
-                                  <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600 dark:text-amber-400 px-2">
-                                    <Star className="h-3 w-3 fill-amber-500" />
-                                    Active
-                                  </span>
-                                )}
-                              </>
-                            )}
                             {run.evaluation_report && (
                               <Button
                                 variant="ghost"

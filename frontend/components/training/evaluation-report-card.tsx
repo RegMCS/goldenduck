@@ -14,6 +14,7 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { type EvaluationReport, type DirectMetrics, type BaselineComparison } from "@/lib/types"
+import { fetchTrainingGet } from "@/lib/training-fetch"
 
 // ── Metric helpers ────────────────────────────────────────────────────────────
 
@@ -260,11 +261,9 @@ function PassFailChecklist({ checks, overall }: { checks: Record<string, boolean
 interface Props {
   /** If provided, display this specific report (for the active model). */
   report?: EvaluationReport | null
-  /** Increment when the active model may have changed (e.g. tab focus, activate). */
-  refreshKey?: number
 }
 
-export function EvaluationReportCard({ report: propReport, refreshKey = 0 }: Props) {
+export function EvaluationReportCard({ report: propReport }: Props) {
   const [report, setReport] = useState<EvaluationReport | null>(propReport ?? null)
   const [loading, setLoading] = useState(!propReport)
   const [error, setError] = useState<string | null>(null)
@@ -273,7 +272,7 @@ export function EvaluationReportCard({ report: propReport, refreshKey = 0 }: Pro
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch("/api/training/active-model/evaluation")
+      const res = await fetchTrainingGet("/api/training/active-model/evaluation")
       if (!res.ok) {
         let msg = `Server returned ${res.status}`
         try {
@@ -297,7 +296,7 @@ export function EvaluationReportCard({ report: propReport, refreshKey = 0 }: Pro
     if (!propReport) {
       fetchActiveReport()
     }
-  }, [propReport, fetchActiveReport, refreshKey])
+  }, [propReport, fetchActiveReport])
 
   if (loading) {
     return (
