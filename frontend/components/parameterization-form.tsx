@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useRef } from "react"
+import React, { useState, useRef, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Upload, X, FileText, Sparkles, RotateCcw, Download, AlertCircle, CheckCircle2, Loader2, TriangleAlert, ChevronUp, ChevronDown } from "lucide-react"
 import { Input } from "@/components/ui/input"
@@ -178,8 +178,139 @@ export function ParameterizationForm() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Removing tradeoff warnings (uncomment if needed subsequently)
-  // const activeWarnings = TRADEOFF_RULES.filter((r) => r.condition(parameters)).map((r) => r.message)
+  // Auto-load AAPL_real.csv on component mount
+  useEffect(() => {
+    const loadDefaultFile = async () => {
+      try {
+        // Call the Next.js proxy endpoint (which proxies to backend)
+        const response = await fetch("/api/default-csv")
+        
+        if (!response.ok) {
+          throw new Error(`Failed to fetch default CSV: ${response.statusText}`)
+        }
+        
+        const contentType = response.headers.get("content-type")
+        
+        let blob: Blob
+        
+        // Check if response is JSON (S3 presigned URL) or direct CSV content
+        if (contentType?.includes("application/json")) {
+          const data = await response.json()
+          if (!data.url) throw new Error("Invalid response: no URL provided")
+          
+          // Fetch the CSV from the presigned URL
+          const csvResponse = await fetch(data.url)
+          if (!csvResponse.ok) throw new Error("Failed to download CSV from S3")
+          blob = await csvResponse.blob()
+        } else {
+          // Direct CSV content (development)
+          blob = await response.blob()
+        }
+        
+        const file = new File([blob], "AAPL_real.csv", { type: "text/csv" })
+        
+        // Validate CSV structure inline
+        const validation = await new Promise<{ validHeaders: boolean; rowCount: number }>((resolve) => {
+          const reader = new FileReader()
+          reader.onload = (e) => {
+            const text = e.target?.result as string
+            const lines = text
+              .split(/\r?\n/)
+              .map((l) => l.trim())
+              .filter((l) => l.length > 0)
+            const firstLine = (lines[0] ?? "").toLowerCase().trim()
+            const headers = firstLine.split(",").map((h) => h.trim())
+            const hasAllHeaders = REQUIRED_CSV_HEADERS.every((required) =>
+              headers.includes(required)
+            )
+            const rowCount = Math.max(lines.length - 1, 0)
+            resolve({ validHeaders: hasAllHeaders, rowCount })
+          }
+          reader.onerror = () => resolve({ validHeaders: false, rowCount: 0 })
+          reader.readAsText(file)
+        })
+        
+        if (validation.validHeaders && validation.rowCount >= MIN_CSV_ROWS) {
+          setParameters((prev) => ({ ...prev, inputFile: file }))
+          setFileError(null)
+        } else {
+          setFileError(`Invalid CSV structure (headers valid: ${validation.validHeaders}, rows: ${validation.rowCount})`)
+        }
+      } catch (error) {
+        // Silently fail if default file is not available - user can still upload manually
+      }
+    }
+
+    loadDefaultFile()
+  }, [])
+
+  const activeWarnings = TRADEOFF_RULES.filter((r) => r.condition(parameters)).map((r) => r.message)
+  // Auto-load AAPL_real.csv on component mount
+  useEffect(() => {
+    const loadDefaultFile = async () => {
+      try {
+        // Call the Next.js proxy endpoint (which proxies to backend)
+        const response = await fetch("/api/default-csv")
+        
+        if (!response.ok) {
+          throw new Error(`Failed to fetch default CSV: ${response.statusText}`)
+        }
+        
+        const contentType = response.headers.get("content-type")
+        
+        let blob: Blob
+        
+        // Check if response is JSON (S3 presigned URL) or direct CSV content
+        if (contentType?.includes("application/json")) {
+          const data = await response.json()
+          if (!data.url) throw new Error("Invalid response: no URL provided")
+          
+          // Fetch the CSV from the presigned URL
+          const csvResponse = await fetch(data.url)
+          if (!csvResponse.ok) throw new Error("Failed to download CSV from S3")
+          blob = await csvResponse.blob()
+        } else {
+          // Direct CSV content (development)
+          blob = await response.blob()
+        }
+        
+        const file = new File([blob], "AAPL_real.csv", { type: "text/csv" })
+        
+        // Validate CSV structure inline
+        const validation = await new Promise<{ validHeaders: boolean; rowCount: number }>((resolve) => {
+          const reader = new FileReader()
+          reader.onload = (e) => {
+            const text = e.target?.result as string
+            const lines = text
+              .split(/\r?\n/)
+              .map((l) => l.trim())
+              .filter((l) => l.length > 0)
+            const firstLine = (lines[0] ?? "").toLowerCase().trim()
+            const headers = firstLine.split(",").map((h) => h.trim())
+            const hasAllHeaders = REQUIRED_CSV_HEADERS.every((required) =>
+              headers.includes(required)
+            )
+            const rowCount = Math.max(lines.length - 1, 0)
+            resolve({ validHeaders: hasAllHeaders, rowCount })
+          }
+          reader.onerror = () => resolve({ validHeaders: false, rowCount: 0 })
+          reader.readAsText(file)
+        })
+        
+        if (validation.validHeaders && validation.rowCount >= MIN_CSV_ROWS) {
+          setParameters((prev) => ({ ...prev, inputFile: file }))
+          setFileError(null)
+        } else {
+          setFileError(`Invalid CSV structure (headers valid: ${validation.validHeaders}, rows: ${validation.rowCount})`)
+        }
+      } catch (error) {
+        // Silently fail if default file is not available - user can still upload manually
+      }
+    }
+
+    loadDefaultFile()
+  }, [])
+
 
   const updateParameter = <K extends keyof MarketParameters>(
     key: K,

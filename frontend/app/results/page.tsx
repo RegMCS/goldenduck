@@ -21,7 +21,16 @@ function FidelityCard({ score, csvSimilarity }: { score: number; csvSimilarity?:
   return (
     <div className="h-full rounded-xl border border-border bg-card px-5 py-4">
       <div className="flex h-full flex-col justify-center gap-1">
-        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Fidelity</p>
+        <div className="flex items-center gap-1">
+          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Fidelity</p>
+          <InfoTooltip
+            content={[
+              "What these scores mean",
+              "Intent fidelity: Did we match your intent?",
+              "CSV similarity: How close is the result to your input overall?",
+            ]}
+          />
+        </div>
         <div className="flex items-center gap-3 py-1">
           <div className="relative h-16 w-16 shrink-0">
             <svg viewBox="0 0 64 64" className="h-16 w-16 -rotate-90">
