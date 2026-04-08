@@ -1,6 +1,6 @@
 import importlib
 
-import job_scheduler.redis_client as redis_client_module
+import goldenduck_core.redis_client as redis_client_module
 
 
 def test_redis_client_uses_default_port_on_invalid_env(monkeypatch):

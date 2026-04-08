@@ -15,5 +15,5 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 # Copy application source needed at runtime
 COPY ml_training_worker/ /app/ml_training_worker/
 COPY ml_training/ /app/ml_training/
-COPY job_scheduler/ /app/job_scheduler/
+COPY goldenduck_core/ /app/goldenduck_core/
 CMD ["python", "-m", "ml_training_worker.training_worker"]

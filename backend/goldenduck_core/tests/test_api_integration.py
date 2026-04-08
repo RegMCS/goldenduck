@@ -8,15 +8,15 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from job_scheduler.db.base import Base
-from job_scheduler.db.session import SessionLocal, engine
-from job_scheduler.main import app
-from job_scheduler.models.ai_model_job import AIModelJob
-from job_scheduler.models.user import User
-from job_scheduler.redis_client import redis_client
-from job_scheduler.services.auth_service import get_current_user
-from job_scheduler.services.job_store import job_store
-from job_scheduler.services.auth_service import get_password_hash
+from goldenduck_core.db.base import Base
+from goldenduck_core.db.session import SessionLocal, engine
+from goldenduck_core.main import app
+from goldenduck_core.models.ai_model_job import AIModelJob
+from goldenduck_core.models.user import User
+from goldenduck_core.redis_client import redis_client
+from goldenduck_core.services.auth_service import get_current_user
+from goldenduck_core.services.job_store import job_store
+from goldenduck_core.services.auth_service import get_password_hash
 
 TEST_USER_ID = uuid.uuid4()
 client = TestClient(app)
@@ -45,7 +45,7 @@ def clean_state():
 @pytest.fixture(autouse=True)
 def auth_user(clean_state):
     """Create a test user and override get_current_user so API calls are authenticated."""
-    from job_scheduler.db.session import get_db
+    from goldenduck_core.db.session import get_db
 
     with SessionLocal() as db:
         user = User(
@@ -127,7 +127,7 @@ def test_status_completed_and_download_redirect_flow():
     assert status_body["metrics"]["ks_statistic"] == 0.05
     assert status_body["download_url"] == f"/api/download/user/{user_id}/{job_id}"
 
-    with patch("job_scheduler.routes.jobs.boto3.client") as mock_boto:
+    with patch("goldenduck_core.routes.jobs.boto3.client") as mock_boto:
         mock_s3 = MagicMock()
         mock_boto.return_value = mock_s3
         mock_s3.generate_presigned_url.return_value = "https://example.com/file.csv"

@@ -27,12 +27,12 @@ from fastapi import APIRouter, Depends, HTTPException, Body, File, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from job_scheduler.db.session import get_db
-from job_scheduler.models.training_job import TrainingJob
-from job_scheduler.models.uploaded_model import UploadedModel
-from job_scheduler.models.user import User
-from job_scheduler.services.auth_service import require_admin
-from job_scheduler.services.training_store import training_store
+from goldenduck_core.db.session import get_db
+from goldenduck_core.models.training_job import TrainingJob
+from goldenduck_core.models.uploaded_model import UploadedModel
+from goldenduck_core.models.user import User
+from goldenduck_core.services.auth_service import require_admin
+from goldenduck_core.services.training_store import training_store
 
 logger = logging.getLogger(__name__)
 

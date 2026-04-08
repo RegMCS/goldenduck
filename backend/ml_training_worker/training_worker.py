@@ -24,10 +24,10 @@ import importlib.util
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-from job_scheduler.redis_client import redis_client
-from job_scheduler.db.session import SessionLocal
-from job_scheduler.models.training_job import TrainingJob
-from job_scheduler.services.training_store import training_store
+from goldenduck_core.redis_client import redis_client
+from goldenduck_core.db.session import SessionLocal
+from goldenduck_core.models.training_job import TrainingJob
+from goldenduck_core.services.training_store import training_store
 
 logging.basicConfig(
     level=logging.INFO,

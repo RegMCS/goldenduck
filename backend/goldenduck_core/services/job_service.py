@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
-from job_scheduler.models.ai_model_job import AIModelJob
-from job_scheduler.models.enums import JobStatus, JobType
+from goldenduck_core.models.ai_model_job import AIModelJob
+from goldenduck_core.models.enums import JobStatus, JobType
 
 
 def create_job(db: Session, user_id: str, job_type: JobType) -> AIModelJob:

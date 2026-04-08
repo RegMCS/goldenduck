@@ -2,10 +2,10 @@ from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from job_scheduler.db.session import get_db
-from job_scheduler.models.user import User
-from job_scheduler.schemas.auth import UserCreate, UserResponse, Token, TokenWithUser
-from job_scheduler.services.auth_service import (
+from goldenduck_core.db.session import get_db
+from goldenduck_core.models.user import User
+from goldenduck_core.schemas.auth import UserCreate, UserResponse, Token, TokenWithUser
+from goldenduck_core.services.auth_service import (
     get_password_hash,
     verify_password,
     create_access_token,

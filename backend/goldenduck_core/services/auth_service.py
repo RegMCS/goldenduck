@@ -8,8 +8,8 @@ import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
-from job_scheduler.db.session import get_db
-from job_scheduler.models.user import User
+from goldenduck_core.db.session import get_db
+from goldenduck_core.models.user import User
 
 
 SECRET_KEY = (os.environ.get("JWT_SECRET_KEY") or "").strip()

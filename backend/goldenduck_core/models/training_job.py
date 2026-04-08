@@ -4,7 +4,7 @@ from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy import DateTime
 from sqlalchemy.sql import func
 
-from job_scheduler.db.base import Base
+from goldenduck_core.db.base import Base
 
 
 class TrainingJob(Base):

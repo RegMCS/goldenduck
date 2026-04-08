@@ -1,8 +1,8 @@
 from fastapi import FastAPI
-from job_scheduler.routes import jobs, health, auth, training, users
+from goldenduck_core.routes import jobs, health, auth, training, users
 
 app = FastAPI(
-    title="Job Scheduler",
+    title="goldenduck-core",
     version="1.0.0",
 )
 
