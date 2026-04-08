@@ -47,6 +47,18 @@ def get_password_hash(password: str) -> str:
     return bcrypt.hashpw(_password_digest(password), bcrypt.gensalt()).decode("utf-8")
 
 
+def _set_datadog_user_trace_tags(user: User) -> None:
+    """Attach Datadog user tags to the active trace (APM / Security / UX analytics)."""
+    try:
+        from ddtrace import tracer
+    except ImportError:
+        return
+    span = tracer.current_root_span() or tracer.current_span()
+    if span is None:
+        return
+    span.set_tag("usr.id", str(user.id))
+
+
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=15))
@@ -72,6 +84,7 @@ def get_current_user(
             db.add(user)
             db.commit()
             db.refresh(user)
+        _set_datadog_user_trace_tags(user)
         return user
 
     if not token:
@@ -101,6 +114,7 @@ def get_current_user(
             detail="Session invalid. Please log in again.",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    _set_datadog_user_trace_tags(user)
     return user
 
 
