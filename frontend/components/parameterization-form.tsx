@@ -28,12 +28,17 @@ const TWEAKABLE_KNOBS = [
   { key: "fatTails", label: "Fat Tails" },
   { key: "momentum", label: "Momentum" },
 ] as const
+type TweakedKnobKey = (typeof TWEAKABLE_KNOBS)[number]["key"]
+type KnobBaseline = Pick<MarketParameters, TweakedKnobKey>
 
 type JobStatus = "queued" | "running" | "completed" | "failed"
 
-export function getTweakedKnobLabels(parameters: MarketParameters): string[] {
+export function getTweakedKnobLabels(
+  parameters: MarketParameters,
+  baseline: KnobBaseline = defaultParameters
+): string[] {
   return TWEAKABLE_KNOBS.filter(
-    ({ key }) => parameters[key] !== defaultParameters[key]
+    ({ key }) => parameters[key] !== baseline[key]
   ).map(({ label }) => label)
 }
 
@@ -182,6 +187,7 @@ export function ParameterizationForm() {
   const router = useRouter()
   const { user, logout } = useAuth()
   const [parameters, setParameters] = useState<MarketParameters>(defaultParameters)
+  const [knobBaseline, setKnobBaseline] = useState<KnobBaseline>(defaultParameters)
   const [isGenerating, setIsGenerating] = useState(false)
   const [fileError, setFileError] = useState<string | null>(null)
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null)
@@ -257,7 +263,7 @@ export function ParameterizationForm() {
   }, [])
 
   const activeWarnings = TRADEOFF_RULES.filter((r) => r.condition(parameters)).map((r) => r.message)
-  const tweakedKnobs = getTweakedKnobLabels(parameters)
+  const tweakedKnobs = getTweakedKnobLabels(parameters, knobBaseline)
   const knobLimitError =
     tweakedKnobs.length > 1
       ? `You can only change one knob at a time. Reset these to default first: ${tweakedKnobs.join(", ")}.`
@@ -338,22 +344,32 @@ export function ParameterizationForm() {
   }
 
   const applyBullRunPreset = () => {
-    setParameters((prev) => ({
-      ...prev,
+    const presetKnobs: KnobBaseline = {
       volatility: 0.5,
       trend: 1.0,
       fatTails: 0.6,
       momentum: 0.85,
+    }
+    setGenerateError(null)
+    setKnobBaseline(presetKnobs)
+    setParameters((prev) => ({
+      ...prev,
+      ...presetKnobs,
     }))
   }
 
   const applyFlashCrashPreset = () => {
-    setParameters((prev) => ({
-      ...prev,
+    const presetKnobs: KnobBaseline = {
       volatility: 1.5,
       trend: -0.2,
       fatTails: 2.0,
       momentum: 0.5,
+    }
+    setGenerateError(null)
+    setKnobBaseline(presetKnobs)
+    setParameters((prev) => ({
+      ...prev,
+      ...presetKnobs,
     }))
   }
 
@@ -512,6 +528,7 @@ export function ParameterizationForm() {
 
   const handleReset = () => {
     setParameters(defaultParameters)
+    setKnobBaseline(defaultParameters)
     setFileError(null)
     setJobStatus(null)
     setDownloadUrl(null)

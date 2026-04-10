@@ -30,6 +30,26 @@ const mockFileReader = {
 
 global.FileReader = vi.fn(() => mockFileReader) as any
 
+function mockAuthenticatedUser() {
+  vi.mocked(global.fetch).mockImplementation((input) => {
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof Request
+          ? input.url
+          : String(input)
+
+    if (url.includes("/api/auth/me")) {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ id: "user-1", username: "tester" }),
+      } as Response)
+    }
+
+    return Promise.resolve({ ok: false, json: async () => ({}) } as Response)
+  })
+}
+
 describe("ParameterizationForm", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -141,23 +161,7 @@ describe("ParameterizationForm", () => {
 
   it("shows an error and disables generate when more than one knob is changed", async () => {
     const user = userEvent.setup()
-    vi.mocked(global.fetch).mockImplementation((input) => {
-      const url =
-        typeof input === "string"
-          ? input
-          : input instanceof Request
-            ? input.url
-            : String(input)
-
-      if (url.includes("/api/auth/me")) {
-        return Promise.resolve({
-          ok: true,
-          json: async () => ({ id: "user-1", username: "tester" }),
-        } as Response)
-      }
-
-      return Promise.resolve({ ok: false, json: async () => ({}) } as Response)
-    })
+    mockAuthenticatedUser()
 
     renderWithAuth(<ParameterizationForm />)
     const generateButton = await screen.findByRole("button", { name: /generate data/i })
@@ -176,6 +180,21 @@ describe("ParameterizationForm", () => {
       await screen.findByText(/you can only change one knob at a time/i)
     ).toBeInTheDocument()
     expect(generateButton).toBeDisabled()
+  })
+
+  it("allows preset selections without triggering the one-knob error", async () => {
+    const user = userEvent.setup()
+    mockAuthenticatedUser()
+
+    renderWithAuth(<ParameterizationForm />)
+    const generateButton = await screen.findByRole("button", { name: /generate data/i })
+
+    await user.click(screen.getByRole("button", { name: /bull run preset/i }))
+
+    expect(
+      screen.queryByText(/you can only change one knob at a time/i)
+    ).not.toBeInTheDocument()
+    expect(generateButton).toBeEnabled()
   })
 
   it("counts only the market knobs that differ from defaults", () => {
