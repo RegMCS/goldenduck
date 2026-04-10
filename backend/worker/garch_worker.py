@@ -1017,6 +1017,7 @@ def _select_best_display_scenario(
     best_idx = 0
     best_score = float("inf")
     best_obj_val = 0.0
+    best_breakdown: list[dict] = []
 
     # Objective metadata for frontend display.
     if vol_only:
@@ -1035,6 +1036,8 @@ def _select_best_display_scenario(
         objective_name = "baseline_composite_match"
         objective_target = 0.0
 
+    trend_direction_target = float(target_mean) if trend_only else float(hist_mean)
+
     for i, scenario in enumerate(scenarios):
         r = _get_log_returns_from_scenario(scenario)
         r = r[np.isfinite(r)]
@@ -1047,6 +1050,10 @@ def _select_best_display_scenario(
         s_kurt = _safe_excess_kurtosis(r)
 
         if not all(np.isfinite(v) for v in [s_mean, s_std, s_hurst, s_kurt]):
+            continue
+
+        # Hard disqualifier: reject scenarios whose trend sign flips relative to the active trend target.
+        if (trend_direction_target > 0.0 and s_mean < 0.0) or (trend_direction_target < 0.0 and s_mean > 0.0):
             continue
 
         # Preservation terms (stay close to input CSV stats).
@@ -1069,6 +1076,40 @@ def _select_best_display_scenario(
                 + 0.25 * d_fat_preserve
             )
             obj_val = float(score)
+            scenario_breakdown = [
+                {
+                    "key": "vol_preserve",
+                    "label": "Volatility Match",
+                    "weight": 0.25,
+                    "score": float(d_vol_preserve),
+                    "target": float(hist_std),
+                    "actual": float(s_std),
+                },
+                {
+                    "key": "trend_preserve",
+                    "label": "Trend Match",
+                    "weight": 0.25,
+                    "score": float(d_trend_preserve),
+                    "target": float(hist_mean),
+                    "actual": float(s_mean),
+                },
+                {
+                    "key": "momentum_preserve",
+                    "label": "Momentum Match",
+                    "weight": 0.25,
+                    "score": float(d_momentum_preserve),
+                    "target": float(hist_hurst),
+                    "actual": float(s_hurst),
+                },
+                {
+                    "key": "fat_preserve",
+                    "label": "Fat Tails Match",
+                    "weight": 0.25,
+                    "score": float(d_fat_preserve),
+                    "target": float(hist_kurt),
+                    "actual": float(s_kurt),
+                },
+            ]
         elif vol_only:
             score = (
                 0.55 * d_vol_target
@@ -1077,6 +1118,40 @@ def _select_best_display_scenario(
                 + 0.15 * d_fat_preserve
             )
             obj_val = float(s_std)
+            scenario_breakdown = [
+                {
+                    "key": "vol_target",
+                    "label": "Volatility Target",
+                    "weight": 0.55,
+                    "score": float(d_vol_target),
+                    "target": float(target_std),
+                    "actual": float(s_std),
+                },
+                {
+                    "key": "trend_preserve",
+                    "label": "Trend Match",
+                    "weight": 0.15,
+                    "score": float(d_trend_preserve),
+                    "target": float(hist_mean),
+                    "actual": float(s_mean),
+                },
+                {
+                    "key": "momentum_preserve",
+                    "label": "Momentum Match",
+                    "weight": 0.15,
+                    "score": float(d_momentum_preserve),
+                    "target": float(hist_hurst),
+                    "actual": float(s_hurst),
+                },
+                {
+                    "key": "fat_preserve",
+                    "label": "Fat Tails Match",
+                    "weight": 0.15,
+                    "score": float(d_fat_preserve),
+                    "target": float(hist_kurt),
+                    "actual": float(s_kurt),
+                },
+            ]
         elif trend_only:
             score = (
                 0.55 * d_trend_target
@@ -1085,6 +1160,40 @@ def _select_best_display_scenario(
                 + 0.15 * d_fat_preserve
             )
             obj_val = float(s_mean)
+            scenario_breakdown = [
+                {
+                    "key": "trend_target",
+                    "label": "Trend Target",
+                    "weight": 0.55,
+                    "score": float(d_trend_target),
+                    "target": float(target_mean),
+                    "actual": float(s_mean),
+                },
+                {
+                    "key": "vol_preserve",
+                    "label": "Volatility Match",
+                    "weight": 0.15,
+                    "score": float(d_vol_preserve),
+                    "target": float(hist_std),
+                    "actual": float(s_std),
+                },
+                {
+                    "key": "momentum_preserve",
+                    "label": "Momentum Match",
+                    "weight": 0.15,
+                    "score": float(d_momentum_preserve),
+                    "target": float(hist_hurst),
+                    "actual": float(s_hurst),
+                },
+                {
+                    "key": "fat_preserve",
+                    "label": "Fat Tails Match",
+                    "weight": 0.15,
+                    "score": float(d_fat_preserve),
+                    "target": float(hist_kurt),
+                    "actual": float(s_kurt),
+                },
+            ]
         elif momentum_only:
             score = (
                 0.55 * d_momentum_target
@@ -1093,6 +1202,40 @@ def _select_best_display_scenario(
                 + 0.15 * d_fat_preserve
             )
             obj_val = float(s_hurst)
+            scenario_breakdown = [
+                {
+                    "key": "momentum_target",
+                    "label": "Momentum Target",
+                    "weight": 0.55,
+                    "score": float(d_momentum_target),
+                    "target": float(target_momentum),
+                    "actual": float(s_hurst),
+                },
+                {
+                    "key": "vol_preserve",
+                    "label": "Volatility Match",
+                    "weight": 0.15,
+                    "score": float(d_vol_preserve),
+                    "target": float(hist_std),
+                    "actual": float(s_std),
+                },
+                {
+                    "key": "trend_preserve",
+                    "label": "Trend Match",
+                    "weight": 0.15,
+                    "score": float(d_trend_preserve),
+                    "target": float(hist_mean),
+                    "actual": float(s_mean),
+                },
+                {
+                    "key": "fat_preserve",
+                    "label": "Fat Tails Match",
+                    "weight": 0.15,
+                    "score": float(d_fat_preserve),
+                    "target": float(hist_kurt),
+                    "actual": float(s_kurt),
+                },
+            ]
         else:  # fat_only
             score = (
                 0.55 * d_fat_target
@@ -1101,18 +1244,53 @@ def _select_best_display_scenario(
                 + 0.15 * d_momentum_preserve
             )
             obj_val = float(s_kurt)
+            scenario_breakdown = [
+                {
+                    "key": "fat_target",
+                    "label": "Fat Tails Target",
+                    "weight": 0.55,
+                    "score": float(d_fat_target),
+                    "target": float(target_kurt),
+                    "actual": float(s_kurt),
+                },
+                {
+                    "key": "vol_preserve",
+                    "label": "Volatility Match",
+                    "weight": 0.15,
+                    "score": float(d_vol_preserve),
+                    "target": float(hist_std),
+                    "actual": float(s_std),
+                },
+                {
+                    "key": "trend_preserve",
+                    "label": "Trend Match",
+                    "weight": 0.15,
+                    "score": float(d_trend_preserve),
+                    "target": float(hist_mean),
+                    "actual": float(s_mean),
+                },
+                {
+                    "key": "momentum_preserve",
+                    "label": "Momentum Match",
+                    "weight": 0.15,
+                    "score": float(d_momentum_preserve),
+                    "target": float(hist_hurst),
+                    "actual": float(s_hurst),
+                },
+            ]
 
         if score < best_score:
             best_score = float(score)
             best_idx = i
             best_obj_val = float(obj_val)
+            best_breakdown = scenario_breakdown
 
     if not np.isfinite(best_score):
         return 0, objective_name, float(objective_target), 0.0, 0.0, {"total": 0.0, "criteria": []}
 
     return best_idx, objective_name, float(objective_target), float(best_obj_val), float(best_score), {
         "total": float(best_score),
-        "criteria": [],
+        "criteria": best_breakdown,
     }
 
     return 0, "fallback", 0.0, 0.0, 0.0

@@ -300,10 +300,6 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
       ? data.selectionScore.toFixed(3)
       : baselineCompositeDistance
   const selectionBreakdown = data.selectionBreakdown?.criteria ?? []
-  const selectionBreakdownTotal =
-    typeof data.selectionBreakdown?.total === "number" && Number.isFinite(data.selectionBreakdown.total)
-      ? data.selectionBreakdown.total.toFixed(3)
-      : null
   const isWeightedObjective =
     data.selectionObjective === "baseline_composite_match" ||
     data.selectionObjective === "volatility_std" ||
@@ -311,6 +307,14 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
     data.selectionObjective === "momentum_hurst" ||
     data.selectionObjective === "fat_tails_extreme_events" ||
     data.selectionObjective === "fat_tails_kurtosis"
+  const selectionBreakdownTotalValue =
+    typeof data.selectionBreakdown?.total === "number" && Number.isFinite(data.selectionBreakdown.total)
+      ? data.selectionBreakdown.total
+      : null
+  const selectionBreakdownTotal =
+    selectionBreakdownTotalValue !== null
+      ? (isWeightedObjective ? 1 - selectionBreakdownTotalValue : selectionBreakdownTotalValue).toFixed(3)
+      : null
   const showVolatilityTab = data.desiredVolatility !== 1.0
   const showFatTailsDistributionTab =
     data.selectionObjective === "fat_tails_kurtosis" ||
@@ -389,21 +393,24 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
         <section className="rounded-xl border border-border bg-card p-5">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-base font-semibold text-foreground">Flash Crash Breakdown</h3>
+              <h3 className="text-base font-semibold text-foreground">Selection Breakdown</h3>
               <p className="text-xs text-muted-foreground">
-                Criterion-level scores for the selected path. Lower failure here usually means the phase schedule needs tuning.
+                Criterion-level scores for the selected path under {objectiveLabel.toLowerCase()}.
               </p>
             </div>
             {selectionBreakdownTotal !== null && (
               <div className="rounded-lg border border-border/70 bg-secondary/30 px-3 py-2 text-right">
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Total</p>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                  {isWeightedObjective ? "Fit" : "Total"}
+                </p>
                 <p className="font-mono text-sm font-semibold text-foreground">{selectionBreakdownTotal}</p>
               </div>
             )}
           </div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {selectionBreakdown.map((item) => {
-              const width = Math.max(0, Math.min(1, item.score)) * 100
+              const displayScore = isWeightedObjective ? 1 - item.score : item.score
+              const width = Math.max(0, Math.min(1, displayScore)) * 100
               return (
                 <div key={item.key} className="rounded-lg border border-border/70 bg-background p-4 space-y-2">
                   <div className="flex items-start justify-between gap-3">
@@ -412,7 +419,7 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
                       <p className="text-[11px] text-muted-foreground">Weight {item.weight.toFixed(2)}</p>
                     </div>
                     <p className="font-mono text-sm font-semibold text-foreground whitespace-nowrap">
-                      {item.score.toFixed(3)}
+                      {displayScore.toFixed(3)}
                     </p>
                   </div>
                   <div className="h-2 rounded-full bg-border/50 overflow-hidden">
