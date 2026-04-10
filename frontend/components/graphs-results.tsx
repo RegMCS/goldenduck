@@ -10,6 +10,7 @@ import { VolatilityFanChart } from "@/components/charts/volatility-fan-chart"
 import { DistributionOverlayChart } from "@/components/charts/distribution-overlay-chart"
 import { StatsPanel } from "@/components/charts/stats-panel"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { InfoTooltip } from "@/components/info-tooltip"
 
 interface VisualizationResultsProps {
   data: GeneratedData
@@ -115,50 +116,6 @@ function hurstMomentum(values: number[]): number {
   return Math.max(0, Math.min(1, hurst))
 }
 
-function FidelityGauge({ score }: { score: number }) {
-  const r = 28
-  const circ = 2 * Math.PI * r
-  const offset = circ * (1 - score / 100)
-  const color = score >= 75 ? "#22c55e" : score >= 50 ? "#f59e0b" : "#ef4444"
-  const label = score >= 75 ? "Excellent match" : score >= 50 ? "Moderate match" : "Low match"
-
-  return (
-    <div className="flex items-center gap-3 py-1">
-      <div className="relative h-16 w-16 shrink-0">
-        <svg viewBox="0 0 64 64" className="h-16 w-16 -rotate-90">
-          <circle cx="32" cy="32" r={r} fill="none" stroke="var(--border)" strokeWidth="6" />
-          <circle
-            cx="32"
-            cy="32"
-            r={r}
-            fill="none"
-            stroke={color}
-            strokeWidth="6"
-            strokeDasharray={circ}
-            strokeDashoffset={offset}
-            strokeLinecap="round"
-            style={{ transition: "stroke-dashoffset 1.2s ease-out" }}
-          />
-        </svg>
-        <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-sm font-bold tabular-nums leading-none" style={{ color }}>
-            {score}
-          </span>
-          <span className="text-[8px] text-muted-foreground uppercase tracking-wider mt-0.5">
-            score
-          </span>
-        </div>
-      </div>
-      <div>
-        <p className="text-sm font-semibold text-foreground">Fidelity</p>
-        <p className="text-[11px] font-medium" style={{ color }}>
-          {label}
-        </p>
-        <p className="text-[10px] text-muted-foreground">vs. desired</p>
-      </div>
-    </div>
-  )
-}
 
 function DualMetricCard({
   label,
@@ -261,22 +218,6 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
     data.selectionObjective,
   ])
 
-  const fidelityScore = useMemo(() => {
-    if (data.overallMatch !== undefined) {
-      return Math.round(data.overallMatch * 100)
-    }
-    // Fallback: compute locally from historical vs synthetic stats
-    const safe = (a: number, b: number) =>
-      1 - Math.min(1, Math.abs((a - b) / Math.max(Math.abs(b), 0.01)))
-    return Math.round(
-      ((safe(s.annualizedVol, h.annualizedVol) +
-        safe(s.kurtosis, h.kurtosis) +
-        safe(s.skewness, h.skewness) +
-        safe(s.sharpe, h.sharpe)) /
-        4) *
-        100
-    )
-  }, [data.overallMatch, h, s])
 
   const pct = (v: number) => `${(v * 100).toFixed(2)}%`
   const num = (v: number) => v.toFixed(3)
@@ -377,50 +318,22 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
       {/* Row: Path info + all metric cards */}
       <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
         <div className="rounded-xl border border-border bg-card p-4 space-y-3 min-w-0">
-          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest truncate">
-            Display Path
-          </p>
+          <div className="flex items-center gap-1">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-widest truncate">
+              Display Path
+            </p>
+            <InfoTooltip content={[
+              `Selection mode: ${objectiveLabel}`,
+              ...(extremeEventsValue !== null ? [`Extreme events: ${extremeEventsValue}${extremeEventsTarget !== null ? ` (target ${extremeEventsTarget})` : ""}`] : []),
+              ...(fatKurtosisValue !== null ? [`Excess kurtosis: ${fatKurtosisValue}${fatKurtosisTarget !== null ? ` (target ${fatKurtosisTarget})` : ""}`] : []),
+              ...(volatilityRatioValue !== null ? [`Roughness ratio: ${volatilityRatioValue}${volatilityRatioTarget !== null ? ` (target ${volatilityRatioTarget})` : ""}`] : []),
+              ...(volatilityStdValue !== null ? [`Annualised vol: ${volatilityStdValue}${volatilityStdTarget !== null ? ` (target ${volatilityStdTarget})` : ""}`] : []),
+              ...(presetCompositeScore !== null ? [`Composite score: ${presetCompositeScore}`] : []),
+              ...(isWeightedObjective && weightedSelectionScore !== null ? [`Weighted score: ${weightedSelectionScore} — lower means a closer match to your inputs`] : []),
+            ]} />
+          </div>
           <p className="text-sm font-mono font-bold tabular-nums text-foreground">{selectedPathLabel}</p>
-          <p className="text-[10px] text-muted-foreground truncate">{objectiveLabel}{extremeEventsValue !== null ? ` · ${extremeEventsValue}${extremeEventsTarget !== null ? ` / ${extremeEventsTarget}` : ""}` : ""}</p>
-          {extremeEventsValue !== null && (
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              Extreme events: <span className="font-semibold text-foreground">{extremeEventsValue}</span>
-              {extremeEventsTarget !== null ? ` (target ${extremeEventsTarget})` : ""}
-            </p>
-          )}
-          {fatKurtosisValue !== null && (
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              Excess kurtosis: <span className="font-semibold text-foreground">{fatKurtosisValue}</span>
-              {fatKurtosisTarget !== null ? ` (target ${fatKurtosisTarget})` : ""}
-            </p>
-          )}
-          {volatilityRatioValue !== null && (
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              Roughness ratio: <span className="font-semibold text-foreground">{volatilityRatioValue}</span>
-              {volatilityRatioTarget !== null ? ` (target ${volatilityRatioTarget})` : ""}
-            </p>
-          )}
-          {volatilityStdValue !== null && (
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              Annualised vol: <span className="font-semibold text-foreground">{volatilityStdValue}</span>
-              {volatilityStdTarget !== null ? ` (target ${volatilityStdTarget})` : ""}
-            </p>
-          )}
-          {presetCompositeScore !== null && (
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              Composite score: <span className="font-semibold text-foreground">{presetCompositeScore}</span>
-            </p>
-          )}
-          {baselineCompositeDistance !== null && (
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              Composite distance: <span className="font-semibold text-foreground">{baselineCompositeDistance}</span>
-            </p>
-          )}
-          {isWeightedObjective && weightedSelectionScore !== null && (
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              Weighted score: <span className="font-semibold text-foreground">{weightedSelectionScore}</span> (lower is better)
-            </p>
-          )}
+          <p className="text-[10px] text-muted-foreground truncate">{objectiveLabel}</p>
         </div>
         <DualMetricCard
           label="Ann. Return"

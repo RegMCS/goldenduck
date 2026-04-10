@@ -10,8 +10,30 @@ import { InfoTooltip } from "@/components/info-tooltip"
 import { type GeneratedData, type JobParameters } from "@/lib/types"
 import { useAuth } from "@/components/auth-provider"
 
+function CountUpValue({ target, decimals = 2, suffix = "", duration = 1600 }: {
+  target: number
+  decimals?: number
+  suffix?: string
+  duration?: number
+}) {
+  const [display, setDisplay] = useState(0)
+
+  useEffect(() => {
+    const start = performance.now()
+    const tick = (now: number) => {
+      const progress = Math.min((now - start) / duration, 1)
+      const eased = 1 - Math.pow(1 - progress, 3)
+      setDisplay(target * eased)
+      if (progress < 1) requestAnimationFrame(tick)
+    }
+    requestAnimationFrame(tick)
+  }, [target, duration])
+
+  return <>{display.toFixed(decimals)}{suffix}</>
+}
+
 function FidelityCard({ score, csvSimilarity }: { score: number; csvSimilarity?: number }) {
-  const r = 28
+  const r = 22
   const circ = 2 * Math.PI * r
   const safeScore = Math.max(0, Math.min(100, Math.round(score)))
   const offset = circ * (1 - safeScore / 100)
@@ -19,54 +41,32 @@ function FidelityCard({ score, csvSimilarity }: { score: number; csvSimilarity?:
   const label = safeScore >= 75 ? "Excellent match" : safeScore >= 50 ? "Moderate match" : "Low match"
 
   return (
-    <div className="h-full rounded-xl border border-border bg-card px-5 py-4">
-      <div className="flex h-full flex-col justify-center gap-1">
-        <div className="flex items-center gap-1">
-          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Fidelity</p>
-          <InfoTooltip
-            content={[
-              "What these scores mean",
-              "Intent fidelity: Did we match your intent?",
-              "CSV similarity: How close is the result to your input overall?",
-            ]}
-          />
+    <div className="flex flex-col justify-between pl-8 border-l border-border">
+      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Fidelity</p>
+      <div className="flex items-center gap-3 mt-2">
+        <div className="relative h-12 w-12 shrink-0">
+          <svg viewBox="0 0 64 64" className="h-12 w-12 -rotate-90">
+            <circle cx="32" cy="32" r={r} fill="none" stroke="var(--border)" strokeWidth="5" />
+            <circle
+              cx="32"
+              cy="32"
+              r={r}
+              fill="none"
+              stroke={color}
+              strokeWidth="5"
+              strokeDasharray={circ}
+              strokeDashoffset={offset}
+              strokeLinecap="round"
+              style={{ transition: "stroke-dashoffset 1.2s ease-out" }}
+            />
+          </svg>
         </div>
-        <div className="flex items-center gap-3 py-1">
-          <div className="relative h-16 w-16 shrink-0">
-            <svg viewBox="0 0 64 64" className="h-16 w-16 -rotate-90">
-              <circle cx="32" cy="32" r={r} fill="none" stroke="var(--border)" strokeWidth="6" />
-              <circle
-                cx="32"
-                cy="32"
-                r={r}
-                fill="none"
-                stroke={color}
-                strokeWidth="6"
-                strokeDasharray={circ}
-                strokeDashoffset={offset}
-                strokeLinecap="round"
-                style={{ transition: "stroke-dashoffset 1.2s ease-out" }}
-              />
-            </svg>
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-sm font-bold tabular-nums leading-none" style={{ color }}>
-                {safeScore}
-              </span>
-              <span className="text-[8px] text-muted-foreground uppercase tracking-wider mt-0.5">
-                score
-              </span>
-            </div>
-          </div>
-          <div>
-            <p className="text-sm font-semibold text-foreground">Fidelity</p>
-            <p className="text-[11px] font-medium" style={{ color }}>
-              {label}
-            </p>
-            <p className="text-[10px] text-muted-foreground">vs. desired</p>
-            {typeof csvSimilarity === "number" && Number.isFinite(csvSimilarity) && (
-              <p className="text-[10px] text-muted-foreground">CSV sim: {Math.round(csvSimilarity)}%</p>
-            )}
-          </div>
+        <div>
+          <p className="text-2xl font-light text-foreground tabular-nums leading-none">{safeScore}</p>
+          <p className="text-[11px] font-medium mt-1" style={{ color }}>{label}</p>
+          {typeof csvSimilarity === "number" && Number.isFinite(csvSimilarity) && (
+            <p className="text-[10px] text-muted-foreground mt-0.5">CSV sim: {Math.round(csvSimilarity)}%</p>
+          )}
         </div>
       </div>
     </div>
@@ -165,28 +165,36 @@ function ResultsContent() {
         {!loading && !error && data && (
           <>
             {jobParams && (
-              <div className="mb-6 grid gap-4 lg:grid-cols-[1fr_240px] lg:items-stretch">
-                <div className="rounded-xl border border-border bg-card px-5 py-4">
-                  <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-foreground">Input Parameters</h3>
-                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-                    {[
-                      { label: "Volatility", value: jobParams.volatility.toFixed(2), range: "Range: 0.5 – 2.0" },
-                      { label: "Trend", value: jobParams.trend.toFixed(2), range: "Range: −1.0 – 1.0" },
-                      { label: "Fat Tails", value: jobParams.fatTails.toFixed(2), range: "Range: 0.5 – 2.0" },
-                      { label: "Momentum", value: jobParams.momentum.toFixed(2), range: "Range: 0.0 – 1.0" },
-                      { label: "Time Horizon", value: `${jobParams.timeHorizon}d`, range: "Range: 500 – 2600 days" },
-                      { label: "File", value: jobParams.fileName ?? "—", range: "" },
-                    ].map((item) => (
-                      <div key={item.label}>
-                        <div className="mb-0.5 flex items-center gap-1">
-                          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">{item.label}</p>
-                          {item.range && <InfoTooltip content={item.range} />}
+              <div className="mb-6 px-1 py-5 flex items-center gap-10">
+                {/* Input Parameters */}
+                <div className="shrink-0">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3">
+                    Input Parameters
+                  </p>
+                  <div className="flex divide-x divide-border">
+                    {([
+                      { label: "Volatility", target: jobParams.volatility, decimals: 2, suffix: "", range: "Range: 0.5 – 2.0" },
+                      { label: "Trend", target: jobParams.trend, decimals: 2, suffix: "", range: "Range: −1.0 – 1.0" },
+                      { label: "Fat Tails", target: jobParams.fatTails, decimals: 2, suffix: "", range: "Range: 0.5 – 2.0" },
+                      { label: "Momentum", target: jobParams.momentum, decimals: 2, suffix: "", range: "Range: 0.0 – 1.0" },
+                      { label: "Time Horizon", target: jobParams.timeHorizon, decimals: 0, suffix: "d", range: "Range: 500 – 2600 days" },
+                    ] as const).map((item) => (
+                      <div key={item.label} className="px-5 first:pl-0">
+                        <div className="mb-1 flex items-center gap-1">
+                          <p className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground whitespace-nowrap">
+                            {item.label}
+                          </p>
+                          <InfoTooltip content={item.range} />
                         </div>
-                        <p className="truncate font-mono text-sm font-medium text-foreground" title={item.value}>
-                          {item.value}
+                        <p className="text-xl font-light text-foreground whitespace-nowrap tabular-nums">
+                          <CountUpValue target={item.target} decimals={item.decimals} suffix={item.suffix} />
                         </p>
                       </div>
                     ))}
+                    <div className="px-5">
+                      <p className="mb-1 text-[10px] font-medium uppercase tracking-widest text-muted-foreground whitespace-nowrap">File</p>
+                      <p className="text-xl font-light text-foreground whitespace-nowrap">{jobParams.fileName ?? "—"}</p>
+                    </div>
                   </div>
                 </div>
 
