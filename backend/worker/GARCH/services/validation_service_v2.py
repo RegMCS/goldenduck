@@ -18,7 +18,7 @@ class ValidationServiceV2:
 
     Compares original OHLCV vs synthetic OHLCV using:
     - Volatility: std dev of percent returns
-    - Fat tails: kurtosis + Q95-Q5 tail spread (50/50)
+    - Fat tails: kurtosis only
     - Momentum: lag-1 autocorrelation of percent returns
     - Trend: MA(20) slope avg, MA(20) uptrend ratio, start-end return
 
@@ -30,7 +30,6 @@ class ValidationServiceV2:
         *,
         volatility_tol_rel: float = 0.05,
         fat_tail_tol_rel: float = 0.10,
-        tail_spread_tol_rel: float = 0.10,
         momentum_tol_abs: float = 0.05,
         trend_start_end_tol_abs: float = 0.01,
         trend_ma_slope_tol_pct: float = 0.01,
@@ -38,7 +37,6 @@ class ValidationServiceV2:
     ) -> None:
         self.volatility_tol_rel = float(volatility_tol_rel)
         self.fat_tail_tol_rel = float(fat_tail_tol_rel)
-        self.tail_spread_tol_rel = float(tail_spread_tol_rel)
         self.momentum_tol_abs = float(momentum_tol_abs)
         self.trend_start_end_tol_abs = float(trend_start_end_tol_abs)
         self.trend_ma_slope_tol_pct = float(trend_ma_slope_tol_pct)
@@ -81,23 +79,14 @@ class ValidationServiceV2:
         # =========================
         kurt_orig = self._to_scalar(stats.kurtosis(orig_returns))
         kurt_synth = self._to_scalar(stats.kurtosis(synth_returns))
-        kurt_target = kurt_orig * fat_tails_knob
+        # Requested mapping:
+        # target_kurt = hist_kurt * (1 + 0.15 * (fat_tails - 1))
+        kurt_target = kurt_orig * (1.0 + 0.15 * (fat_tails_knob - 1.0))
         kurt_match = self._match_relative(
             kurt_target, kurt_synth, self.fat_tail_tol_rel
         )
 
-        q95_orig = self._to_scalar(np.percentile(orig_returns, 95))
-        q5_orig = self._to_scalar(np.percentile(orig_returns, 5))
-        q95_synth = self._to_scalar(np.percentile(synth_returns, 95))
-        q5_synth = self._to_scalar(np.percentile(synth_returns, 5))
-        tail_spread_orig = q95_orig - q5_orig
-        tail_spread_synth = q95_synth - q5_synth
-        tail_spread_target = tail_spread_orig * fat_tails_knob
-        tail_spread_match = self._match_relative(
-            tail_spread_target, tail_spread_synth, self.tail_spread_tol_rel
-        )
-
-        fat_tail_match = 0.5 * kurt_match + 0.5 * tail_spread_match
+        fat_tail_match = kurt_match
 
         # =========================
         # Momentum (ACF lag-1)
@@ -171,13 +160,6 @@ class ValidationServiceV2:
                     "synthetic": kurt_synth,
                     "tolerance_rel": self.fat_tail_tol_rel,
                     "match_pct": kurt_match * 100.0,
-                },
-                "tail_spread_q95_q5": {
-                    "original": tail_spread_orig,
-                    "target": tail_spread_target,
-                    "synthetic": tail_spread_synth,
-                    "tolerance_rel": self.tail_spread_tol_rel,
-                    "match_pct": tail_spread_match * 100.0,
                 },
                 "match_pct": fat_tail_match * 100.0,
             },
