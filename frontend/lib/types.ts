@@ -96,10 +96,25 @@ export interface GeneratedData {
   selectionTarget?: number
   selectionValue?: number
   selectionScore?: number
+  selectionBreakdown?: SelectionBreakdown
   intentFidelity?: number
   csvSimilarity?: number
   desiredVolatility?: number
   volatilityFan?: VolatilityFanPoint[]
+}
+
+export interface SelectionCriterionBreakdown {
+  key: string
+  label: string
+  weight: number
+  score: number
+  target?: number
+  actual?: number
+}
+
+export interface SelectionBreakdown {
+  total: number
+  criteria: SelectionCriterionBreakdown[]
 }
 
 export interface VolatilityFanPoint {

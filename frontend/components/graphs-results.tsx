@@ -244,6 +244,8 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
             ? "Volatility target (path roughness)"
           : data.selectionObjective === "bull_run_composite"
             ? "Bull Run preset (composite score)"
+            : data.selectionObjective === "flash_crash_evaluation"
+              ? "Flash Crash preset (evaluation score)"
             : data.selectionObjective === "flash_crash_composite"
               ? "Flash Crash preset (composite score)"
           : "Default fallback"
@@ -281,6 +283,7 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
       : null
   const presetCompositeScore =
     (data.selectionObjective === "bull_run_composite" ||
+      data.selectionObjective === "flash_crash_evaluation" ||
       data.selectionObjective === "flash_crash_composite") &&
     typeof data.selectionValue === "number" &&
     Number.isFinite(data.selectionValue)
@@ -296,6 +299,11 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
     typeof data.selectionScore === "number" && Number.isFinite(data.selectionScore)
       ? data.selectionScore.toFixed(3)
       : baselineCompositeDistance
+  const selectionBreakdown = data.selectionBreakdown?.criteria ?? []
+  const selectionBreakdownTotal =
+    typeof data.selectionBreakdown?.total === "number" && Number.isFinite(data.selectionBreakdown.total)
+      ? data.selectionBreakdown.total.toFixed(3)
+      : null
   const isWeightedObjective =
     data.selectionObjective === "baseline_composite_match" ||
     data.selectionObjective === "volatility_std" ||
@@ -376,6 +384,56 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
           delta={`${((s.totalReturn - h.totalReturn) * 100).toFixed(2)}pp`}
         />
       </div>
+
+      {selectionBreakdown.length > 0 && (
+        <section className="rounded-xl border border-border bg-card p-5">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-base font-semibold text-foreground">Flash Crash Breakdown</h3>
+              <p className="text-xs text-muted-foreground">
+                Criterion-level scores for the selected path. Lower failure here usually means the phase schedule needs tuning.
+              </p>
+            </div>
+            {selectionBreakdownTotal !== null && (
+              <div className="rounded-lg border border-border/70 bg-secondary/30 px-3 py-2 text-right">
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Total</p>
+                <p className="font-mono text-sm font-semibold text-foreground">{selectionBreakdownTotal}</p>
+              </div>
+            )}
+          </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {selectionBreakdown.map((item) => {
+              const width = Math.max(0, Math.min(1, item.score)) * 100
+              return (
+                <div key={item.key} className="rounded-lg border border-border/70 bg-background p-4 space-y-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground">{item.label}</p>
+                      <p className="text-[11px] text-muted-foreground">Weight {item.weight.toFixed(2)}</p>
+                    </div>
+                    <p className="font-mono text-sm font-semibold text-foreground whitespace-nowrap">
+                      {item.score.toFixed(3)}
+                    </p>
+                  </div>
+                  <div className="h-2 rounded-full bg-border/50 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-amber-500 transition-[width] duration-300"
+                      style={{ width: `${width}%` }}
+                    />
+                  </div>
+                  {(typeof item.actual === "number" || typeof item.target === "number") && (
+                    <p className="text-[11px] text-muted-foreground font-mono leading-5">
+                      {typeof item.actual === "number" ? `actual ${item.actual.toFixed(3)}` : ""}
+                      {typeof item.actual === "number" && typeof item.target === "number" ? " · " : ""}
+                      {typeof item.target === "number" ? `target ${item.target.toFixed(3)}` : ""}
+                    </p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
 
       {/* Candlestick comparison */}
       <section className="rounded-xl border border-border bg-card p-5">

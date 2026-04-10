@@ -5,6 +5,42 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+FLASH_CRASH_TRIGGER_SCALE = 0.008
+FLASH_CRASH_TRIGGER_MIN_STEPS = 5
+FLASH_CRASH_TRIGGER_MAX_STEPS = 20
+
+
+# Flash-crash schedules use mixed phase sizing:
+# - fractions (<= 1.0) are portions of the horizon
+# - integers (> 1.0) are fixed step counts
+# This keeps the trigger as a true flash event regardless of horizon length.
+FLASH_CRASH_DELTA_PHASES = [
+    (0.55, 1.0),  # Calm
+    (5, 3.5),     # Trigger (resolved dynamically at runtime)
+    (0.15, 2.5),  # Stress
+    (0.15, 1.5),  # Recovery
+    (0.10, 1.1),  # Tail
+]
+
+# Absolute theta values by phase.
+FLASH_CRASH_THETA_PHASES = [
+    (0.55, 1e-5),  # Calm
+    (5, 5e-4),     # Trigger (resolved dynamically at runtime)
+    (0.15, 3e-4),  # Stress
+    (0.15, 8e-5),  # Recovery
+    (0.10, 1e-5),  # Tail
+]
+
+# Absolute daily drift values by phase.
+FLASH_CRASH_DRIFT_PHASES = [
+    (0.55, 0.0002),   # Calm
+    (5, -0.0015),     # Trigger (resolved dynamically at runtime)
+    (0.15, -0.0008),  # Stress
+    (0.15, 0.0008),   # Recovery
+    (0.10, 0.0002),   # Tail
+]
+
+
 SCENARIOS = {
     "sudden_crisis": {
         "description": "Sudden crisis at day 200, lasting 300 days, then recovery",
@@ -29,14 +65,8 @@ SCENARIOS = {
         + [1.5] * max(0, horizon - 700),
     },
     "flash_crash": {
-        "description": "Brief extreme spike with quick recovery",
-        # Phases expressed as (fraction_of_horizon, delta_value)
-        "phases": [
-            (0.60, 1.0),  # 60% calm buildup
-            (0.10, 3.5),  # 10% extreme crash spike
-            (0.20, 1.8),  # 20% elevated-vol recovery
-            (0.10, 1.1),  # 10% return to near-normal
-        ],
+        "description": "Brief extreme spike with quick recovery (delta scheduler)",
+        "phases": FLASH_CRASH_DELTA_PHASES,
         # Preset knobs aligned to flash-crash behavior.
         "knobs": {
             "desired_trend": -0.2,
@@ -48,15 +78,20 @@ SCENARIOS = {
 }
 
 
-def _build_phase_sequence(phases: list[tuple[float, float]], horizon: int) -> list[float]:
+def _build_phase_sequence(phases: list[tuple[float | int, float]], horizon: int) -> list[float]:
     sequence: list[float] = []
     remaining = int(horizon)
 
-    for idx, (fraction, value) in enumerate(phases):
+    for idx, (portion_or_steps, value) in enumerate(phases):
         if idx == len(phases) - 1:
             count = remaining
         else:
-            count = int(round(horizon * float(fraction)))
+            amount = float(portion_or_steps)
+            # Fractions are interpreted as horizon portions; values > 1 are fixed steps.
+            if amount <= 1.0:
+                count = int(round(horizon * amount))
+            else:
+                count = int(round(amount))
             count = max(0, min(count, remaining))
         sequence.extend([float(value)] * count)
         remaining -= count
@@ -67,6 +102,28 @@ def _build_phase_sequence(phases: list[tuple[float, float]], horizon: int) -> li
         sequence = sequence[:horizon]
 
     return sequence
+
+
+def _get_flash_crash_trigger_steps(horizon: int) -> int:
+    """Scale trigger length with horizon while keeping it within [5, 20]."""
+    return int(
+        np.clip(
+            float(horizon) * FLASH_CRASH_TRIGGER_SCALE,
+            FLASH_CRASH_TRIGGER_MIN_STEPS,
+            FLASH_CRASH_TRIGGER_MAX_STEPS,
+        )
+    )
+
+
+def _resolve_flash_crash_trigger_steps(
+    phases: list[tuple[float | int, float]], horizon: int
+) -> list[tuple[float | int, float]]:
+    """Return phases with trigger step count replaced by horizon-aware value."""
+    resolved = list(phases)
+    if len(resolved) >= 2:
+        trigger_steps = _get_flash_crash_trigger_steps(horizon)
+        resolved[1] = (trigger_steps, resolved[1][1])
+    return resolved
 
 
 def generate_scenario(scenario_type: str, horizon: int) -> Tuple[np.ndarray, str]:
@@ -90,7 +147,10 @@ def generate_scenario(scenario_type: str, horizon: int) -> Tuple[np.ndarray, str
 
     scenario = SCENARIOS[scenario_type]
     if "phases" in scenario:
-        sequence = _build_phase_sequence(scenario["phases"], horizon)
+        phases = scenario["phases"]
+        if scenario_type == "flash_crash":
+            phases = _resolve_flash_crash_trigger_steps(phases, horizon)
+        sequence = _build_phase_sequence(phases, horizon)
     else:
         sequence = scenario["sequence"](horizon)
 
@@ -103,6 +163,24 @@ def generate_scenario(scenario_type: str, horizon: int) -> Tuple[np.ndarray, str
     logger.info(f"Generated scenario: {scenario_type} - {scenario['description']}")
 
     return np.array(sequence), scenario["description"]
+
+
+def get_flash_crash_delta_schedule(horizon: int) -> np.ndarray:
+    """Return the flash-crash delta schedule."""
+    phases = _resolve_flash_crash_trigger_steps(FLASH_CRASH_DELTA_PHASES, horizon)
+    return np.array(_build_phase_sequence(phases, horizon), dtype=float)
+
+
+def get_flash_crash_theta_schedule(horizon: int) -> np.ndarray:
+    """Return the flash-crash absolute theta schedule."""
+    phases = _resolve_flash_crash_trigger_steps(FLASH_CRASH_THETA_PHASES, horizon)
+    return np.array(_build_phase_sequence(phases, horizon), dtype=float)
+
+
+def get_flash_crash_drift_schedule(horizon: int) -> np.ndarray:
+    """Return the flash-crash absolute daily drift schedule."""
+    phases = _resolve_flash_crash_trigger_steps(FLASH_CRASH_DRIFT_PHASES, horizon)
+    return np.array(_build_phase_sequence(phases, horizon), dtype=float)
 
 
 def list_scenarios():

@@ -16,7 +16,12 @@ from goldenduck_core.redis_client import redis_client
 from goldenduck_core.services.job_store import job_store
 from goldenduck_core.models.enums import JobStatus
 from worker.GARCH.services.garch_service import GARCHService
-from worker.GARCH.services.scenarios import generate_scenario, get_scenario_knobs
+from worker.GARCH.services.scenarios import (
+    generate_scenario,
+    get_flash_crash_drift_schedule,
+    get_flash_crash_theta_schedule,
+    get_scenario_knobs,
+)
 from goldenduck_core.db.session import SessionLocal
 from goldenduck_core.services.job_service import update_job_status
 
@@ -41,6 +46,8 @@ MIN_CSV_DATA_POINTS = 500
 
 # Cache the risk-free rate so we only fetch it once per worker process
 _cached_rf_rate: float | None = None
+
+FLASH_CRASH_HORIZON = 500
 
 
 def _infer_skew_shock_flags(returns: np.ndarray) -> tuple[bool, dict]:
@@ -543,6 +550,16 @@ def _is_flash_crash_preset(user_knobs: dict, eps: float = 1e-9) -> bool:
     )
 
 
+def _is_bull_run_preset(user_knobs: dict, eps: float = 5e-3) -> bool:
+    """Check whether current knobs match bull-run preset values with a practical tolerance."""
+    return (
+        abs(float(user_knobs.get("desired_volatility", 1.0)) - 0.5) <= eps
+        and abs(float(user_knobs.get("desired_fat_tails", 1.0)) - 0.6) <= eps
+        and abs(float(user_knobs.get("desired_trend", 0.0)) - 0.7) <= eps
+        and abs(float(user_knobs.get("desired_momentum", 0.5)) - 0.85) <= eps
+    )
+
+
 def _target_mean_from_desired_trend(desired_trend: float) -> float:
     """
     Map desired trend knob to target DAILY mean log return.
@@ -700,9 +717,136 @@ def _score_flash_crash_path(
     )
 
 
+def _score_flash_crash_path_with_breakdown(
+    prices: np.ndarray,
+    returns: np.ndarray,
+    sigma_path: np.ndarray,
+    historical_prices: np.ndarray,
+    delta_schedule: np.ndarray,
+    trigger_start: int,
+    trigger_end: int,
+    recovery_end: int,
+    baseline_sigma: float,
+) -> tuple[float, list[dict]]:
+    """Weighted flash-crash evaluation with per-criterion breakdown."""
+    p = np.asarray(prices, dtype=float)
+    r = np.asarray(returns, dtype=float)
+    s = np.asarray(sigma_path, dtype=float)
+    h = np.asarray(historical_prices, dtype=float)
+
+    p = p[np.isfinite(p)]
+    r = r[np.isfinite(r)]
+    s = s[np.isfinite(s)]
+    h = h[np.isfinite(h)]
+    d = np.asarray(delta_schedule, dtype=float)
+    d = d[np.isfinite(d)]
+
+    if len(p) < 3:
+        return 0.0, []
+
+    trigger_start = int(np.clip(trigger_start, 1, len(p) - 2))
+    trigger_end = int(np.clip(trigger_end, trigger_start + 1, len(p) - 1))
+    recovery_end = int(np.clip(recovery_end, trigger_end + 1, len(p) - 1))
+    crash_bottom_idx = trigger_start + int(np.argmin(p[trigger_start:trigger_end]))
+
+    pre_crash_peak = float(np.max(p[:trigger_start])) if trigger_start > 0 else float(p[0])
+    crash_trough = float(p[crash_bottom_idx])
+    drawdown = (pre_crash_peak - crash_trough) / max(pre_crash_peak, 1e-12)
+    crash_depth_target = 0.25
+    crash_depth_score = float(
+        np.clip(1.0 - abs(drawdown - crash_depth_target) / crash_depth_target, 0.0, 1.0)
+    )
+
+    min_len = min(len(s), len(d))
+    if min_len >= 2:
+        sigma_slice = s[:min_len]
+        delta_slice = d[:min_len]
+        if np.std(sigma_slice) > 1e-12 and np.std(delta_slice) > 1e-12:
+            corr = float(np.corrcoef(sigma_slice, delta_slice)[0, 1])
+        else:
+            corr = 0.0
+    else:
+        corr = 0.0
+    vol_alignment_score = float(np.clip(max(0.0, corr), 0.0, 1.0))
+
+    crash_window = p[max(0, trigger_end - 10) : min(len(p), trigger_end + 5)]
+    trough = float(np.min(crash_window)) if len(crash_window) > 0 else crash_trough
+    recovered = float(p[recovery_end])
+    pre_crash_ref = float(np.max(p[: max(1, trigger_end - 20)]))
+    recovery_ratio = (recovered - trough) / max(pre_crash_ref - trough, 1e-8)
+    recovery_target = 0.55
+    recovery_score = float(
+        np.clip(1.0 - abs(recovery_ratio - recovery_target) / recovery_target, 0.0, 1.0)
+    )
+
+    crash_returns = r[trigger_start : min(recovery_end, len(r))]
+    if len(crash_returns) >= 3:
+        skew_val = float(stats.skew(crash_returns, bias=False))
+        skewness_score = 0.0 if skew_val >= 0 else float(min(1.0, abs(skew_val) / 1.5))
+    else:
+        skew_val = 0.0
+        skewness_score = 0.0
+
+    baseline_sigma = max(float(baseline_sigma), 1e-8)
+    pre_vol = float(np.mean(s[:trigger_start])) if len(s[:trigger_start]) > 0 else baseline_sigma
+    pre_vol_ratio = pre_vol / baseline_sigma
+    pre_calm_score = float(np.clip(1.0 - abs(pre_vol_ratio - 1.0), 0.0, 1.0))
+
+    criteria = [
+        {
+            "key": "crash_depth",
+            "label": "Crash Depth",
+            "weight": 0.30,
+            "score": crash_depth_score,
+            "target": crash_depth_target,
+            "actual": float(drawdown),
+        },
+        {
+            "key": "vol_alignment",
+            "label": "Vol Alignment",
+            "weight": 0.25,
+            "score": vol_alignment_score,
+            "target": 1.0,
+            "actual": float(corr),
+        },
+        {
+            "key": "recovery",
+            "label": "Recovery Shape",
+            "weight": 0.20,
+            "score": recovery_score,
+            "target": recovery_target,
+            "actual": float(recovery_ratio),
+        },
+        {
+            "key": "skewness",
+            "label": "Crash Skewness",
+            "weight": 0.15,
+            "score": skewness_score,
+            "target": -0.5,
+            "actual": float(skew_val),
+        },
+        {
+            "key": "pre_calm",
+            "label": "Pre-crash Calm",
+            "weight": 0.10,
+            "score": pre_calm_score,
+            "target": 1.0,
+            "actual": float(pre_vol_ratio),
+        },
+    ]
+
+    total = float(sum(item["weight"] * item["score"] for item in criteria))
+    return total, criteria
+
+
 def _select_best_display_scenario(
-    scenarios: list[pd.DataFrame], user_knobs: dict, historical_returns: np.ndarray | None = None
-) -> tuple[int, str, float, float, float]:
+    scenarios: list[pd.DataFrame],
+    user_knobs: dict,
+    historical_prices: np.ndarray | None = None,
+    historical_returns: np.ndarray | None = None,
+    scenario_metadata: list[dict] | None = None,
+    delta_schedule: np.ndarray | None = None,
+) -> tuple[int, str, float, float, float, dict]:
     """
     Select one scenario path for frontend display using a single-knob visual objective.
 
@@ -713,10 +857,10 @@ def _select_best_display_scenario(
       - Otherwise: fallback to first path.
 
     Returns:
-      (best_index, objective_name, target_value, best_value)
+            (best_index, objective_name, target_value, best_value, best_score, breakdown)
     """
     if not scenarios:
-        return 0, "fallback", 0.0, 0.0, 0.0
+                return 0, "fallback", 0.0, 0.0, 0.0, {"total": 0.0, "criteria": []}
 
     desired_volatility = float(user_knobs.get("desired_volatility", 1.0))
     desired_trend = float(user_knobs.get("desired_trend", 0.0))
@@ -730,14 +874,8 @@ def _select_best_display_scenario(
     volatility_active = abs(desired_volatility - 1.0) > eps
     fat_tails_active = abs(desired_fat_tails - 1.0) > eps
 
-    # Bull-run preset (temporary testing mode):
-    # volatility=0.5, fat_tails=0.6, trend=1.0, momentum=0.85
-    bull_run_preset = (
-        abs(desired_volatility - 0.5) <= 1e-9
-        and abs(desired_fat_tails - 0.6) <= 1e-9
-        and abs(desired_trend - 1.0) <= 1e-9
-        and abs(desired_momentum - 0.85) <= 1e-9
-    )
+    # Bull-run preset: volatility=0.5, fat_tails=0.6, trend=0.7, momentum=0.85
+    bull_run_preset = _is_bull_run_preset(user_knobs)
 
     if bull_run_preset:
         target_mean = _target_mean_from_desired_trend(desired_trend)
@@ -761,45 +899,77 @@ def _select_best_display_scenario(
 
         if not np.isfinite(best_score):
             # No path passed hard filters; keep objective tag but return finite score.
-            return 0, "bull_run_composite", 1.0, 0.0, 0.0
-        return best_idx, "bull_run_composite", 1.0, float(best_score), float(best_score)
+            return 0, "bull_run_composite", 1.0, 0.0, 0.0, {"total": 0.0, "criteria": []}
+        return best_idx, "bull_run_composite", 1.0, float(best_score), float(best_score), {
+            "total": float(best_score),
+            "criteria": [],
+        }
 
     if _is_flash_crash_preset(user_knobs):
         horizon = len(scenarios[0]) if scenarios else 0
-        crash_start = int(0.60 * horizon)
-        crash_days = 5
+        trigger_start = int(0.60 * horizon)
+        trigger_end = int(0.70 * horizon)
+        recovery_end = int(0.90 * horizon)
+
+        hist_prices = (
+            np.asarray(historical_prices, dtype=float).ravel()
+            if historical_prices is not None
+            else np.array([])
+        )
+        hist_prices = hist_prices[np.isfinite(hist_prices)] if len(hist_prices) > 0 else hist_prices
+
+        hist = np.asarray(historical_returns).ravel() if historical_returns is not None else np.array([])
+        hist = hist[np.isfinite(hist)] if len(hist) > 0 else hist
+        baseline_sigma = float(np.std(hist, ddof=1)) if len(hist) > 1 else 0.01
 
         best_idx = 0
         best_score = float("-inf")
+        best_breakdown: list[dict] = []
         for i, scenario in enumerate(scenarios):
             prices = scenario["Close"].values.astype(float)
             prices = np.clip(prices, 1e-12, None)
+            returns = np.log(prices[1:] / prices[:-1])
+            meta = scenario_metadata[i] if scenario_metadata and i < len(scenario_metadata) else {}
+            sigma_path = np.asarray(meta.get("volatility_forecast", []), dtype=float)
+            if len(sigma_path) == 0:
+                sigma_path = np.full(len(prices), baseline_sigma, dtype=float)
 
-            if not _is_valid_flash_crash(prices, crash_start=crash_start, crash_days=crash_days):
-                score = float("-inf")
-            else:
-                score = _score_flash_crash_path(prices, crash_start=crash_start, crash_days=crash_days)
+            score, breakdown = _score_flash_crash_path_with_breakdown(
+                prices=prices,
+                returns=returns,
+                sigma_path=sigma_path,
+                historical_prices=hist_prices,
+                delta_schedule=np.asarray(delta_schedule if delta_schedule is not None else np.array([]), dtype=float),
+                trigger_start=trigger_start,
+                trigger_end=trigger_end,
+                recovery_end=recovery_end,
+                baseline_sigma=baseline_sigma,
+            )
 
             if score > best_score:
                 best_score = score
                 best_idx = i
+                best_breakdown = breakdown
 
         if not np.isfinite(best_score):
             # No path passed hard filters; keep objective tag but return finite score.
-            return 0, "flash_crash_composite", 1.0, 0.0, 0.0
-        return best_idx, "flash_crash_composite", 1.0, float(best_score), float(best_score)
+            return 0, "flash_crash_evaluation", 1.0, 0.0, 0.0, {"total": 0.0, "criteria": []}
+        return best_idx, "flash_crash_evaluation", 1.0, float(best_score), float(best_score), {
+            "total": float(best_score),
+            "criteria": best_breakdown,
+        }
 
     # Weighted primary + preservation selection against input CSV stats.
     # If one knob is tweaked: 0.55 weight for active knob target, 0.15 each for
     # preserving untouched knobs close to historical input stats.
     # If no knobs are tweaked: equal 0.25 weight across all 4 knobs to preserve input.
     if historical_returns is None:
-        return 0, "fallback", 0.0, 0.0, 0.0
+        return 0, "fallback", 0.0, 0.0, 0.0, {"total": 0.0, "criteria": []}
 
     hist = np.asarray(historical_returns, dtype=float).ravel()
     hist = hist[np.isfinite(hist)]
     if len(hist) < 2:
-        return 0, "fallback", 0.0, 0.0, 0.0
+        return 0, "fallback", 0.0, 0.0, 0.0, {"total": 0.0, "criteria": []}
 
     # Historical/base (input CSV) stats used for preservation terms.
     hist_mean = float(np.mean(hist))
@@ -838,7 +1008,7 @@ def _select_best_display_scenario(
 
     # Keep current behavior for unexpected multi-knob states.
     if not (no_knob_active or vol_only or trend_only or momentum_only or fat_only):
-        return 0, "fallback", 0.0, 0.0, 0.0
+        return 0, "fallback", 0.0, 0.0, 0.0, {"total": 0.0, "criteria": []}
 
     def _norm_err(actual: float, target: float, denom: float) -> float:
         d = abs(float(actual) - float(target)) / max(float(denom), 1e-12)
@@ -938,9 +1108,12 @@ def _select_best_display_scenario(
             best_obj_val = float(obj_val)
 
     if not np.isfinite(best_score):
-        return 0, objective_name, float(objective_target), 0.0, 0.0
+        return 0, objective_name, float(objective_target), 0.0, 0.0, {"total": 0.0, "criteria": []}
 
-    return best_idx, objective_name, float(objective_target), float(best_obj_val), float(best_score)
+    return best_idx, objective_name, float(objective_target), float(best_obj_val), float(best_score), {
+        "total": float(best_score),
+        "criteria": [],
+    }
 
     return 0, "fallback", 0.0, 0.0, 0.0
 
@@ -987,10 +1160,12 @@ while True:
         # Extract user knobs for ML parameter prediction.
         # Skew flags may be auto-overridden later after data is loaded.
         user_knobs = {
+            "ticker": ticker,
             "desired_volatility": float(params.get("desired_volatility", 1.0)),
             "desired_trend": float(params.get("desired_trend", 0.0)),
             "desired_fat_tails": float(params.get("desired_fat_tails", 1.0)),
             "desired_momentum": float(params.get("desired_momentum", 0.5)),
+            "asset_class": params.get("asset_class") or params.get("assetClass"),
             # A/B toggle for asymmetric innovation shocks when dist='skewt'
             "use_skew_shocks": bool(params.get("use_skew_shocks", False)),
             # A/B toggle to force using 'skewt' branch for return shocks
@@ -1066,6 +1241,14 @@ while True:
         else:
             raise ValueError("Either ticker or csv_data must be provided")
 
+        if _is_flash_crash_preset(user_knobs) and horizon != FLASH_CRASH_HORIZON:
+            logger.info(
+                "Flash crash preset forces horizon=%s; overriding requested horizon=%s",
+                FLASH_CRASH_HORIZON,
+                horizon,
+            )
+            horizon = FLASH_CRASH_HORIZON
+
         garch = GARCHService()
 
         fitted_params = garch.fit_with_retry(data, p=p, q=q)
@@ -1121,21 +1304,37 @@ while True:
             historical_returns=returns, user_knobs=user_knobs
         )
 
-        # TEMPORARY: Bypass RF predictor and use desired_volatility directly as delta
-        desired_vol = user_knobs.get("desired_volatility", 1.0)
-        pred_params["delta"] = desired_vol
-        pred_params["delta_confidence"] = 1.0  # High confidence since we're using user input directly
+        # Check if bull run preset is active
+        desired_volatility = user_knobs.get("desired_volatility", 1.0)
+        desired_fat_tails = user_knobs.get("desired_fat_tails", 1.0)
+        bull_run_preset = _is_bull_run_preset(user_knobs)
+
+        # Only bypass RF predictor if NOT using bull run preset
+        if not bull_run_preset:
+            # TEMPORARY: Bypass RF predictor and use desired_volatility directly as delta
+            pred_params["delta"] = desired_volatility
+            pred_params["delta_confidence"] = 1.0  # High confidence since we're using user input directly
+            logger.info(f"  Delta (ML): {pred_params['delta']:.4f} [USING DESIRED_VOLATILITY DIRECTLY]")
+        else:
+            # For bull run preset, use RF predictor's delta prediction
+            logger.info(f"  Delta (ML): {pred_params['delta']:.4f} [RF PREDICTOR - BULL RUN PRESET]")
 
         # Map desired_fat_tails to theta (forecast stochasticity)
         # Range: 0.5 -> 1e-5, 2.0 -> 1e-2
-        desired_fat_tails = user_knobs.get("desired_fat_tails", 1.0)
         fat_tails_clipped = float(np.clip(desired_fat_tails, 0.5, 2.0))
-        
+
         # Linear interpolation from 1e-5 to 1e-2
         theta = 1e-5 + (fat_tails_clipped - 0.5) / 1.5 * (1e-2 - 1e-5)
         pred_params["theta"] = theta
 
-        logger.info(f"  Delta (ML): {pred_params['delta']:.4f} [USING DESIRED_VOLATILITY DIRECTLY]")
+        theta_sequence = None
+        drift_sequence = None
+        if _is_flash_crash_preset(user_knobs):
+            theta_sequence = get_flash_crash_theta_schedule(horizon)
+            drift_sequence = get_flash_crash_drift_schedule(horizon)
+            logger.info("Using flash_crash theta scheduler")
+            logger.info("Using flash_crash drift scheduler")
+
         logger.info(f"  Theta (mapped from fat_tails={desired_fat_tails}): {pred_params['theta']:.6f}")
 
         if _is_flash_crash_preset(user_knobs):
@@ -1148,9 +1347,15 @@ while True:
             num_scenarios=num_scenarios,
             horizon=horizon,
             theta=float(pred_params["theta"]),
+            theta_sequence=theta_sequence,
+            drift_sequence=drift_sequence,
+            scenario_type="flash_crash" if _is_flash_crash_preset(user_knobs) else None,
             delta_sequence=delta_sequence,
             user_knobs=user_knobs,
+            return_metadata=True,
         )
+
+        scenarios, scenario_metadata = scenarios
 
         metrics = garch.validate_scenarios(scenarios, user_knobs=user_knobs)
 
@@ -1211,8 +1416,14 @@ while True:
                 selection_target,
                 selection_value,
                 selection_score,
+                selection_breakdown,
             ) = _select_best_display_scenario(
-                scenarios, user_knobs, historical_returns=returns
+                scenarios,
+                user_knobs,
+                historical_prices=data["Close"].values.astype(float),
+                historical_returns=returns,
+                scenario_metadata=scenario_metadata,
+                delta_schedule=delta_sequence,
             )
             selected_idx = int(np.clip(selected_idx, 0, max(len(scenarios) - 1, 0)))
 
@@ -1256,10 +1467,14 @@ while True:
                 selection_value,
             )
 
-            # Fidelity metrics aligned with weighted selection logic:
-            # - intent_fidelity: 1 - weighted selection score
+            # Fidelity metrics aligned with selection objective semantics:
+            # - flash crash objectives: composite score itself (higher is better)
+            # - other objectives: convert distance-style score to similarity
             # - csv_similarity: equal-weight similarity to input CSV stats
-            intent_fidelity = float(np.clip(1.0 - float(selection_score), 0.0, 1.0))
+            if selection_objective in {"flash_crash_evaluation", "flash_crash_composite"}:
+                intent_fidelity = float(np.clip(float(selection_score), 0.0, 1.0))
+            else:
+                intent_fidelity = float(np.clip(1.0 - float(selection_score), 0.0, 1.0))
             csv_similarity = intent_fidelity
             try:
                 hist_r = np.asarray(returns, dtype=float).ravel()
@@ -1303,6 +1518,7 @@ while True:
             chart_data["selectionTarget"] = float(selection_target)
             chart_data["selectionValue"] = float(selection_value)
             chart_data["selectionScore"] = float(selection_score)
+            chart_data["selectionBreakdown"] = selection_breakdown
             chart_data["intentFidelity"] = float(intent_fidelity)
             chart_data["csvSimilarity"] = float(csv_similarity)
             chart_data["desiredVolatility"] = float(user_knobs.get("desired_volatility", 1.0))
