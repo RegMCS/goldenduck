@@ -30,8 +30,7 @@ describe("Header", () => {
   it("renders the logo and app name", () => {
     renderWithAuth(<Header />)
 
-    expect(screen.getByText("SynthMarket")).toBeInTheDocument()
-    expect(screen.getByText("Synthetic Data Generator")).toBeInTheDocument()
+    expect(screen.getByText("Synthetic Market Data Generator")).toBeInTheDocument()
     expect(screen.getByRole("banner")).toBeInTheDocument()
   })
 

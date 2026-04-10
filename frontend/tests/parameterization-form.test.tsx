@@ -1,7 +1,7 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi, beforeEach } from "vitest"
-import { ParameterizationForm } from "@/components/parameterization-form"
+import { ParameterizationForm, getTweakedKnobLabels } from "@/components/parameterization-form"
 import { defaultParameters } from "@/lib/types"
 import { AuthProvider } from "@/components/auth-provider"
 
@@ -70,7 +70,6 @@ describe("ParameterizationForm", () => {
   })
 
   it("shows file upload interface", async () => {
-    const user = userEvent.setup()
     renderWithAuth(<ParameterizationForm />)
 
     const uploadButton = screen.getByText("Click to upload CSV")
@@ -123,7 +122,7 @@ describe("ParameterizationForm", () => {
     await user.type(volatilityInput, "1.8")
 
     // Click reset button
-    const resetButton = screen.getByRole("button", { name: /reset/i })
+    const resetButton = screen.getByRole("button", { name: /^reset$/i })
     await user.click(resetButton)
 
     // Parameter should be reset to default
@@ -138,5 +137,55 @@ describe("ParameterizationForm", () => {
     expect(screen.getByText("Configuration Summary")).toBeInTheDocument()
     expect(screen.getByText("Model Parameters")).toBeInTheDocument()
     expect(screen.getByText("Input Time Series")).toBeInTheDocument()
+  })
+
+  it("shows an error and disables generate when more than one knob is changed", async () => {
+    const user = userEvent.setup()
+    vi.mocked(global.fetch).mockImplementation((input) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof Request
+            ? input.url
+            : String(input)
+
+      if (url.includes("/api/auth/me")) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ id: "user-1", username: "tester" }),
+        } as Response)
+      }
+
+      return Promise.resolve({ ok: false, json: async () => ({}) } as Response)
+    })
+
+    renderWithAuth(<ParameterizationForm />)
+    const generateButton = await screen.findByRole("button", { name: /generate data/i })
+
+    const volatilityInput = screen.getAllByDisplayValue(String(defaultParameters.volatility))[0]
+    await user.clear(volatilityInput)
+    await user.type(volatilityInput, "1.4")
+    await user.tab()
+
+    const trendInput = screen.getAllByDisplayValue(String(defaultParameters.trend))[0]
+    await user.clear(trendInput)
+    await user.type(trendInput, "0.2")
+    await user.tab()
+
+    expect(
+      await screen.findByText(/you can only change one knob at a time/i)
+    ).toBeInTheDocument()
+    expect(generateButton).toBeDisabled()
+  })
+
+  it("counts only the market knobs that differ from defaults", () => {
+    expect(
+      getTweakedKnobLabels({
+        ...defaultParameters,
+        volatility: 1.4,
+        trend: 0.2,
+        timeHorizon: 800,
+      })
+    ).toEqual(["Volatility", "Trend"])
   })
 })

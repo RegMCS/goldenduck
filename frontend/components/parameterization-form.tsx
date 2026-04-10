@@ -22,8 +22,20 @@ const DEFAULT_TICKER = "AAPL"
 const MIN_HORIZON_DAYS = 500
 const MAX_HORIZON_DAYS = 2600
 const MIN_CSV_ROWS = 500
+const TWEAKABLE_KNOBS = [
+  { key: "volatility", label: "Volatility" },
+  { key: "trend", label: "Trend" },
+  { key: "fatTails", label: "Fat Tails" },
+  { key: "momentum", label: "Momentum" },
+] as const
 
 type JobStatus = "queued" | "running" | "completed" | "failed"
+
+export function getTweakedKnobLabels(parameters: MarketParameters): string[] {
+  return TWEAKABLE_KNOBS.filter(
+    ({ key }) => parameters[key] !== defaultParameters[key]
+  ).map(({ label }) => label)
+}
 
 
 interface ParameterFieldProps {
@@ -245,6 +257,11 @@ export function ParameterizationForm() {
   }, [])
 
   const activeWarnings = TRADEOFF_RULES.filter((r) => r.condition(parameters)).map((r) => r.message)
+  const tweakedKnobs = getTweakedKnobLabels(parameters)
+  const knobLimitError =
+    tweakedKnobs.length > 1
+      ? `You can only change one knob at a time. Reset these to default first: ${tweakedKnobs.join(", ")}.`
+      : null
   // Auto-load AAPL_real.csv on component mount
   useEffect(() => {
     const loadDefaultFile = async () => {
@@ -316,6 +333,7 @@ export function ParameterizationForm() {
     key: K,
     value: MarketParameters[K]
   ) => {
+    setGenerateError(null)
     setParameters((prev) => ({ ...prev, [key]: value }))
   }
 
@@ -404,6 +422,12 @@ export function ParameterizationForm() {
       setGenerateError("Please upload a CSV file before generating.")
       return
     }
+
+    if (knobLimitError) {
+      setGenerateError(knobLimitError)
+      return
+    }
+
     setGenerateError(null)
 
     setIsGenerating(true)
@@ -642,7 +666,7 @@ export function ParameterizationForm() {
               step={0.01}
             />
             <ParameterField
-              label="V Momentum"
+              label="Momentum"
               description="Volatility momentum / persistence"
               tooltip={[
                 "Controls how much past volatility influences the next period.",
@@ -685,7 +709,25 @@ export function ParameterizationForm() {
               ))}
             </ul>
           </div>
-        )} */}
+        )}
+
+        {knobLimitError && (
+          <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3">
+            <div className="flex items-start gap-2 text-sm text-destructive">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{knobLimitError}</span>
+            </div>
+          </div>
+        )}
+
+        {knobLimitError && (
+          <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3">
+            <div className="flex items-start gap-2 text-sm text-destructive">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{knobLimitError}</span>
+            </div>
+          </div>
+        )} 
 
         {/* <Card>
           <CardHeader>
@@ -768,7 +810,7 @@ export function ParameterizationForm() {
               step={1}
             />
           </CardContent>
-        </Card> */}
+        </Card> */} 
 
         {/* {activeWarnings.length > 0 && (
           <div className="rounded-lg border border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 px-4 py-3 space-y-2">
@@ -945,7 +987,7 @@ export function ParameterizationForm() {
               ) : (
                 <Button
                   onClick={handleGenerate}
-                  disabled={isGenerating}
+                  disabled={isGenerating || !!knobLimitError}
                   className="w-full gap-2"
                   size="lg"
                 >
