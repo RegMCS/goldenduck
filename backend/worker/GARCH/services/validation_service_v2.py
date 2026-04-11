@@ -7,7 +7,6 @@ from typing import Dict
 import numpy as np
 import pandas as pd
 from scipy import stats
-from statsmodels.tsa.stattools import acf
 
 logger = logging.getLogger(__name__)
 
@@ -17,12 +16,12 @@ class ValidationServiceV2:
     Validation Service V2
 
     Compares original OHLCV vs synthetic OHLCV using:
-    - Volatility: std dev of percent returns
+    - Volatility: std dev of log returns
     - Fat tails: kurtosis only
-    - Momentum: lag-1 autocorrelation of percent returns
+    - Momentum: Hurst exponent of percent returns
     - Trend: MA(20) slope avg, MA(20) uptrend ratio, start-end return
 
-    Matching uses linear decay with a tolerance band.
+    Matching uses linear decay without a tolerance band.
     """
 
     def __init__(
@@ -63,12 +62,14 @@ class ValidationServiceV2:
 
         orig_returns = self._percent_returns(orig_close)
         synth_returns = self._percent_returns(synth_close)
+        orig_log_returns = self._log_returns(orig_close)
+        synth_log_returns = self._log_returns(synth_close)
 
         # =========================
         # Volatility
         # =========================
-        vol_orig = self._to_scalar(np.std(orig_returns, ddof=1))
-        vol_synth = self._to_scalar(np.std(synth_returns, ddof=1))
+        vol_orig = self._to_scalar(np.std(orig_log_returns, ddof=1))
+        vol_synth = self._to_scalar(np.std(synth_log_returns, ddof=1))
         vol_target = vol_orig * volatility_knob
         vol_match = self._match_relative(
             vol_target, vol_synth, self.volatility_tol_rel
@@ -89,14 +90,19 @@ class ValidationServiceV2:
         fat_tail_match = kurt_match
 
         # =========================
-        # Momentum (ACF lag-1)
+        # Momentum (Hurst exponent)
         # =========================
-        acf_orig = self._acf_lag1(orig_returns)
-        acf_synth = self._acf_lag1(synth_returns)
-        momentum_scale = momentum_knob / 0.5 if 0.5 != 0 else 1.0
-        acf_target = acf_orig * momentum_scale
+        hurst_orig = self._hurst_exponent(orig_returns)
+        hurst_synth = self._hurst_exponent(synth_returns)
+        # Keep knob semantics centered at 0.5:
+        # knob=0.5 -> target = original
+        # knob<0.5 -> move target toward 0.5 (more anti-persistent/random)
+        # knob>0.5 -> amplify distance from 0.5 (more persistent)
+        momentum_scale = momentum_knob / 0.5
+        hurst_target = 0.5 + (hurst_orig - 0.5) * momentum_scale
+        hurst_target = float(np.clip(hurst_target, 0.0, 1.0))
         momentum_match = self._match_absolute(
-            acf_target, acf_synth, self.momentum_tol_abs
+            hurst_target, hurst_synth, self.momentum_tol_abs
         )
 
         # =========================
@@ -164,10 +170,10 @@ class ValidationServiceV2:
                 "match_pct": fat_tail_match * 100.0,
             },
             "momentum": {
-                "acf_lag1": {
-                    "original": acf_orig,
-                    "target": acf_target,
-                    "synthetic": acf_synth,
+                "hurst": {
+                    "original": hurst_orig,
+                    "target": hurst_target,
+                    "synthetic": hurst_synth,
                     "tolerance_abs": self.momentum_tol_abs,
                     "match_pct": momentum_match * 100.0,
                 },
@@ -210,10 +216,50 @@ class ValidationServiceV2:
         returns = np.asarray(returns, dtype=float)
         return returns[np.isfinite(returns)]
 
-    def _acf_lag1(self, returns: np.ndarray) -> float:
-        if returns.size < 2:
+    def _log_returns(self, close: pd.Series) -> np.ndarray:
+        x = close.astype(float).values
+        x = np.asarray(x, dtype=float)
+        x = x[np.isfinite(x)]
+        if x.size < 2:
+            return np.asarray([], dtype=float)
+        valid = (x[1:] > 0.0) & (x[:-1] > 0.0)
+        if not np.any(valid):
+            return np.asarray([], dtype=float)
+        returns = np.log(x[1:][valid] / x[:-1][valid])
+        returns = np.asarray(returns, dtype=float)
+        return returns[np.isfinite(returns)]
+
+    def _hurst_exponent(self, returns: np.ndarray) -> float:
+        """
+        Estimate Hurst exponent from returns using the variance-time scaling method:
+        std(x[t+lag] - x[t]) ~ lag^H
+        """
+        x = np.asarray(returns, dtype=float)
+        x = x[np.isfinite(x)]
+        n = x.size
+        if n < 20:
             return float("nan")
-        return self._to_scalar(acf(returns, nlags=1, fft=False)[1])
+
+        max_lag = min(100, n // 2)
+        if max_lag < 3:
+            return float("nan")
+
+        lags = np.arange(2, max_lag + 1, dtype=int)
+        used_lags: list[float] = []
+        tau: list[float] = []
+
+        for lag in lags:
+            diffs = x[lag:] - x[:-lag]
+            s = float(np.std(diffs))
+            if np.isfinite(s) and s > 0.0:
+                used_lags.append(float(lag))
+                tau.append(s)
+
+        if len(used_lags) < 2:
+            return float("nan")
+
+        slope, _ = np.polyfit(np.log(used_lags), np.log(tau), 1)
+        return float(np.clip(slope, 0.0, 1.0))
 
     def _ma20_trend_metrics(self, close: pd.Series) -> tuple[float, float]:
         ma20 = close.rolling(20).mean()
@@ -238,20 +284,20 @@ class ValidationServiceV2:
             return 0.0
         eps = 1e-12
         delta_rel = abs(synth - orig) / (abs(orig) + eps)
-        return self._exp_match(delta_rel, tol_rel, scale=tol_rel * 2.0)
+        # No tolerance band: decay starts immediately from delta=0.
+        return self._decay_match(delta_rel, scale=tol_rel)
 
     def _match_absolute(self, orig: float, synth: float, tol_abs: float) -> float:
         if not np.isfinite(orig) or not np.isfinite(synth):
             return 0.0
         delta = abs(synth - orig)
-        return self._exp_match(delta, tol_abs, scale=tol_abs * 2.0)
+        # No tolerance band: decay starts immediately from delta=0.
+        return self._decay_match(delta, scale=tol_abs)
 
-    def _exp_match(self, delta: float, tol: float, scale: float) -> float:
-        if tol <= 0 or scale <= 0:
+    def _decay_match(self, delta: float, scale: float) -> float:
+        if scale <= 0:
             return 0.0
-        if delta <= tol:
-            return 1.0
-        return float(max(0.0, 1.0 - (delta - tol) / scale))
+        return float(max(0.0, 1.0 - (delta / scale)))
 
     def _to_scalar(self, value) -> float:
         if isinstance(value, (float, int)):

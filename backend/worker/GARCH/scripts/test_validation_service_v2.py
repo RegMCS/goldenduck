@@ -20,7 +20,7 @@ SYNTHETIC_OHLCV_PATH = Path("backend/OHLCV_output default.csv")
 # Knobs used to generate the synthetic data
 USER_KNOBS = {
     "volatility": 1.0,  # 0.5 - 2.0
-    "fat_tails": 2.0,   # 0.5 - 2.0
+    "fat_tails": 1.0,   # 0.5 - 2.0
     "momentum": 0.5,    # 0.0 - 1.0
     "trend": 0.0,       # -1.0 - 1.0
 }
@@ -59,7 +59,7 @@ def _pretty_print(results: dict) -> None:
     _print_section("Volatility")
     vol = results["volatility"]
     _print_metric_row(
-        "Std Dev (returns)",
+        "Std Dev (log returns)",
         _fmt_num(vol["original"]),
         _fmt_num(vol["target"]),
         _fmt_num(vol["synthetic"]),
@@ -79,9 +79,9 @@ def _pretty_print(results: dict) -> None:
     print(f"\nFat Tails Match: {_fmt_pct(ft['match_pct'])}")
 
     _print_section("Momentum")
-    mom = results["momentum"]["acf_lag1"]
+    mom = results["momentum"]["hurst"]
     _print_metric_row(
-        "ACF (lag-1)",
+        "Hurst exponent",
         _fmt_num(mom["original"]),
         _fmt_num(mom["target"]),
         _fmt_num(mom["synthetic"]),
