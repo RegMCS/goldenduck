@@ -172,7 +172,9 @@ def _series_stats(prices: list, returns_arr: np.ndarray) -> dict:
     }
 
 
-def compute_chart_data(historical_df: pd.DataFrame, scenario: pd.DataFrame, all_scenarios: list = None) -> dict:
+def compute_chart_data(
+    historical_df: pd.DataFrame, scenario: pd.DataFrame, all_scenarios: list = None
+) -> dict:
     df = historical_df.copy()
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
@@ -286,7 +288,10 @@ def compute_chart_data(historical_df: pd.DataFrame, scenario: pd.DataFrame, all_
         prices_matrix = []
         for s in all_scenarios:
             s_df = s.reset_index(drop=True)
-            closes = [float(s_df.iloc[i].get("Close", s_df.iloc[i].get("close", 0))) for i in range(len(s_df))]
+            closes = [
+                float(s_df.iloc[i].get("Close", s_df.iloc[i].get("close", 0)))
+                for i in range(len(s_df))
+            ]
             if len(closes) > 0:
                 start_price = closes[0] or 1.0
                 normalized = [round(c / start_price * 100, 4) for c in closes]
@@ -307,7 +312,11 @@ def compute_chart_data(historical_df: pd.DataFrame, scenario: pd.DataFrame, all_
                     {
                         "date": date_str,
                         "timestamp": ts,
-                        "historical": round(hist_closes[i] / h_start * 100, 4) if i < len(hist_closes) else None,
+                        "historical": (
+                            round(hist_closes[i] / h_start * 100, 4)
+                            if i < len(hist_closes)
+                            else None
+                        ),
                         "p10": round(float(p10[i]), 4),
                         "p50": round(float(p50[i]), 4),
                         "p90": round(float(p90[i]), 4),
@@ -416,11 +425,11 @@ def _count_extreme_events(returns: np.ndarray, threshold: float = 2.5) -> int:
     """
     if len(returns) < 2:
         return 0
-    
+
     std = float(np.std(returns))
     if std < 1e-12:
         return 0
-    
+
     normalized = np.abs(returns) / std
     count = int(np.sum(normalized > threshold))
     return count
@@ -500,7 +509,7 @@ def _baseline_match_distance(
 
     d_mean = (s_mean - h_mean) / max(abs(h_mean), 1e-4)
     d_vol = (s_ann_vol - h_ann_vol) / max(abs(h_ann_vol), 1e-6)
-    d_hurst = (s_hurst - h_hurst)  # already naturally scaled in [0, 1]
+    d_hurst = s_hurst - h_hurst  # already naturally scaled in [0, 1]
     d_kurt = (s_kurt - h_kurt) / max(abs(h_kurt), 1.0)
     d_skew = (s_skew - h_skew) / max(abs(h_skew), 0.25)
 
@@ -543,10 +552,26 @@ def _is_flash_crash_preset(user_knobs: dict, eps: float = 1e-9) -> bool:
     """Check whether current knobs match flash-crash preset values."""
     preset = get_scenario_knobs("flash_crash")
     return (
-        abs(float(user_knobs.get("desired_trend", 0.0)) - float(preset.get("desired_trend", 0.0))) <= eps
-        and abs(float(user_knobs.get("desired_volatility", 1.0)) - float(preset.get("desired_volatility", 1.0))) <= eps
-        and abs(float(user_knobs.get("desired_fat_tails", 1.0)) - float(preset.get("desired_fat_tails", 1.0))) <= eps
-        and abs(float(user_knobs.get("desired_momentum", 0.5)) - float(preset.get("desired_momentum", 0.5))) <= eps
+        abs(
+            float(user_knobs.get("desired_trend", 0.0))
+            - float(preset.get("desired_trend", 0.0))
+        )
+        <= eps
+        and abs(
+            float(user_knobs.get("desired_volatility", 1.0))
+            - float(preset.get("desired_volatility", 1.0))
+        )
+        <= eps
+        and abs(
+            float(user_knobs.get("desired_fat_tails", 1.0))
+            - float(preset.get("desired_fat_tails", 1.0))
+        )
+        <= eps
+        and abs(
+            float(user_knobs.get("desired_momentum", 0.5))
+            - float(preset.get("desired_momentum", 0.5))
+        )
+        <= eps
     )
 
 
@@ -648,7 +673,7 @@ def _is_valid_flash_crash(
         return False
 
     crash_depth = (pre_crash - crash_low) / pre_crash
-    denom = (pre_crash - crash_low)
+    denom = pre_crash - crash_low
     if denom <= 1e-12:
         return False
     recovery = (end_price - crash_low) / denom
@@ -749,7 +774,9 @@ def _score_flash_crash_path_with_breakdown(
     recovery_end = int(np.clip(recovery_end, trigger_end + 1, len(p) - 1))
     crash_bottom_idx = trigger_start + int(np.argmin(p[trigger_start:trigger_end]))
 
-    pre_crash_peak = float(np.max(p[:trigger_start])) if trigger_start > 0 else float(p[0])
+    pre_crash_peak = (
+        float(np.max(p[:trigger_start])) if trigger_start > 0 else float(p[0])
+    )
     crash_trough = float(p[crash_bottom_idx])
     drawdown = (pre_crash_peak - crash_trough) / max(pre_crash_peak, 1e-12)
     crash_depth_target = 0.25
@@ -788,7 +815,11 @@ def _score_flash_crash_path_with_breakdown(
         skewness_score = 0.0
 
     baseline_sigma = max(float(baseline_sigma), 1e-8)
-    pre_vol = float(np.mean(s[:trigger_start])) if len(s[:trigger_start]) > 0 else baseline_sigma
+    pre_vol = (
+        float(np.mean(s[:trigger_start]))
+        if len(s[:trigger_start]) > 0
+        else baseline_sigma
+    )
     pre_vol_ratio = pre_vol / baseline_sigma
     pre_calm_score = float(np.clip(1.0 - abs(pre_vol_ratio - 1.0), 0.0, 1.0))
 
@@ -860,7 +891,7 @@ def _select_best_display_scenario(
             (best_index, objective_name, target_value, best_value, best_score, breakdown)
     """
     if not scenarios:
-                return 0, "fallback", 0.0, 0.0, 0.0, {"total": 0.0, "criteria": []}
+        return 0, "fallback", 0.0, 0.0, 0.0, {"total": 0.0, "criteria": []}
 
     desired_volatility = float(user_knobs.get("desired_volatility", 1.0))
     desired_trend = float(user_knobs.get("desired_trend", 0.0))
@@ -879,7 +910,11 @@ def _select_best_display_scenario(
 
     if bull_run_preset:
         target_mean = _target_mean_from_desired_trend(desired_trend)
-        hist = np.asarray(historical_returns).ravel() if historical_returns is not None else np.array([])
+        hist = (
+            np.asarray(historical_returns).ravel()
+            if historical_returns is not None
+            else np.array([])
+        )
         hist = hist[np.isfinite(hist)] if len(hist) > 0 else hist
         hist_std = float(np.std(hist, ddof=1)) if len(hist) > 1 else 0.01
         target_vol = max(1e-8, hist_std * desired_volatility)
@@ -899,11 +934,25 @@ def _select_best_display_scenario(
 
         if not np.isfinite(best_score):
             # No path passed hard filters; keep objective tag but return finite score.
-            return 0, "bull_run_composite", 1.0, 0.0, 0.0, {"total": 0.0, "criteria": []}
-        return best_idx, "bull_run_composite", 1.0, float(best_score), float(best_score), {
-            "total": float(best_score),
-            "criteria": [],
-        }
+            return (
+                0,
+                "bull_run_composite",
+                1.0,
+                0.0,
+                0.0,
+                {"total": 0.0, "criteria": []},
+            )
+        return (
+            best_idx,
+            "bull_run_composite",
+            1.0,
+            float(best_score),
+            float(best_score),
+            {
+                "total": float(best_score),
+                "criteria": [],
+            },
+        )
 
     if _is_flash_crash_preset(user_knobs):
         horizon = len(scenarios[0]) if scenarios else 0
@@ -916,9 +965,17 @@ def _select_best_display_scenario(
             if historical_prices is not None
             else np.array([])
         )
-        hist_prices = hist_prices[np.isfinite(hist_prices)] if len(hist_prices) > 0 else hist_prices
+        hist_prices = (
+            hist_prices[np.isfinite(hist_prices)]
+            if len(hist_prices) > 0
+            else hist_prices
+        )
 
-        hist = np.asarray(historical_returns).ravel() if historical_returns is not None else np.array([])
+        hist = (
+            np.asarray(historical_returns).ravel()
+            if historical_returns is not None
+            else np.array([])
+        )
         hist = hist[np.isfinite(hist)] if len(hist) > 0 else hist
         baseline_sigma = float(np.std(hist, ddof=1)) if len(hist) > 1 else 0.01
 
@@ -929,7 +986,11 @@ def _select_best_display_scenario(
             prices = scenario["Close"].values.astype(float)
             prices = np.clip(prices, 1e-12, None)
             returns = np.log(prices[1:] / prices[:-1])
-            meta = scenario_metadata[i] if scenario_metadata and i < len(scenario_metadata) else {}
+            meta = (
+                scenario_metadata[i]
+                if scenario_metadata and i < len(scenario_metadata)
+                else {}
+            )
             sigma_path = np.asarray(meta.get("volatility_forecast", []), dtype=float)
             if len(sigma_path) == 0:
                 sigma_path = np.full(len(prices), baseline_sigma, dtype=float)
@@ -939,7 +1000,10 @@ def _select_best_display_scenario(
                 returns=returns,
                 sigma_path=sigma_path,
                 historical_prices=hist_prices,
-                delta_schedule=np.asarray(delta_schedule if delta_schedule is not None else np.array([]), dtype=float),
+                delta_schedule=np.asarray(
+                    delta_schedule if delta_schedule is not None else np.array([]),
+                    dtype=float,
+                ),
                 trigger_start=trigger_start,
                 trigger_end=trigger_end,
                 recovery_end=recovery_end,
@@ -953,11 +1017,25 @@ def _select_best_display_scenario(
 
         if not np.isfinite(best_score):
             # No path passed hard filters; keep objective tag but return finite score.
-            return 0, "flash_crash_evaluation", 1.0, 0.0, 0.0, {"total": 0.0, "criteria": []}
-        return best_idx, "flash_crash_evaluation", 1.0, float(best_score), float(best_score), {
-            "total": float(best_score),
-            "criteria": best_breakdown,
-        }
+            return (
+                0,
+                "flash_crash_evaluation",
+                1.0,
+                0.0,
+                0.0,
+                {"total": 0.0, "criteria": []},
+            )
+        return (
+            best_idx,
+            "flash_crash_evaluation",
+            1.0,
+            float(best_score),
+            float(best_score),
+            {
+                "total": float(best_score),
+                "criteria": best_breakdown,
+            },
+        )
 
     # Weighted primary + preservation selection against input CSV stats.
     # If one knob is tweaked: 0.55 weight for active knob target, 0.15 each for
@@ -1001,10 +1079,30 @@ def _select_best_display_scenario(
         and not volatility_active
         and not fat_tails_active
     )
-    vol_only = volatility_active and not trend_active and not momentum_active and not fat_tails_active
-    trend_only = trend_active and not momentum_active and not volatility_active and not fat_tails_active
-    momentum_only = momentum_active and not trend_active and not volatility_active and not fat_tails_active
-    fat_only = fat_tails_active and not trend_active and not momentum_active and not volatility_active
+    vol_only = (
+        volatility_active
+        and not trend_active
+        and not momentum_active
+        and not fat_tails_active
+    )
+    trend_only = (
+        trend_active
+        and not momentum_active
+        and not volatility_active
+        and not fat_tails_active
+    )
+    momentum_only = (
+        momentum_active
+        and not trend_active
+        and not volatility_active
+        and not fat_tails_active
+    )
+    fat_only = (
+        fat_tails_active
+        and not trend_active
+        and not momentum_active
+        and not volatility_active
+    )
 
     # Keep current behavior for unexpected multi-knob states.
     if not (no_knob_active or vol_only or trend_only or momentum_only or fat_only):
@@ -1053,7 +1151,9 @@ def _select_best_display_scenario(
             continue
 
         # Hard disqualifier: reject scenarios whose trend sign flips relative to the active trend target.
-        if (trend_direction_target > 0.0 and s_mean < 0.0) or (trend_direction_target < 0.0 and s_mean > 0.0):
+        if (trend_direction_target > 0.0 and s_mean < 0.0) or (
+            trend_direction_target < 0.0 and s_mean > 0.0
+        ):
             continue
 
         # Preservation terms (stay close to input CSV stats).
@@ -1286,12 +1386,26 @@ def _select_best_display_scenario(
             best_breakdown = scenario_breakdown
 
     if not np.isfinite(best_score):
-        return 0, objective_name, float(objective_target), 0.0, 0.0, {"total": 0.0, "criteria": []}
+        return (
+            0,
+            objective_name,
+            float(objective_target),
+            0.0,
+            0.0,
+            {"total": 0.0, "criteria": []},
+        )
 
-    return best_idx, objective_name, float(objective_target), float(best_obj_val), float(best_score), {
-        "total": float(best_score),
-        "criteria": best_breakdown,
-    }
+    return (
+        best_idx,
+        objective_name,
+        float(objective_target),
+        float(best_obj_val),
+        float(best_score),
+        {
+            "total": float(best_score),
+            "criteria": best_breakdown,
+        },
+    )
 
     return 0, "fallback", 0.0, 0.0, 0.0
 
@@ -1491,11 +1605,17 @@ while True:
         if not bull_run_preset:
             # TEMPORARY: Bypass RF predictor and use desired_volatility directly as delta
             pred_params["delta"] = desired_volatility
-            pred_params["delta_confidence"] = 1.0  # High confidence since we're using user input directly
-            logger.info(f"  Delta (ML): {pred_params['delta']:.4f} [USING DESIRED_VOLATILITY DIRECTLY]")
+            pred_params["delta_confidence"] = (
+                1.0  # High confidence since we're using user input directly
+            )
+            logger.info(
+                f"  Delta (ML): {pred_params['delta']:.4f} [USING DESIRED_VOLATILITY DIRECTLY]"
+            )
         else:
             # For bull run preset, use RF predictor's delta prediction
-            logger.info(f"  Delta (ML): {pred_params['delta']:.4f} [RF PREDICTOR - BULL RUN PRESET]")
+            logger.info(
+                f"  Delta (ML): {pred_params['delta']:.4f} [RF PREDICTOR - BULL RUN PRESET]"
+            )
 
         # Map desired_fat_tails to theta (forecast stochasticity)
         # Range: 0.5 -> 1e-5, 2.0 -> 1e-2
@@ -1513,7 +1633,9 @@ while True:
             logger.info("Using flash_crash theta scheduler")
             logger.info("Using flash_crash drift scheduler")
 
-        logger.info(f"  Theta (mapped from fat_tails={desired_fat_tails}): {pred_params['theta']:.6f}")
+        logger.info(
+            f"  Theta (mapped from fat_tails={desired_fat_tails}): {pred_params['theta']:.6f}"
+        )
 
         if _is_flash_crash_preset(user_knobs):
             delta_sequence, flash_desc = generate_scenario("flash_crash", horizon)
@@ -1618,7 +1740,12 @@ while True:
                     selected_returns, user_knobs
                 )
 
-                for k in ["mean_match", "volatility_match", "kurtosis_match", "acf_match"]:
+                for k in [
+                    "mean_match",
+                    "volatility_match",
+                    "kurtosis_match",
+                    "acf_match",
+                ]:
                     if k in selected_metrics:
                         metrics[k] = float(selected_metrics[k])
 
@@ -1649,7 +1776,10 @@ while True:
             # - flash crash objectives: composite score itself (higher is better)
             # - other objectives: convert distance-style score to similarity
             # - csv_similarity: equal-weight similarity to input CSV stats
-            if selection_objective in {"flash_crash_evaluation", "flash_crash_composite"}:
+            if selection_objective in {
+                "flash_crash_evaluation",
+                "flash_crash_composite",
+            }:
                 intent_fidelity = float(np.clip(float(selection_score), 0.0, 1.0))
             else:
                 intent_fidelity = float(np.clip(1.0 - float(selection_score), 0.0, 1.0))
@@ -1673,7 +1803,9 @@ while True:
                     sel_kurt = _safe_excess_kurtosis(sel_r)
 
                     def _norm_err(actual: float, target: float, denom: float) -> float:
-                        d = abs(float(actual) - float(target)) / max(float(denom), 1e-12)
+                        d = abs(float(actual) - float(target)) / max(
+                            float(denom), 1e-12
+                        )
                         return float(np.clip(d, 0.0, 1.0))
 
                     d_vol = _norm_err(sel_std, hist_std, hist_std)
@@ -1689,7 +1821,9 @@ while True:
                     fidelity_exc,
                 )
 
-            chart_data = compute_chart_data(data, scenarios[selected_idx], all_scenarios=scenarios)
+            chart_data = compute_chart_data(
+                data, scenarios[selected_idx], all_scenarios=scenarios
+            )
             chart_data["overallMatch"] = float(metrics.get("overall_match", 0.0))
             chart_data["selectedScenarioId"] = int(selected_idx + 1)
             chart_data["selectionObjective"] = selection_objective
@@ -1699,14 +1833,18 @@ while True:
             chart_data["selectionBreakdown"] = selection_breakdown
             chart_data["intentFidelity"] = float(intent_fidelity)
             chart_data["csvSimilarity"] = float(csv_similarity)
-            chart_data["desiredVolatility"] = float(user_knobs.get("desired_volatility", 1.0))
+            chart_data["desiredVolatility"] = float(
+                user_knobs.get("desired_volatility", 1.0)
+            )
 
             # Keep kurtosis stats consistent with display-path selection basis:
             # use log-return excess kurtosis from input CSV and selected scenario path.
             try:
                 hist_log_returns = np.asarray(returns, dtype=float).ravel()
                 hist_log_returns = hist_log_returns[np.isfinite(hist_log_returns)]
-                sel_log_returns = _get_log_returns_from_scenario(scenarios[selected_idx])
+                sel_log_returns = _get_log_returns_from_scenario(
+                    scenarios[selected_idx]
+                )
                 sel_log_returns = sel_log_returns[np.isfinite(sel_log_returns)]
 
                 chart_data["stats"]["historical"]["kurtosis"] = round(
@@ -1745,7 +1883,9 @@ while True:
             job_store.set_chart_data(job_id, chart_data)
             logger.info("Chart data stored for job %s", job_id)
         except Exception as e:
-            logger.warning("Could not compute chart data for job %s: %s", job_id, e, exc_info=True)
+            logger.warning(
+                "Could not compute chart data for job %s: %s", job_id, e, exc_info=True
+            )
 
         # Persist results (now including predicted parameters)
         results_with_predictions = {

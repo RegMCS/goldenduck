@@ -142,7 +142,7 @@ async def download_results(
 async def get_default_csv():
     """
     Get the AAPL_real.csv default file.
-    
+
     In development: serve from local file system (if it exists).
     In production (local file missing): generate presigned S3 URL.
     """
@@ -154,7 +154,7 @@ async def get_default_csv():
             media_type="text/csv",
             filename="AAPL_real.csv",
         )
-    
+
     # Fall back to S3 (production)
     bucket_name = os.environ.get("S3_BUCKET_NAME")
     if not bucket_name:
@@ -162,7 +162,7 @@ async def get_default_csv():
             status_code=404,
             detail="Default CSV file not found locally and S3 not configured",
         )
-    
+
     s3_key = "default-data/AAPL_real.csv"
     try:
         s3_client = boto3.client("s3")

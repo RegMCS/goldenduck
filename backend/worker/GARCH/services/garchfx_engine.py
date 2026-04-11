@@ -110,7 +110,9 @@ class GARCHFXEngine:
                 delta = self._regime_switcher(delta, regime_states, regimes)
 
             # Step 4: Sample stochastic variance from Gamma distribution
-            stochastic_variance = np.random.gamma(shape=shape, scale=theta_step, size=1)[0]
+            stochastic_variance = np.random.gamma(
+                shape=shape, scale=theta_step, size=1
+            )[0]
 
             # Step 5: GARCH-FX equation
             forecasted_variance = (self.omega * delta) + (
@@ -242,7 +244,12 @@ class GARCHFXEngine:
                 mu_sequence = drift_arr[:horizon]
             else:
                 mu_sequence = np.concatenate(
-                    [drift_arr, np.full(horizon - len(drift_arr), float(drift_arr[-1]), dtype=float)]
+                    [
+                        drift_arr,
+                        np.full(
+                            horizon - len(drift_arr), float(drift_arr[-1]), dtype=float
+                        ),
+                    ]
                 )
         else:
             mu_sequence = np.full(horizon, float(base_mu), dtype=float)

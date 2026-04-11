@@ -16,7 +16,7 @@ FLASH_CRASH_TRIGGER_MAX_STEPS = 20
 # This keeps the trigger as a true flash event regardless of horizon length.
 FLASH_CRASH_DELTA_PHASES = [
     (0.55, 1.0),  # Calm
-    (5, 3.5),     # Trigger (resolved dynamically at runtime)
+    (5, 3.5),  # Trigger (resolved dynamically at runtime)
     (0.15, 2.5),  # Stress
     (0.15, 1.5),  # Recovery
     (0.10, 1.1),  # Tail
@@ -25,7 +25,7 @@ FLASH_CRASH_DELTA_PHASES = [
 # Absolute theta values by phase.
 FLASH_CRASH_THETA_PHASES = [
     (0.55, 1e-5),  # Calm
-    (5, 5e-4),     # Trigger (resolved dynamically at runtime)
+    (5, 5e-4),  # Trigger (resolved dynamically at runtime)
     (0.15, 3e-4),  # Stress
     (0.15, 8e-5),  # Recovery
     (0.10, 1e-5),  # Tail
@@ -33,18 +33,20 @@ FLASH_CRASH_THETA_PHASES = [
 
 # Absolute daily drift values by phase.
 FLASH_CRASH_DRIFT_PHASES = [
-    (0.55, 0.0002),   # Calm
-    (5, -0.0015),     # Trigger (resolved dynamically at runtime)
+    (0.55, 0.0002),  # Calm
+    (5, -0.0015),  # Trigger (resolved dynamically at runtime)
     (0.15, -0.0008),  # Stress
-    (0.15, 0.0008),   # Recovery
-    (0.10, 0.0002),   # Tail
+    (0.15, 0.0008),  # Recovery
+    (0.10, 0.0002),  # Tail
 ]
 
 
 SCENARIOS = {
     "sudden_crisis": {
         "description": "Sudden crisis at day 200, lasting 300 days, then recovery",
-        "sequence": lambda horizon: [1.0] * 200 + [2.5] * 300 + [1.2] * max(0, horizon - 500),
+        "sequence": lambda horizon: [1.0] * 200
+        + [2.5] * 300
+        + [1.2] * max(0, horizon - 500),
     },
     "gradual_escalation": {
         "description": "Gradual escalation from normal to extreme stress",
@@ -55,7 +57,8 @@ SCENARIOS = {
     },
     "crisis_waves": {
         "description": "Multiple crisis waves (5 cycles)",
-        "sequence": lambda horizon: ([1.0] * 100 + [2.0] * 100) * (max(1, horizon // 200)),
+        "sequence": lambda horizon: ([1.0] * 100 + [2.0] * 100)
+        * (max(1, horizon // 200)),
     },
     "prolonged_stress": {
         "description": "Extended high-volatility period",
@@ -78,7 +81,9 @@ SCENARIOS = {
 }
 
 
-def _build_phase_sequence(phases: list[tuple[float | int, float]], horizon: int) -> list[float]:
+def _build_phase_sequence(
+    phases: list[tuple[float | int, float]], horizon: int
+) -> list[float]:
     sequence: list[float] = []
     remaining = int(horizon)
 

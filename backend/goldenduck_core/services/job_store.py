@@ -83,7 +83,7 @@ class JobStore:
 
     def set_chart_data(self, job_id: str, chart_data: dict):
         import math
-        
+
         def json_serialize(obj):
             """Handle special float values."""
             if isinstance(obj, float):
@@ -91,8 +91,10 @@ class JobStore:
                     return None
                 return obj
             raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
-        
-        redis_client.set(f"job:{job_id}:chart_data", json.dumps(chart_data, default=json_serialize))
+
+        redis_client.set(
+            f"job:{job_id}:chart_data", json.dumps(chart_data, default=json_serialize)
+        )
 
 
 job_store = JobStore()

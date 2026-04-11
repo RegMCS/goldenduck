@@ -270,14 +270,24 @@ class GARCHService:
             if return_metadata:
                 scenario_metadata.append(
                     {
-                        "volatility_forecast": np.array(volatility_forecast, dtype=float),
+                        "volatility_forecast": np.array(
+                            volatility_forecast, dtype=float
+                        ),
                         "returns": np.array(returns, dtype=float),
                         "theta_sequence": np.array(
-                            theta_sequence if theta_sequence is not None else np.full(horizon, theta),
+                            (
+                                theta_sequence
+                                if theta_sequence is not None
+                                else np.full(horizon, theta)
+                            ),
                             dtype=float,
                         ),
                         "drift_sequence": np.array(
-                            drift_sequence if drift_sequence is not None else np.full(horizon, np.nan),
+                            (
+                                drift_sequence
+                                if drift_sequence is not None
+                                else np.full(horizon, np.nan)
+                            ),
                             dtype=float,
                         ),
                     }
