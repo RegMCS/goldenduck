@@ -58,6 +58,7 @@ function LoginForm() {
           username: data.user.username,
           first_name: data.user.first_name ?? null,
           last_name: data.user.last_name ?? null,
+          is_admin: data.user.is_admin ?? false,
         })
       }
       router.push(next)

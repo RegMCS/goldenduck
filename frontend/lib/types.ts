@@ -105,4 +105,88 @@ export interface JobHistoryItem {
 export interface JobHistoryResponse {
   jobs: JobHistoryItem[]
   total: number
+  total_completed: number
+  total_running: number
+  total_failed: number
+  total_queued: number
+}
+
+export type TrainingStatus = "queued" | "running" | "completed" | "failed"
+
+export interface TrainingRunConfig {
+  testing_mode: boolean
+  n_assets: number
+  n_scenarios: number
+  run_evaluation: boolean
+}
+
+export interface DirectMetrics {
+  rmse: number
+  mae: number
+  r2: number
+  mape?: number
+}
+
+export interface BaselineComparison {
+  ai_score: number
+  baseline_fixed: number
+  baseline_heuristic: number
+  p_value_vs_fixed: number
+  p_value_vs_heuristic: number
+  significant_vs_fixed: boolean
+  significant_vs_heuristic: boolean
+}
+
+export interface EvaluationReport {
+  timestamp: string
+  dataset_size: { train: number; val: number; test: number }
+  direct_metrics: { delta: DirectMetrics }
+  end_to_end_metrics: { mean_score: number }
+  baseline_comparison: BaselineComparison
+  quality_checks: Record<string, boolean>
+  overall_pass: boolean
+}
+
+export interface TrainingRun {
+  id: string
+  status: TrainingStatus
+  config: TrainingRunConfig
+  triggered_by: string
+  started_at: string
+  completed_at: string | null
+  step?: string            // e.g. "Step 2 of 4: Generating samples"
+  step_index?: number      // 1–4
+  model_name?: string      // e.g. "rf_delta_20260402_143000.pkl"
+  is_active?: boolean
+  evaluation_report?: EvaluationReport | null
+  error?: string | null
+}
+
+export interface TrainingRunsResponse {
+  runs: TrainingRun[]
+  total: number
+}
+
+export interface TrainingModel {
+  name: string             // filename e.g. rf_delta_20260402_143000.pkl
+  created_at: string
+  size_bytes: number
+  is_active: boolean
+  run_id?: string
+}
+
+/** Row from GET /api/training/uploads (manual S3 uploads) */
+export interface UploadedModelRow {
+  id: string
+  model_name: string
+  s3_key: string
+  uploaded_by: string
+  created_at: string
+  file_size_bytes: number | null
+  is_active: boolean
+}
+
+export interface UploadedModelsListResponse {
+  uploads: UploadedModelRow[]
+  total: number
 }

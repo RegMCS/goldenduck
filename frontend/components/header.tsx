@@ -2,10 +2,12 @@
 
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
-import { Activity, Settings, Sun, Moon, History, LogOut, User } from "lucide-react"
+import { Activity, Sun, Moon, History, LogOut, User, BrainCircuit, Sliders, Shield } from "lucide-react"
 import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/components/auth-provider"
+
+
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -43,7 +45,10 @@ export function Header() {
                 }`}
               asChild
             >
-              <Link href="/">Configure</Link>
+              <Link href="/">
+                <Sliders className="h-4 w-4" />
+                Configure
+              </Link>
             </Button>
             <Button
               variant="ghost"
@@ -60,7 +65,41 @@ export function Header() {
                 Reports
               </Link>
             </Button>
+            {user?.is_admin && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className={`gap-1.5 ${pathname === "/models"
+                  ? "text-foreground font-semibold bg-muted"
+                  : "text-muted-foreground hover:text-foreground"
+                  }`}
+                asChild
+                id="nav-models-link"
+              >
+                <Link href="/models">
+                  <BrainCircuit className="h-4 w-4" />
+                  Models
+                </Link>
+              </Button>
+            )}
+            {user?.is_admin && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className={`gap-1.5 ${pathname === "/admin/users"
+                  ? "text-foreground font-semibold bg-muted"
+                  : "text-muted-foreground hover:text-foreground"
+                  }`}
+                asChild
+              >
+                <Link href="/admin/users">
+                  <Shield className="h-4 w-4" />
+                  Users
+                </Link>
+              </Button>
+            )}
           </nav>
+
         </div>
         <div className="flex items-center gap-1">
           {!loading && (
@@ -74,9 +113,9 @@ export function Header() {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem asChild>
+                    {/* <DropdownMenuItem asChild>
                       <Link href="/profile">Profile</Link>
-                    </DropdownMenuItem>
+                    </DropdownMenuItem> */}
                     <DropdownMenuItem onClick={async () => { await logout(); router.push("/login") }}>
                       <LogOut className="h-4 w-4" />
                       Log out
@@ -109,10 +148,6 @@ export function Header() {
             <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
             <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
             <span className="sr-only">Toggle theme</span>
-          </Button>
-          <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
-            <Settings className="h-4 w-4" />
-            <span className="sr-only">Settings</span>
           </Button>
         </div>
       </div>

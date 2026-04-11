@@ -195,13 +195,13 @@ export default function ReportsPage() {
                 {user && (
                 <>
                 {/* ── Page Header ── */}
-                <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                     <div>
-                        <div className="flex items-center gap-2 mb-1">
+                        <div className="mb-1 flex items-center gap-2">
                             <Button
                                 variant="ghost"
                                 size="sm"
-                                className="gap-1.5 text-muted-foreground hover:text-foreground -ml-2 h-8"
+                                className="h-8 gap-1.5 -ml-2 text-muted-foreground hover:text-foreground"
                                 asChild
                             >
                                 <Link href="/">
@@ -210,12 +210,19 @@ export default function ReportsPage() {
                                 </Link>
                             </Button>
                         </div>
-                        <h2 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
-                            Generated Reports
-                        </h2>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                            All previously submitted AI model jobs and their results.
-                        </p>
+                        <div className="flex items-center gap-3">
+                            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-primary/10 shadow-sm">
+                                <BarChart3 className="h-5 w-5 text-primary" />
+                            </div>
+                            <div>
+                                <h2 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
+                                    Generated Reports
+                                </h2>
+                                <p className="mt-0.5 text-sm text-muted-foreground">
+                                    All previously submitted AI model jobs and their results.
+                                </p>
+                            </div>
+                        </div>
                     </div>
 
                     <div className="flex items-center gap-2 flex-shrink-0">
@@ -261,20 +268,24 @@ export default function ReportsPage() {
                     <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
                         {(
                             [
-                                { label: "Total", value: data.total, color: "text-foreground" },
+                                {
+                                    label: "Total",
+                                    value: data.total_completed + data.total_running + data.total_failed + data.total_queued,
+                                    color: "text-foreground",
+                                },
                                 {
                                     label: "Completed",
-                                    value: data.jobs.filter((j) => j.status === "completed").length,
+                                    value: data.total_completed,
                                     color: "text-emerald-600 dark:text-emerald-400",
                                 },
                                 {
                                     label: "Running",
-                                    value: data.jobs.filter((j) => j.status === "running").length,
+                                    value: data.total_running,
                                     color: "text-blue-600 dark:text-blue-400",
                                 },
                                 {
                                     label: "Failed",
-                                    value: data.jobs.filter((j) => j.status === "failed").length,
+                                    value: data.total_failed,
                                     color: "text-red-600 dark:text-red-400",
                                 },
                             ] as { label: string; value: number; color: string }[]

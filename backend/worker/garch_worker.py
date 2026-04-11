@@ -12,12 +12,12 @@ from scipy import stats
 
 import io
 import boto3
-from job_scheduler.redis_client import redis_client
-from job_scheduler.services.job_store import job_store
-from job_scheduler.models.enums import JobStatus
+from goldenduck_core.redis_client import redis_client
+from goldenduck_core.services.job_store import job_store
+from goldenduck_core.models.enums import JobStatus
 from worker.GARCH.services.garch_service import GARCHService
-from job_scheduler.db.session import SessionLocal
-from job_scheduler.services.job_service import update_job_status
+from goldenduck_core.db.session import SessionLocal
+from goldenduck_core.services.job_service import update_job_status
 
 # Add ml_training to path for importing ParameterPredictor
 ML_TRAINING_PATH = Path(__file__).parent.parent / "ml_training"

@@ -125,6 +125,14 @@ function ParameterField({ label, description, tooltip, value, onChange, min, max
   )
 }
 
+const countCsvRows = (text: string): number => {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+  return Math.max(lines.length - 1, 0)
+}
+
 interface TradeoffRule {
   condition: (p: MarketParameters) => boolean
   message: string
@@ -134,12 +142,12 @@ const TRADEOFF_RULES: TradeoffRule[] = [
   {
     condition: (p) => p.momentum > 0.7,
     message:
-      "Setting V Momentum > 0.7 will also increase tail thickness (kurtosis +1.5 to +2.0) as a natural side effect of return persistence.",
+      "Setting Momentum > 0.7 will also increase tail thickness (kurtosis +1.5 to +2.0) as a natural side effect of return persistence.",
   },
   {
     condition: (p) => p.fatTails > 1.5 && p.momentum > 0.7,
     message:
-      "Combining Fat Tails > 1.5 with V Momentum > 0.7 will cause kurtosis to hit the model ceiling (~8.0) — expect extreme tail behaviour.",
+      "Combining Fat Tails > 1.5 with Momentum > 0.7 will cause kurtosis to hit the model ceiling (~8.0) — expect extreme tail behaviour.",
   },
   {
     condition: (p) => p.trend > 0.7 || p.trend < -0.7,
@@ -165,7 +173,8 @@ export function ParameterizationForm() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const activeWarnings = TRADEOFF_RULES.filter((r) => r.condition(parameters)).map((r) => r.message)
+  // Removing tradeoff warnings (uncomment if needed subsequently)
+  // const activeWarnings = TRADEOFF_RULES.filter((r) => r.condition(parameters)).map((r) => r.message)
 
   const updateParameter = <K extends keyof MarketParameters>(
     key: K,
@@ -190,7 +199,7 @@ export function ParameterizationForm() {
         const hasAllHeaders = REQUIRED_CSV_HEADERS.every((required) =>
           headers.includes(required)
         )
-        const rowCount = Math.max(lines.length - 1, 0)
+        const rowCount = countCsvRows(text)
         resolve({ validHeaders: hasAllHeaders, rowCount })
       }
       reader.onerror = () => resolve({ validHeaders: false, rowCount: 0 })
@@ -223,6 +232,7 @@ export function ParameterizationForm() {
 
     setFileError(null)
     updateParameter("inputFile", file)
+    updateParameter("timeHorizon", Math.min(MAX_HORIZON_DAYS, rowCount))
   }
 
   const handleRemoveFile = () => {
@@ -327,103 +337,6 @@ export function ParameterizationForm() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base font-semibold text-foreground">
-              Model Parameters
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-6 sm:grid-cols-2">
-            <ParameterField
-              label="Volatility"
-              description="Controls the magnitude of price fluctuations"
-              tooltip={[
-                "Scales overall price swings.",
-                "1.0 = historical level",
-                "2.0 = twice as volatile",
-              ]}
-              value={parameters.volatility}
-              onChange={(v) => updateParameter("volatility", v)}
-              min={0.5}
-              max={2.0}
-              step={0.01}
-            />
-            <ParameterField
-              label="Trend"
-              description="Market direction bias (-1 bearish, 0 neutral, +1 bullish)"
-              tooltip={[
-                "Sets directional drift.",
-                "0 = neutral",
-                "+1 = strong bull (+15% annual)",
-                "−1 = strong bear (−15% annual)",
-                "Note: extreme values (> 0.7) slightly increase skewness as a side effect.",
-              ]}
-              value={parameters.trend}
-              onChange={(v) => updateParameter("trend", v)}
-              min={-1}
-              max={1}
-              step={0.01}
-            />
-            <ParameterField
-              label="Fat Tails"
-              description="Probability of extreme price movements"
-              tooltip={[
-                "Controls how often extreme moves occur.",
-                "1.0 = moderate tail frequency",
-                "2.0 = crash-like tail frequency",
-              ]}
-              value={parameters.fatTails}
-              onChange={(v) => updateParameter("fatTails", v)}
-              min={0.5}
-              max={2.0}
-              step={0.01}
-            />
-            <ParameterField
-              label="V Momentum"
-              description="Volatility momentum / persistence"
-              tooltip={[
-                "Controls return persistence.",
-                "0.5 = neutral",
-                "> 0.7 = trending (today predicts tomorrow)",
-                "< 0.3 = mean-reverting",
-                "Note: high values increase tail thickness as a side effect.",
-              ]}
-              value={parameters.momentum}
-              onChange={(v) => updateParameter("momentum", v)}
-              min={0.0}
-              max={1.0}
-              step={0.01}
-            />
-            <ParameterField
-              label="Time Horizon"
-              description={`Number of trading days to generate. Use longer horizons to clearly observe non-zero trend effects.`}
-              value={parameters.timeHorizon}
-              onChange={(v) => updateParameter("timeHorizon", v)}
-              min={MIN_HORIZON_DAYS}
-              max={MAX_HORIZON_DAYS}
-              step={1}
-            />
-          </CardContent>
-        </Card>
-
-        {activeWarnings.length > 0 && (
-          <div className="rounded-lg border border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 px-4 py-3 space-y-2">
-            <div className="flex items-center gap-2">
-              <TriangleAlert className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
-              <span className="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide">
-                Parameter tradeoffs detected
-              </span>
-            </div>
-            <ul className="space-y-1.5 pl-6 list-disc">
-              {activeWarnings.map((msg) => (
-                <li key={msg} className="text-xs text-amber-800 dark:text-amber-300">
-                  {msg}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base font-semibold text-foreground">
               Input Time Series
             </CardTitle>
           </CardHeader>
@@ -483,6 +396,104 @@ export function ParameterizationForm() {
             </div>
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base font-semibold text-foreground">
+              Model Parameters
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-6 sm:grid-cols-2">
+            <ParameterField
+              label="Volatility"
+              description="Controls the magnitude of price fluctuations"
+              tooltip={[
+                "Scales overall price swings.",
+                "1.0 = historical level",
+                "2.0 = twice as volatile",
+              ]}
+              value={parameters.volatility}
+              onChange={(v) => updateParameter("volatility", v)}
+              min={0.5}
+              max={2.0}
+              step={0.01}
+            />
+            <ParameterField
+              label="Trend"
+              description="Market direction bias (-1 bearish, 0 neutral, +1 bullish)"
+              tooltip={[
+                "Sets directional drift.",
+                "0 = neutral",
+                "+1 = strong bull (+15% annual)",
+                "−1 = strong bear (−15% annual)",
+                "Note: extreme values (> 0.7) slightly increase skewness as a side effect.",
+              ]}
+              value={parameters.trend}
+              onChange={(v) => updateParameter("trend", v)}
+              min={-1}
+              max={1}
+              step={0.01}
+            />
+            <ParameterField
+              label="Fat Tails"
+              description="Probability of extreme price movements"
+              tooltip={[
+                "Controls how often extreme moves occur.",
+                "1.0 = moderate tail frequency",
+                "2.0 = crash-like tail frequency",
+              ]}
+              value={parameters.fatTails}
+              onChange={(v) => updateParameter("fatTails", v)}
+              min={0.5}
+              max={2.0}
+              step={0.01}
+            />
+            <ParameterField
+              label="Momentum"
+              description="Volatility momentum / persistence"
+              tooltip={[
+                "Controls return persistence.",
+                "0.5 = neutral",
+                "> 0.7 = trending (today predicts tomorrow)",
+                "< 0.3 = mean-reverting",
+                "Note: high values increase tail thickness as a side effect.",
+              ]}
+              value={parameters.momentum}
+              onChange={(v) => updateParameter("momentum", v)}
+              min={0.0}
+              max={1.0}
+              step={0.01}
+            />
+            <ParameterField
+              label="Time Horizon"
+              description={`Number of trading days to generate. Use longer horizons to clearly observe non-zero trend effects.`}
+              value={parameters.timeHorizon}
+              onChange={(v) => updateParameter("timeHorizon", v)}
+              min={MIN_HORIZON_DAYS}
+              max={MAX_HORIZON_DAYS}
+              step={1}
+            />
+          </CardContent>
+        </Card>
+
+        {/* {activeWarnings.length > 0 && (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 px-4 py-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <TriangleAlert className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+              <span className="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide">
+                Parameter tradeoffs detected
+              </span>
+            </div>
+            <ul className="space-y-1.5 pl-6 list-disc">
+              {activeWarnings.map((msg) => (
+                <li key={msg} className="text-xs text-amber-800 dark:text-amber-300">
+                  {msg}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )} */}
+
       </div>
 
       <div className="lg:block">
@@ -498,7 +509,7 @@ export function ParameterizationForm() {
                 { label: "Volatility", value: parameters.volatility.toFixed(2) },
                 { label: "Trend", value: parameters.trend.toFixed(2) },
                 { label: "Fat Tails", value: parameters.fatTails.toFixed(2) },
-                { label: "V Momentum", value: parameters.momentum.toFixed(2) },
+                { label: "Momentum", value: parameters.momentum.toFixed(2) },
                 { label: "Time Horizon", value: `${parameters.timeHorizon} days` },
                 { label: "Time Series", value: parameters.inputFile?.name ?? "Not uploaded" },
               ].map((item) => (
@@ -577,6 +588,7 @@ export function ParameterizationForm() {
                 onClick={handleReset}
                 className="w-full gap-2 bg-transparent"
                 size="sm"
+                disabled={isGenerating}
               >
                 <RotateCcw className="h-4 w-4" />
                 Reset
