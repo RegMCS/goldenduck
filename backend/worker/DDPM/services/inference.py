@@ -1,231 +1,123 @@
-"""
-Inference service for DDPM Stage 1 & Stage 2.
-Implements unconditional (Stage 1) and conditional with CFG (Stage 2) path generation.
-"""
 
-import torch
-import torch.nn as nn
 import numpy as np
-from typing import Tuple, Optional
-import logging
-
-logger = logging.getLogger(__name__)
+import torch
+from worker.DDPM.scripts.model import ConditionalDenoiser
+from worker.DDPM.utils import (get_noise_schedule, normalise_cond_vector,
+                                REGIME_PRESETS)
 
 
 class InferenceService:
-    """
-    High-level inference interface for both DDPM stages.
-    Stage 1: Unconditional denoising
-    Stage 2: Conditional denoising with Classifier-Free Guidance (CFG)
-    """
-
-    def __init__(self, device="cpu"):
-        """
-        Args:
-            device: torch device ("cpu" or "cuda")
-        """
-        self.device = device
-
-    def generate_stage1(
-        self,
-        model: nn.Module,
-        scheduler,
-        num_paths: int = 2000,
-        shape: Tuple[int, int, int] = (1, 7, 1260),
-        seed: Optional[int] = None,
-    ) -> np.ndarray:
-        """
-        Generate Stage 1 paths: unconditional DDPM sampling.
-
-        Args:
-            model: Conv1DUNet denoiser (trained on unconditional task)
-            scheduler: DDPMScheduler with noise schedule
-            num_paths: Number of paths to generate
-            shape: (batch_size, num_assets, seq_len) — adjust batch_size from num_paths
-            seed: Random seed for reproducibility
-
-        Returns:
-            Generated paths array of shape (num_paths, num_assets, seq_len)
-        """
-        if seed is not None:
-            torch.manual_seed(seed)
-            np.random.seed(seed)
-
-        model.eval()
-        batch_size = shape[0]
-        generated = []
-
-        num_batches = (num_paths + batch_size - 1) // batch_size
-
-        with torch.no_grad():
-            for batch_idx in range(num_batches):
-                remaining = min(batch_size, num_paths - batch_idx * batch_size)
-                batch_shape = (remaining, shape[1], shape[2])
-
-                # Run p_sample_loop from scheduler
-                x_0 = scheduler.p_sample_loop(model, batch_shape, self.device)
-                generated.append(x_0.cpu().numpy())
-
-        generated = np.concatenate(generated, axis=0)[:num_paths]
-        logger.info(f"Stage 1: Generated {generated.shape[0]} paths")
-        return generated
-
-    def generate_stage2_cfg(
-        self,
-        model: nn.Module,
-        scheduler,
-        conditioning: np.ndarray,
-        num_paths: int = 2000,
-        guidance_scale: float = 3.0,
-        shape: Tuple[int, int, int] = (1, 7, 1260),
-        seed: Optional[int] = None,
-    ) -> np.ndarray:
-        """
-        Generate Stage 2 paths: conditional DDPM with Classifier-Free Guidance.
-
-        CFG formula:
-          ε̂(x_t, t, c) = ε_u(x_t, t) + guidance_scale * (ε_c(x_t, t, c) - ε_u(x_t, t))
-        where ε_u = unconditional, ε_c = conditional, c = conditioning vector
-
-        Args:
-            model: ConditionalDenoiser (trained on conditional task with CFG dropout)
-            scheduler: DDPMScheduler with noise schedule
-            conditioning: Array of shape (4,) — [realised_vol, drift, tail_index, momentum]
-            num_paths: Number of paths to generate
-            guidance_scale: CFG scale (1.0 = no guidance, >1.0 = stronger conditioning)
-            shape: (batch_size, num_assets, seq_len)
-            seed: Random seed for reproducibility
-
-        Returns:
-            Generated paths array of shape (num_paths, num_assets, seq_len)
-        """
-        if seed is not None:
-            torch.manual_seed(seed)
-            np.random.seed(seed)
-
-        model.eval()
-        batch_size = shape[0]
-        generated = []
-
-        num_batches = (num_paths + batch_size - 1) // batch_size
-
-        # Expand conditioning to batch
-        c_batch = torch.from_numpy(conditioning).float().to(self.device)
-
-        with torch.no_grad():
-            for batch_idx in range(num_batches):
-                remaining = min(batch_size, num_paths - batch_idx * batch_size)
-                batch_shape = (remaining, shape[1], shape[2])
-
-                # Generate using CFG
-                x_0 = self._p_sample_loop_cfg(
-                    model, scheduler, batch_shape, c_batch[:remaining], guidance_scale
-                )
-                generated.append(x_0.cpu().numpy())
-
-        generated = np.concatenate(generated, axis=0)[:num_paths]
-        logger.info(
-            f"Stage 2 (CFG scale={guidance_scale}): Generated {generated.shape[0]} paths"
+    def __init__(self, checkpoint_path: str, artefact_dir: str,
+                 device_str: str = "auto"):
+        self.device = torch.device(
+            "cuda" if (device_str == "auto" and torch.cuda.is_available())
+            else device_str if device_str != "auto" else "cpu"
         )
-        return generated
+        ckpt = torch.load(checkpoint_path, map_location=self.device)
+
+        self.seq_len  = ckpt.get("seq_len",  1260)
+        self.n_assets = ckpt.get("n_assets",    7)
+
+        self.model = ConditionalDenoiser(
+            seq_len  = self.seq_len,
+            in_ch    = self.n_assets,
+            cond_dim = 4,
+        ).to(self.device)
+        self.model.load_state_dict(ckpt["model_state_dict"])
+        self.model.eval()
+
+        self.cond_norm_params = {
+            "min": np.load(f"{artefact_dir}/cond_norm_min.npy"),
+            "max": np.load(f"{artefact_dir}/cond_norm_max.npy"),
+        }
+        self.window_scales = np.load(f"{artefact_dir}/window_scales.npy")
+
+        T = 200
+        self.betas, self.alphas, self.alpha_bar = get_noise_schedule(
+            T=T, device=str(self.device))
+        self.T = T
+        print(f"InferenceService loaded | seq_len={self.seq_len} "
+              f"n_assets={self.n_assets} | device={self.device}")
+
+    def _cond_tensor(self, raw_dict: dict) -> torch.Tensor:
+        normed = normalise_cond_vector(raw_dict, self.cond_norm_params)
+        return torch.tensor(normed, dtype=torch.float32,
+                             device=self.device).unsqueeze(0)
 
     @torch.no_grad()
-    def _p_sample_loop_cfg(
-        self,
-        model: nn.Module,
-        scheduler,
-        shape: Tuple[int, int, int],
-        conditioning: torch.Tensor,
-        guidance_scale: float = 3.0,
-    ) -> torch.Tensor:
+    def generate(self, regime: str = "crisis",
+                 n_paths: int = 100,
+                 guidance_scale: float = 3.0,
+                 asset_idx: int = 0,
+                 custom_cond: dict = None) -> np.ndarray:
         """
-        Iterative denoising with Classifier-Free Guidance.
+        Generate n_paths synthetic log-return paths.
 
-        Args:
-            model: ConditionalDenoiser
-            scheduler: DDPMScheduler
-            shape: Batch shape (batch_size, channels, length)
-            conditioning: Conditioning tensor (batch_size, 4)
-            guidance_scale: CFG scale
+        regime         : "calm" | "highvol" | "crisis" | "custom"
+        n_paths        : number of paths to generate
+        guidance_scale : CFG scale (higher = stronger conditioning)
+        asset_idx      : which asset to extract (0 = SPY by default)
+        custom_cond    : dict with realised_vol, drift, tail_index, momentum
+                         (required when regime="custom")
 
-        Returns:
-            Denoised tensor of shape (batch_size, channels, length)
+        Returns: np.ndarray of shape (n_paths, seq_len)
         """
-        x = torch.randn(shape, device=self.device)
-        batch_size = shape[0]
+        if regime == "custom":
+            if custom_cond is None:
+                raise ValueError("custom_cond dict required when regime='custom'")
+            raw_cond = custom_cond
+        else:
+            raw_cond = REGIME_PRESETS[regime]
 
-        for t_idx in reversed(range(scheduler.T)):
-            t_batch = torch.full((batch_size,), t_idx, device=self.device, dtype=torch.long)
+        c_cond = self._cond_tensor(raw_cond).expand(n_paths, -1)
+        c_null = torch.zeros_like(c_cond)
 
-            # Conditional prediction
-            pred_noise_cond = model(x, t_batch, conditioning)
+        x = torch.randn(n_paths, self.n_assets, self.seq_len,
+                        device=self.device)
 
-            # Unconditional prediction (zero conditioning)
-            c_uncond = torch.zeros_like(conditioning)
-            pred_noise_uncond = model(x, t_batch, c_uncond)
+        for t_idx in reversed(range(self.T)):
+            t_batch = torch.full((n_paths,), t_idx, dtype=torch.long,
+                                  device=self.device)
+            beta    = self.betas[t_idx]
+            alpha   = self.alphas[t_idx]
+            ab      = self.alpha_bar[t_idx]
 
-            # CFG: interpolate between unconditional and conditional
-            pred_noise = pred_noise_uncond + guidance_scale * (
-                pred_noise_cond - pred_noise_uncond
-            )
+            noise_cond = self.model(x, t_batch, c_cond)
+            noise_null = self.model(x, t_batch, c_null)
+            noise_pred = noise_null + guidance_scale * (noise_cond - noise_null)
 
-            alpha = 1.0 - scheduler.betas[t_idx]
-            sqrt_one_m = scheduler.sqrt_one_m_ab[t_idx].clamp(min=1e-5)
-            coef = scheduler.betas[t_idx] / sqrt_one_m
-
-            # Posterior mean
-            mean = (1.0 / alpha.sqrt()) * (x - coef * pred_noise)
-            mean = mean.clamp(-2, 2)
+            x0_pred = (x - torch.sqrt(1 - ab) * noise_pred) / torch.sqrt(ab)
+            x0_pred = torch.clamp(x0_pred, -5.0, 5.0)
 
             if t_idx > 0:
-                noise = torch.randn_like(x)
-                std = scheduler.posterior_var[t_idx].sqrt().clamp(min=1e-8)
-                x = mean + std * noise
+                ab_prev = self.alpha_bar[t_idx - 1]
+                coef1   = torch.sqrt(ab_prev) * beta / (1 - ab)
+                coef2   = torch.sqrt(alpha) * (1 - ab_prev) / (1 - ab)
+                mu      = coef1 * x0_pred + coef2 * x
+                sigma   = torch.sqrt(beta * (1 - ab_prev) / (1 - ab))
+                x       = mu + sigma * torch.randn_like(x)
             else:
-                x = mean
+                x = x0_pred
 
-            x = x.clamp(-2, 2)
+        paths_norm   = x[:, asset_idx, :].cpu().numpy()
+        median_scale = float(np.median(self.window_scales[:, asset_idx]))
+        return paths_norm * median_scale
 
-        return x
-
-    def generate_paths(
-        self,
-        model: nn.Module,
-        scheduler,
-        stage: int = 1,
-        num_paths: int = 2000,
-        conditioning: Optional[np.ndarray] = None,
-        guidance_scale: float = 1.0,
-        seed: Optional[int] = None,
-    ) -> np.ndarray:
+    @torch.no_grad()
+    def generate_all_regimes(self, n_paths: int = 100,
+                              guidance_scale: float = 3.0,
+                              asset_idx: int = 0) -> dict:
         """
-        Unified interface for both stages.
-
-        Args:
-            model: Denoiser network (Conv1DUNet or ConditionalDenoiser)
-            scheduler: DDPMScheduler
-            stage: 1 or 2
-            num_paths: Number of paths
-            conditioning: [realised_vol, drift, tail_index, momentum] (required for stage=2)
-            guidance_scale: CFG scale (stage=2 only)
-            seed: Random seed
-
-        Returns:
-            Generated paths array (num_paths, 7, 1260)
+        Generate paths for all 3 regime presets.
+        Returns: {"calm": (N,L), "highvol": (N,L), "crisis": (N,L)}
         """
-        if stage == 1:
-            return self.generate_stage1(
-                model, scheduler, num_paths=num_paths, seed=seed
+        results = {}
+        for regime in ["calm", "highvol", "crisis"]:
+            print(f"Generating {regime} paths ...")
+            results[regime] = self.generate(
+                regime         = regime,
+                n_paths        = n_paths,
+                guidance_scale = guidance_scale,
+                asset_idx      = asset_idx,
             )
-        elif stage == 2:
-            assert conditioning is not None, "Conditioning required for stage=2"
-            return self.generate_stage2_cfg(
-                model,
-                scheduler,
-                conditioning,
-                num_paths=num_paths,
-                guidance_scale=guidance_scale,
-                seed=seed,
-            )
-        else:
-            raise ValueError(f"Invalid stage: {stage}")
+        return results
