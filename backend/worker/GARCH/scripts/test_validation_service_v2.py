@@ -15,12 +15,12 @@ from worker.GARCH.services.validation_service_v2 import ValidationServiceV2
 # CONFIG: Set paths and knobs here
 # ============================================
 ORIGINAL_OHLCV_PATH = Path("backend/AAPL.csv")
-SYNTHETIC_OHLCV_PATH = Path("backend/synthetic-scenarios/synthetic_realised_vol_low.csv")
+SYNTHETIC_OHLCV_PATH = Path("backend/garch_validation/garch_baseline.csv")
 
 # Knobs used to generate the synthetic data
 USER_KNOBS = {
-    "volatility": 0.5,  # 0.5 - 2.0
-    "fat_tails": 1.0,   # 0.5 - 2.0
+    "volatility": 1,  # 0.5 - 2.0
+    "fat_tails": 1,   # 0.5 - 2.0
     "momentum": 0.5,    # 0.0 - 1.0
     "trend": 0.0,       # -1.0 - 1.0
 }
@@ -30,8 +30,8 @@ def _load_ohlcv(path: Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"File not found: {path}")
     df = pd.read_csv(path)
-    if "path_id" in df.columns:
-        df = df[df["path_id"] == 1].copy()
+    if "scenario_id" in df.columns:
+        df = df[df["scenario_id"] == 1].copy()
     return df
 
 
