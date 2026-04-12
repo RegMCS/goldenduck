@@ -17,29 +17,33 @@ class ValidationServiceV2:
 
     Compares original OHLCV vs synthetic OHLCV using:
     - Volatility: std dev of log returns
-    - Fat tails: kurtosis only
-    - Momentum: Hurst exponent of percent returns
-    - Trend: MA(20) slope avg, MA(20) uptrend ratio, start-end return
+    - Fat tails: kurtosis (matched on normalized kurtosis)
+    - Momentum: Hurst exponent of cumulative return process
+    - Trend: mean log return
 
-    Matching uses linear decay without a tolerance band.
+    Matching uses hybrid linear decay (relative + absolute floor).
     """
 
     def __init__(
         self,
         *,
-        volatility_tol_rel: float = 0.05,
-        fat_tail_tol_rel: float = 0.10,
-        momentum_tol_abs: float = 0.05,
-        trend_start_end_tol_abs: float = 0.01,
-        trend_ma_slope_tol_pct: float = 0.01,
-        trend_up_ratio_tol_abs: float = 0.10,
+        # Shared hybrid-decay knobs:
+        # err = |synth-target| / (abs_floor + rel_weight*|target|)
+        # match = max(0, 1 - decay_k*err)
+        decay_rel_weight: float = 1.0,
+        decay_k: float = 1.0,
+        # Per-metric absolute floors (protect very small targets from over-penalization)
+        volatility_abs_floor: float = 0.10,
+        fat_tail_abs_floor: float = 0.50,
+        momentum_abs_floor: float = 0.10,
+        trend_abs_floor: float = 0.01,
     ) -> None:
-        self.volatility_tol_rel = float(volatility_tol_rel)
-        self.fat_tail_tol_rel = float(fat_tail_tol_rel)
-        self.momentum_tol_abs = float(momentum_tol_abs)
-        self.trend_start_end_tol_abs = float(trend_start_end_tol_abs)
-        self.trend_ma_slope_tol_pct = float(trend_ma_slope_tol_pct)
-        self.trend_up_ratio_tol_abs = float(trend_up_ratio_tol_abs)
+        self.decay_rel_weight = float(decay_rel_weight)
+        self.decay_k = float(decay_k)
+        self.volatility_abs_floor = float(volatility_abs_floor)
+        self.fat_tail_abs_floor = float(fat_tail_abs_floor)
+        self.momentum_abs_floor = float(momentum_abs_floor)
+        self.trend_abs_floor = float(trend_abs_floor)
 
     def validate(
         self,
@@ -71,8 +75,10 @@ class ValidationServiceV2:
         vol_orig = self._to_scalar(np.std(orig_log_returns, ddof=1))
         vol_synth = self._to_scalar(np.std(synth_log_returns, ddof=1))
         vol_target = vol_orig * volatility_knob
-        vol_match = self._match_relative(
-            vol_target, vol_synth, self.volatility_tol_rel
+        vol_match = self._match_hybrid(
+            vol_target,
+            vol_synth,
+            abs_floor=self.volatility_abs_floor,
         )
 
         # =========================
@@ -83,8 +89,13 @@ class ValidationServiceV2:
         # Requested mapping:
         # target_kurt = hist_kurt * (1 + 0.15 * (fat_tails - 1))
         kurt_target = kurt_orig * (1.0 + 0.15 * (fat_tails_knob - 1.0))
-        kurt_match = self._match_relative(
-            kurt_target, kurt_synth, self.fat_tail_tol_rel
+        kurt_orig_norm = self._normalize_kurtosis(kurt_orig)
+        kurt_target_norm = self._normalize_kurtosis(kurt_target)
+        kurt_synth_norm = self._normalize_kurtosis(kurt_synth)
+        kurt_match = self._match_hybrid(
+            kurt_target_norm,
+            kurt_synth_norm,
+            abs_floor=self.fat_tail_abs_floor,
         )
 
         fat_tail_match = kurt_match
@@ -92,8 +103,10 @@ class ValidationServiceV2:
         # =========================
         # Momentum (Hurst exponent)
         # =========================
-        hurst_orig = self._hurst_exponent(orig_returns)
-        hurst_synth = self._hurst_exponent(synth_returns)
+        # Use log returns and estimate H on cumulative demeaned increments
+        # so random-walk-like behavior is centered around H ~= 0.5.
+        hurst_orig = self._hurst_exponent(orig_log_returns)
+        hurst_synth = self._hurst_exponent(synth_log_returns)
         # Keep knob semantics centered at 0.5:
         # knob=0.5 -> target = original
         # knob<0.5 -> move target toward 0.5 (more anti-persistent/random)
@@ -101,23 +114,18 @@ class ValidationServiceV2:
         momentum_scale = momentum_knob / 0.5
         hurst_target = 0.5 + (hurst_orig - 0.5) * momentum_scale
         hurst_target = float(np.clip(hurst_target, 0.0, 1.0))
-        momentum_match = self._match_absolute(
-            hurst_target, hurst_synth, self.momentum_tol_abs
+        momentum_match = self._match_hybrid(
+            hurst_target,
+            hurst_synth,
+            abs_floor=self.momentum_abs_floor,
         )
 
         # =========================
-        # Trend
+        # Trend (mean returns)
         # =========================
-        ma_slope_orig, up_ratio_orig = self._ma20_trend_metrics(orig_close)
-        ma_slope_synth, up_ratio_synth = self._ma20_trend_metrics(synth_close)
-
-        start_end_orig = self._start_end_return(orig_close)
-        start_end_synth = self._start_end_return(synth_close)
-
-        # MA slope tolerance is % of average original price level
-        avg_price_orig = self._to_scalar(np.mean(orig_close))
-        ma_slope_tol_abs = abs(avg_price_orig) * self.trend_ma_slope_tol_pct
-        # Trend mapping:
+        trend_orig = self._to_scalar(np.mean(orig_log_returns))
+        trend_synth = self._to_scalar(np.mean(synth_log_returns))
+        # Keep existing trend knob semantics:
         # - trend = 0.0 => multiplier = 1.0 (neutral)
         # - trend = +1.0 => multiplier = 2.0 (stronger same direction)
         # - trend = -1.0 => multiplier = -1.0 (full reversal)
@@ -125,26 +133,12 @@ class ValidationServiceV2:
             trend_multiplier = 1.0 + 2.0 * trend_knob
         else:
             trend_multiplier = 1.0 + trend_knob
-        ma_slope_target = ma_slope_orig * trend_multiplier
-        start_end_target = start_end_orig * trend_multiplier
-
-        if trend_knob >= 0:
-            up_ratio_target = up_ratio_orig + trend_knob * (1.0 - up_ratio_orig)
-        else:
-            up_ratio_target = up_ratio_orig + trend_knob * (up_ratio_orig)
-        up_ratio_target = float(np.clip(up_ratio_target, 0.0, 1.0))
-
-        ma_slope_match = self._match_absolute(
-            ma_slope_target, ma_slope_synth, ma_slope_tol_abs
+        trend_target = trend_orig * trend_multiplier
+        trend_match = self._match_hybrid(
+            trend_target,
+            trend_synth,
+            abs_floor=self.trend_abs_floor,
         )
-        up_ratio_match = self._match_absolute(
-            up_ratio_target, up_ratio_synth, self.trend_up_ratio_tol_abs
-        )
-        start_end_match = self._match_absolute(
-            start_end_target, start_end_synth, self.trend_start_end_tol_abs
-        )
-
-        trend_match = (ma_slope_match + up_ratio_match + start_end_match) / 3.0
 
         # =========================
         # Overall
@@ -156,7 +150,9 @@ class ValidationServiceV2:
                 "original": vol_orig,
                 "target": vol_target,
                 "synthetic": vol_synth,
-                "tolerance_rel": self.volatility_tol_rel,
+                "decay_abs_floor": self.volatility_abs_floor,
+                "decay_rel_weight": self.decay_rel_weight,
+                "decay_k": self.decay_k,
                 "match_pct": vol_match * 100.0,
             },
             "fat_tails": {
@@ -164,7 +160,12 @@ class ValidationServiceV2:
                     "original": kurt_orig,
                     "target": kurt_target,
                     "synthetic": kurt_synth,
-                    "tolerance_rel": self.fat_tail_tol_rel,
+                    "original_normalized": kurt_orig_norm,
+                    "target_normalized": kurt_target_norm,
+                    "synthetic_normalized": kurt_synth_norm,
+                    "decay_abs_floor": self.fat_tail_abs_floor,
+                    "decay_rel_weight": self.decay_rel_weight,
+                    "decay_k": self.decay_k,
                     "match_pct": kurt_match * 100.0,
                 },
                 "match_pct": fat_tail_match * 100.0,
@@ -174,32 +175,22 @@ class ValidationServiceV2:
                     "original": hurst_orig,
                     "target": hurst_target,
                     "synthetic": hurst_synth,
-                    "tolerance_abs": self.momentum_tol_abs,
+                    "decay_abs_floor": self.momentum_abs_floor,
+                    "decay_rel_weight": self.decay_rel_weight,
+                    "decay_k": self.decay_k,
                     "match_pct": momentum_match * 100.0,
                 },
                 "match_pct": momentum_match * 100.0,
             },
             "trend": {
-                "ma20_slope_avg": {
-                    "original": ma_slope_orig,
-                    "target": ma_slope_target,
-                    "synthetic": ma_slope_synth,
-                    "tolerance_abs": ma_slope_tol_abs,
-                    "match_pct": ma_slope_match * 100.0,
-                },
-                "ma20_up_ratio": {
-                    "original": up_ratio_orig,
-                    "target": up_ratio_target,
-                    "synthetic": up_ratio_synth,
-                    "tolerance_abs": self.trend_up_ratio_tol_abs,
-                    "match_pct": up_ratio_match * 100.0,
-                },
-                "start_end_return": {
-                    "original": start_end_orig,
-                    "target": start_end_target,
-                    "synthetic": start_end_synth,
-                    "tolerance_abs": self.trend_start_end_tol_abs,
-                    "match_pct": start_end_match * 100.0,
+                "mean_return": {
+                    "original": trend_orig,
+                    "target": trend_target,
+                    "synthetic": trend_synth,
+                    "decay_abs_floor": self.trend_abs_floor,
+                    "decay_rel_weight": self.decay_rel_weight,
+                    "decay_k": self.decay_k,
+                    "match_pct": trend_match * 100.0,
                 },
                 "match_pct": trend_match * 100.0,
             },
@@ -231,15 +222,18 @@ class ValidationServiceV2:
 
     def _hurst_exponent(self, returns: np.ndarray) -> float:
         """
-        Estimate Hurst exponent from returns using the variance-time scaling method:
-        std(x[t+lag] - x[t]) ~ lag^H
+        Estimate Hurst exponent with variance-time scaling on cumulative returns:
+        Let y_t = cumsum(r_t - mean(r)).
+        Then std(y[t+lag] - y[t]) ~ lag^H.
+        For uncorrelated returns (random walk), H is typically near 0.5.
         """
-        x = np.asarray(returns, dtype=float)
-        x = x[np.isfinite(x)]
-        n = x.size
+        r = np.asarray(returns, dtype=float)
+        r = r[np.isfinite(r)]
+        n = r.size
         if n < 20:
             return float("nan")
 
+        y = np.cumsum(r - np.mean(r))
         max_lag = min(100, n // 2)
         if max_lag < 3:
             return float("nan")
@@ -249,7 +243,7 @@ class ValidationServiceV2:
         tau: list[float] = []
 
         for lag in lags:
-            diffs = x[lag:] - x[:-lag]
+            diffs = y[lag:] - y[:-lag]
             s = float(np.std(diffs))
             if np.isfinite(s) and s > 0.0:
                 used_lags.append(float(lag))
@@ -279,25 +273,27 @@ class ValidationServiceV2:
             return float("nan")
         return (last - first) / first
 
-    def _match_relative(self, orig: float, synth: float, tol_rel: float) -> float:
-        if not np.isfinite(orig) or not np.isfinite(synth):
+    def _match_hybrid(self, target: float, synth: float, abs_floor: float) -> float:
+        """
+        Hybrid linear decay:
+        err = |synth-target| / (abs_floor + rel_weight*|target|)
+        match = max(0, 1 - decay_k*err)
+        """
+        if not np.isfinite(target) or not np.isfinite(synth):
             return 0.0
-        eps = 1e-12
-        delta_rel = abs(synth - orig) / (abs(orig) + eps)
-        # No tolerance band: decay starts immediately from delta=0.
-        return self._decay_match(delta_rel, scale=tol_rel)
+        denom = abs(abs_floor) + self.decay_rel_weight * abs(target)
+        if denom <= 0:
+            return 0.0
+        err = abs(synth - target) / denom
+        return float(max(0.0, 1.0 - (self.decay_k * err)))
 
-    def _match_absolute(self, orig: float, synth: float, tol_abs: float) -> float:
-        if not np.isfinite(orig) or not np.isfinite(synth):
-            return 0.0
-        delta = abs(synth - orig)
-        # No tolerance band: decay starts immediately from delta=0.
-        return self._decay_match(delta, scale=tol_abs)
-
-    def _decay_match(self, delta: float, scale: float) -> float:
-        if scale <= 0:
-            return 0.0
-        return float(max(0.0, 1.0 - (delta / scale)))
+    def _normalize_kurtosis(self, value: float) -> float:
+        """
+        Signed log normalization to compress heavy-tailed ranges while preserving sign.
+        """
+        if not np.isfinite(value):
+            return float("nan")
+        return float(np.sign(value) * np.log1p(abs(value)))
 
     def _to_scalar(self, value) -> float:
         if isinstance(value, (float, int)):
