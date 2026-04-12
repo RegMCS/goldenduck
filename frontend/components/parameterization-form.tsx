@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useRef } from "react"
+import React, { useState, useRef, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Upload, X, FileText, Sparkles, RotateCcw, Download, AlertCircle, CheckCircle2, Loader2, TriangleAlert, ChevronUp, ChevronDown } from "lucide-react"
 import { Input } from "@/components/ui/input"
@@ -17,13 +17,29 @@ import {
 import { useAuth } from "@/components/auth-provider"
 import Link from "next/link"
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? ""
-const DEFAULT_TICKER = "AAPL"
 const MIN_HORIZON_DAYS = 500
 const MAX_HORIZON_DAYS = 2600
 const MIN_CSV_ROWS = 500
+const TWEAKABLE_KNOBS = [
+  { key: "volatility", label: "Volatility" },
+  { key: "trend", label: "Trend" },
+  { key: "fatTails", label: "Fat Tails" },
+  { key: "momentum", label: "Momentum" },
+] as const
+type TweakedKnobKey = (typeof TWEAKABLE_KNOBS)[number]["key"]
+type KnobBaseline = Pick<MarketParameters, TweakedKnobKey>
+type PresetMode = "bull" | "flash" | null
 
 type JobStatus = "queued" | "running" | "completed" | "failed"
+
+export function getTweakedKnobLabels(
+  parameters: MarketParameters,
+  baseline: KnobBaseline = defaultParameters
+): string[] {
+  return TWEAKABLE_KNOBS.filter(
+    ({ key }) => parameters[key] !== baseline[key]
+  ).map(({ label }) => label)
+}
 
 
 interface ParameterFieldProps {
@@ -69,6 +85,7 @@ function ParameterField({ label, description, tooltip, value, onChange, min, max
         <Input
           type="text"
           inputMode="decimal"
+          aria-label={label}
           value={localValue}
           onChange={(e) => setLocalValue(e.target.value)}
           onBlur={commit}
@@ -140,6 +157,11 @@ interface TradeoffRule {
 
 const TRADEOFF_RULES: TradeoffRule[] = [
   {
+    condition: (p) => p.timeHorizon < MIN_HORIZON_DAYS,
+    message:
+      `A time horizon below ${MIN_HORIZON_DAYS} days reduces the amount of data available for the model to learn from. We'll do our best, but results may be less statistically reliable — a longer horizon will produce more accurate synthetic data.`,
+  },
+  {
     condition: (p) => p.momentum > 0.7,
     message:
       "Setting Momentum > 0.7 will also increase tail thickness (kurtosis +1.5 to +2.0) as a natural side effect of return persistence.",
@@ -161,10 +183,67 @@ const TRADEOFF_RULES: TradeoffRule[] = [
   },
 ]
 
+let defaultCsvLoadPromise: Promise<File | null> | null = null
+
+const loadDefaultCsvFile = async (): Promise<File | null> => {
+  try {
+    const response = await fetch("/api/default-csv")
+    if (!response.ok) {
+      return null
+    }
+
+    const contentType = response.headers.get("content-type")
+    let blob: Blob
+
+    if (contentType?.includes("application/json")) {
+      const data = await response.json()
+      if (!data.url) return null
+
+      const csvResponse = await fetch(data.url)
+      if (!csvResponse.ok) return null
+      blob = await csvResponse.blob()
+    } else {
+      blob = await response.blob()
+    }
+
+    const file = new File([blob], "AAPL_real.csv", { type: "text/csv" })
+
+    const validation = await new Promise<{ validHeaders: boolean; rowCount: number }>((resolve) => {
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        const text = e.target?.result as string
+        const lines = text
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter((l) => l.length > 0)
+        const firstLine = (lines[0] ?? "").toLowerCase().trim()
+        const headers = firstLine.split(",").map((h) => h.trim())
+        const hasAllHeaders = REQUIRED_CSV_HEADERS.every((required) =>
+          headers.includes(required)
+        )
+        const rowCount = countCsvRows(text)
+        resolve({ validHeaders: hasAllHeaders, rowCount })
+      }
+      reader.onerror = () => resolve({ validHeaders: false, rowCount: 0 })
+      reader.readAsText(file)
+    })
+
+    if (!validation.validHeaders || validation.rowCount < MIN_CSV_ROWS) {
+      return null
+    }
+
+    return file
+  } catch {
+    return null
+  }
+}
+
 export function ParameterizationForm() {
   const router = useRouter()
   const { user, logout } = useAuth()
   const [parameters, setParameters] = useState<MarketParameters>(defaultParameters)
+  const [knobBaseline, setKnobBaseline] = useState<KnobBaseline>(defaultParameters)
+  const [presetMode, setPresetMode] = useState<PresetMode>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [fileError, setFileError] = useState<string | null>(null)
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null)
@@ -173,14 +252,80 @@ export function ParameterizationForm() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Removing tradeoff warnings (uncomment if needed subsequently)
-  // const activeWarnings = TRADEOFF_RULES.filter((r) => r.condition(parameters)).map((r) => r.message)
+  // Auto-load AAPL_real.csv on component mount
+  useEffect(() => {
+    let isMounted = true
+    if (!defaultCsvLoadPromise) {
+      defaultCsvLoadPromise = loadDefaultCsvFile()
+    }
+
+    defaultCsvLoadPromise.then((file) => {
+      if (!isMounted || !file) return
+      setParameters((prev) => ({
+        ...prev,
+        inputFile: prev.inputFile ?? file,
+      }))
+      setFileError(null)
+    })
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
+  const activeWarnings = TRADEOFF_RULES.filter((r) => r.condition(parameters)).map((r) => r.message)
+  const tweakedKnobs = getTweakedKnobLabels(parameters, knobBaseline)
+  const knobLimitError =
+    presetMode === null && tweakedKnobs.length > 1
+      ? `You can only change one knob at a time. Reset these to default first: ${tweakedKnobs.join(", ")}.`
+      : null
+
+  const isTweakableKnobKey = (key: keyof MarketParameters): key is TweakedKnobKey =>
+    TWEAKABLE_KNOBS.some((knob) => knob.key === key)
+
 
   const updateParameter = <K extends keyof MarketParameters>(
     key: K,
     value: MarketParameters[K]
   ) => {
+    if (isTweakableKnobKey(key) && presetMode !== null) {
+      setPresetMode(null)
+      setKnobBaseline(defaultParameters)
+    }
+    setGenerateError(null)
     setParameters((prev) => ({ ...prev, [key]: value }))
+  }
+
+  const applyBullRunPreset = () => {
+    const presetKnobs: KnobBaseline = {
+      volatility: 0.5,
+      trend: 1.0,
+      fatTails: 0.6,
+      momentum: 0.85,
+    }
+    setGenerateError(null)
+    setPresetMode("bull")
+    setKnobBaseline(presetKnobs)
+    setParameters((prev) => ({
+      ...prev,
+      ...presetKnobs,
+    }))
+  }
+
+  const applyFlashCrashPreset = () => {
+    const presetKnobs: KnobBaseline = {
+      volatility: 1.5,
+      trend: -0.2,
+      fatTails: 2.0,
+      momentum: 0.5,
+    }
+    setGenerateError(null)
+    setPresetMode("flash")
+    setKnobBaseline(presetKnobs)
+    setParameters((prev) => ({
+      ...prev,
+      ...presetKnobs,
+    }))
   }
 
   const validateCsvStructure = (
@@ -248,6 +393,12 @@ export function ParameterizationForm() {
       setGenerateError("Please upload a CSV file before generating.")
       return
     }
+
+    if (knobLimitError) {
+      setGenerateError(knobLimitError)
+      return
+    }
+
     setGenerateError(null)
 
     setIsGenerating(true)
@@ -301,6 +452,17 @@ export function ParameterizationForm() {
             clearInterval(pollIntervalRef.current!)
             setDownloadUrl(`/api/download/user/${userId}/${data.job_id}`)
             setIsGenerating(false)
+            localStorage.setItem(
+              `goldenduck_job_params_${data.job_id}`,
+              JSON.stringify({
+                volatility: parameters.volatility,
+                trend: parameters.trend,
+                fatTails: parameters.fatTails,
+                momentum: parameters.momentum,
+                timeHorizon: parameters.timeHorizon,
+                fileName: parameters.inputFile?.name ?? null,
+              })
+            )
             router.push(`/results?jobId=${data.job_id}`)
           } else if (statusData.status === "failed") {
             clearInterval(pollIntervalRef.current!)
@@ -321,6 +483,8 @@ export function ParameterizationForm() {
 
   const handleReset = () => {
     setParameters(defaultParameters)
+    setKnobBaseline(defaultParameters)
+    setPresetMode(null)
     setFileError(null)
     setJobStatus(null)
     setDownloadUrl(null)
@@ -396,12 +560,36 @@ export function ParameterizationForm() {
             </div>
           </CardContent>
         </Card>
-
+        
         <Card>
           <CardHeader>
-            <CardTitle className="text-base font-semibold text-foreground">
-              Model Parameters
-            </CardTitle>
+            <div className="flex items-center justify-between gap-3">
+              <CardTitle className="text-base font-semibold text-foreground">
+                Model Parameters
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  onClick={applyBullRunPreset}
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Bull Run Preset
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  onClick={applyFlashCrashPreset}
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Flash Crash Preset
+                </Button>
+              </div>
+            </div>
           </CardHeader>
           <CardContent className="grid gap-6 sm:grid-cols-2">
             <ParameterField
@@ -422,11 +610,12 @@ export function ParameterizationForm() {
               label="Trend"
               description="Market direction bias (-1 bearish, 0 neutral, +1 bullish)"
               tooltip={[
-                "Sets directional drift.",
-                "0 = neutral",
-                "+1 = strong bull (+15% annual)",
-                "−1 = strong bear (−15% annual)",
-                "Note: extreme values (> 0.7) slightly increase skewness as a side effect.",
+                "Controls the overall market direction.",
+                "-1.0 = strong downtrend (~−50% annual drift)",
+                "-0.5 = mild downtrend (~−25% annual drift)",
+                "0.0 = neutral (historical level)",
+                "+0.5 = mild uptrend (~+25% annual drift)",
+                "+1.0 = strong uptrend (~+50% annual drift)",
               ]}
               value={parameters.trend}
               onChange={(v) => updateParameter("trend", v)}
@@ -438,9 +627,10 @@ export function ParameterizationForm() {
               label="Fat Tails"
               description="Probability of extreme price movements"
               tooltip={[
-                "Controls how often extreme moves occur.",
-                "1.0 = moderate tail frequency",
-                "2.0 = crash-like tail frequency",
+                "Controls how often extreme price moves occur.",
+                "0.5 = rare extremes (calmer than history)",
+                "1.0 = historical level",
+                "2.0 = twice as likely to see extreme moves",
               ]}
               value={parameters.fatTails}
               onChange={(v) => updateParameter("fatTails", v)}
@@ -452,11 +642,11 @@ export function ParameterizationForm() {
               label="Momentum"
               description="Volatility momentum / persistence"
               tooltip={[
-                "Controls return persistence.",
-                "0.5 = neutral",
-                "> 0.7 = trending (today predicts tomorrow)",
-                "< 0.3 = mean-reverting",
-                "Note: high values increase tail thickness as a side effect.",
+                "Controls how much past volatility influences the next period.",
+                "0.0 = no persistence (each day is independent)",
+                "0.5 = moderate persistence (historical level)",
+                "0.7 = strong persistence (trends carry forward noticeably)",
+                "1.0 = maximum persistence (highly trending behaviour)",
               ]}
               value={parameters.momentum}
               onChange={(v) => updateParameter("momentum", v)}
@@ -476,7 +666,7 @@ export function ParameterizationForm() {
           </CardContent>
         </Card>
 
-        {/* {activeWarnings.length > 0 && (
+        {activeWarnings.length > 0 && (
           <div className="rounded-lg border border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 px-4 py-3 space-y-2">
             <div className="flex items-center gap-2">
               <TriangleAlert className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
@@ -492,8 +682,16 @@ export function ParameterizationForm() {
               ))}
             </ul>
           </div>
-        )} */}
+        )}
 
+        {knobLimitError && (
+          <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3">
+            <div className="flex items-start gap-2 text-sm text-destructive">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{knobLimitError}</span>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="lg:block">
@@ -553,7 +751,7 @@ export function ParameterizationForm() {
               ) : (
                 <Button
                   onClick={handleGenerate}
-                  disabled={isGenerating}
+                  disabled={isGenerating || !!knobLimitError}
                   className="w-full gap-2"
                   size="lg"
                 >

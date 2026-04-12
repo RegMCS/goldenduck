@@ -20,15 +20,12 @@ interface DrawdownChartProps {
 }
 
 export function DrawdownChart({ data, height = 400 }: DrawdownChartProps) {
-  const displayData = useMemo(() => {
-    const maxPoints = 300
-    const step = Math.max(1, Math.floor(data.length / maxPoints))
-    return data.filter((_, i) => i % step === 0).map((d) => ({
-      ...d,
-      historicalDdPct: d.historicalDrawdown * 100,
-      syntheticDdPct: d.syntheticDrawdown * 100,
-    }))
-  }, [data])
+  const displayData = useMemo(() => data.map((d, i) => ({
+    ...d,
+    idx: i + 1,
+    historicalDdPct: d.historicalDrawdown * 100,
+    syntheticDdPct: d.syntheticDrawdown * 100,
+  })), [data])
 
   const { histMaxDd, synthMaxDd, histAvgDd, synthAvgDd } = useMemo(() => {
     const hDds = data.map((d) => d.historicalDrawdown)
@@ -40,12 +37,6 @@ export function DrawdownChart({ data, height = 400 }: DrawdownChartProps) {
       synthAvgDd: (sDds.reduce((a, b) => a + b, 0) / sDds.length) * 100,
     }
   }, [data])
-
-  const formatDate = useCallback((value: string) => {
-    if (!value) return ""
-    const parts = value.split("-")
-    return `${parts[1]}/${parts[2]}`
-  }, [])
 
   const CustomTooltip = useCallback(
     ({
@@ -97,7 +88,7 @@ export function DrawdownChart({ data, height = 400 }: DrawdownChartProps) {
         <div>
           <h4 className="text-sm font-semibold text-foreground">Drawdown Analysis</h4>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Peak-to-trough decline · dotted lines mark max drawdown · drag brush to zoom
+            Peak-to-trough decline · dotted lines mark max drawdown
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3 text-xs shrink-0">
@@ -131,7 +122,7 @@ export function DrawdownChart({ data, height = 400 }: DrawdownChartProps) {
       </div>
 
       <ResponsiveContainer width="100%" height={height}>
-        <AreaChart data={displayData} margin={{ top: 8, right: 12, bottom: 0, left: 10 }}>
+        <AreaChart data={displayData} margin={{ top: 8, right: 12, bottom: 24, left: 10 }}>
           <defs>
             <linearGradient id="ddHistGrad" x1="0" y1="1" x2="0" y2="0">
               <stop offset="5%" stopColor="#ef4444" stopOpacity={0.35} />
@@ -144,12 +135,12 @@ export function DrawdownChart({ data, height = 400 }: DrawdownChartProps) {
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" opacity={0.4} />
           <XAxis
-            dataKey="date"
-            tickFormatter={formatDate}
+            dataKey="idx"
             tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
             tickLine={false}
             axisLine={{ stroke: "var(--border)" }}
             interval={Math.max(1, Math.floor(displayData.length / 8))}
+            label={{ value: "Data points", position: "insideBottomRight", offset: 0, dy: 18, fontSize: 9, fill: "var(--muted-foreground)" }}
           />
           <YAxis
             tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
@@ -186,12 +177,11 @@ export function DrawdownChart({ data, height = 400 }: DrawdownChartProps) {
             }}
           />
           <Brush
-            dataKey="date"
+            dataKey="idx"
             height={28}
             stroke="var(--border)"
             fill="var(--card)"
             travellerWidth={8}
-            tickFormatter={formatDate}
           />
           <Area
             type="monotone"
@@ -214,6 +204,7 @@ export function DrawdownChart({ data, height = 400 }: DrawdownChartProps) {
           />
         </AreaChart>
       </ResponsiveContainer>
+      <p className="-mt-3 text-center text-[10px] text-muted-foreground/60">Drag handles to zoom · scroll to pan</p>
     </div>
   )
 }

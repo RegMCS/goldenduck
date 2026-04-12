@@ -47,6 +47,72 @@ class ValidationService:
             logger.error(f"Could not convert {type(value)} to scalar: {value}")
             raise
 
+    def _safe_hurst_momentum(self, returns_arr: np.ndarray) -> float:
+        """
+        Estimate Hurst-based momentum score in [0, 1].
+        """
+        x = np.asarray(returns_arr).ravel()
+        x = x[np.isfinite(x)]
+        if len(x) < 20:
+            return 0.5
+
+        y = np.cumsum(x - float(np.mean(x)))
+        if float(np.std(y)) < 1e-12:
+            return 0.5
+
+        lags = np.array([2, 4, 8, 16, 32, 64], dtype=int)
+        lags = lags[lags < (len(y) // 2)]
+        if len(lags) < 2:
+            return 0.5
+
+        log_lags = []
+        log_tau = []
+        for lag in lags:
+            diff = y[lag:] - y[:-lag]
+            tau = float(np.std(diff))
+            if tau > 1e-12 and np.isfinite(tau):
+                log_lags.append(np.log(float(lag)))
+                log_tau.append(np.log(tau))
+
+        if len(log_lags) < 2:
+            return 0.5
+
+        try:
+            hurst = float(np.polyfit(np.array(log_lags), np.array(log_tau), 1)[0])
+        except Exception:
+            return 0.5
+
+        if not np.isfinite(hurst):
+            return 0.5
+        return float(np.clip(hurst, 0.0, 1.0))
+
+    def _target_hurst_from_momentum_knob(
+        self,
+        desired_momentum: float,
+        input_hurst: float,
+        low_anchor: float = 0.15,
+        high_anchor: float = 0.85,
+    ) -> float:
+        """
+        Map momentum knob to target H with anchors:
+          - knob=0.5 preserves input_hurst
+          - knob=0.0 targets low_anchor
+          - knob=1.0 targets high_anchor
+        """
+        m = float(np.clip(desired_momentum, 0.0, 1.0))
+        h_in = float(np.clip(input_hurst, 0.0, 1.0))
+        lo = float(np.clip(low_anchor, 0.0, 1.0))
+        hi = float(np.clip(high_anchor, 0.0, 1.0))
+
+        if m <= 0.5:
+            t = m / 0.5
+            target = lo + t * (h_in - lo)
+        else:
+            t = (m - 0.5) / 0.5
+            target = h_in + t * (hi - h_in)
+
+        return float(np.clip(target, 0.0, 1.0))
+
     def _compute_mean_sign_match(
         self,
         synth_mean: float,
@@ -188,7 +254,7 @@ class ValidationService:
         synth_volatility = self._to_scalar(np.std(synth_returns, ddof=1))
         synth_kurtosis = self._to_scalar(stats.kurtosis(synth_returns))
         synth_skewness = self._to_scalar(stats.skew(synth_returns))
-        synth_acf = self._to_scalar(acf(synth_returns, nlags=10, fft=False)[1])
+        synth_hurst = self._safe_hurst_momentum(synth_returns)
 
         # Extract user knobs
         desired_volatility = float(user_knobs.get("desired_volatility", 1.0))
@@ -204,9 +270,19 @@ class ValidationService:
         desired_volatility_value = self.historical_volatility * desired_volatility
 
         # Mean return (trend) — absolute bull/bear target
-        # desired_trend=-1 -> -15% annual, 0 -> 0%, +1 -> +15% annual.
+        # Piecewise annual drift mapping (symmetric for bearish):
+        # +0.25 -> +10%/yr, +0.50 -> +25%/yr, +1.00 -> +50%/yr.
         historical_mean = self._to_scalar(np.mean(self.historical_returns))
-        desired_mean_value = desired_trend * 0.15 / 252
+        trend_mag = float(np.clip(abs(desired_trend), 0.0, 1.0))
+        if trend_mag <= 0.25:
+            annual_drift_mag = 0.40 * trend_mag
+        elif trend_mag <= 0.50:
+            annual_drift_mag = 0.10 + 0.60 * (trend_mag - 0.25)
+        else:
+            annual_drift_mag = 0.25 + 0.50 * (trend_mag - 0.50)
+
+        annual_drift = np.sign(desired_trend) * annual_drift_mag
+        desired_mean_value = annual_drift / 252
 
         # Kurtosis (with momentum adjustment)
         base_kurtosis = self.historical_kurtosis * desired_fat_tails
@@ -216,8 +292,26 @@ class ValidationService:
         # Kurtosis (FIXED - use model-aware formula)
         # desired_kurtosis_value = self.compute_target_kurtosis(user_knobs)
 
-        # Skewness (AR(1) + trend contributions)
-        phi = -0.1 + 0.4 * desired_momentum
+        # Momentum target (Hurst-based, aligned with generation)
+        hist_hurst = float(
+            user_knobs.get(
+                "historical_hurst", self._safe_hurst_momentum(self.historical_returns)
+            )
+        )
+        desired_hurst_value = float(
+            user_knobs.get(
+                "target_hurst",
+                self._target_hurst_from_momentum_knob(
+                    desired_momentum,
+                    hist_hurst,
+                    low_anchor=0.15,
+                    high_anchor=0.85,
+                ),
+            )
+        )
+
+        # Skewness (AR(1) + trend contributions), using phi derived from target H.
+        phi = float(np.clip(2.0 * desired_hurst_value - 1.0, -0.95, 0.95))
 
         if abs(phi) > 0.05:
             k = 0.5 + (desired_volatility - 1.0) * 0.2
@@ -232,9 +326,9 @@ class ValidationService:
 
         desired_skewness_value = ar_skewness + trend_skewness
 
-        # ACF (with GARCH dampening)
-        dampening = 0.9
-        desired_acf_value = phi * dampening
+        # Momentum match from Hurst target.
+        momentum_match = 1.0 - abs(synth_hurst - desired_hurst_value) / 0.5
+        momentum_match = float(np.clip(momentum_match, 0.0, 1.0))
 
         # ============================================================
         # Calculate matches
@@ -254,9 +348,8 @@ class ValidationService:
             synth_std=synth_volatility,
             sample_size=len(synth_returns),
         )
-        acf_match = 1.0 - abs(synth_acf - desired_acf_value) / (
-            abs(desired_acf_value) + 0.1
-        )
+        # Keep legacy key name for frontend compatibility.
+        acf_match = momentum_match
 
         # ============================================================
         # Logging
@@ -268,7 +361,7 @@ class ValidationService:
             f"\n  Volatility: synth={synth_volatility:.4f} vs desired={desired_volatility_value:.4f} (match={volatility_match:.2%})"
             f"\n  Kurtosis: synth={synth_kurtosis:.2f} vs desired={desired_kurtosis_value:.2f} (match={kurtosis_match:.2%})"
             f"\n  Skewness (diagnostic): synth={synth_skewness:.4f} vs desired={desired_skewness_value:.4f}"
-            f"\n  ACF: synth={synth_acf:.4f} vs desired={desired_acf_value:.4f} (match={acf_match:.2%})"
+            f"\n  Hurst Momentum: synth={synth_hurst:.4f} vs desired={desired_hurst_value:.4f} (match={acf_match:.2%})"
         )
 
         return {
@@ -287,8 +380,11 @@ class ValidationService:
             "skewness_historical": self._to_scalar(self.historical_skewness),
             "skewness_synthetic": synth_skewness,
             "skewness_desired": desired_skewness_value,
-            "acf_synthetic": synth_acf,
-            "acf_desired": desired_acf_value,
+            "hurst_synthetic": synth_hurst,
+            "hurst_desired": desired_hurst_value,
+            # Backward-compatible aliases used by current frontend contract
+            "acf_synthetic": synth_hurst,
+            "acf_desired": desired_hurst_value,
             "acf_match": acf_match,
             "overall_match": (
                 mean_match + volatility_match + kurtosis_match + acf_match

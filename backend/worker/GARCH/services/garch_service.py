@@ -164,6 +164,8 @@ class GARCHService:
         num_scenarios: int = 1000,
         horizon: int = 252,
         theta: float = 0.005,
+        theta_sequence: Optional[np.ndarray] = None,
+        drift_sequence: Optional[np.ndarray] = None,
         scenario_type: Optional[str] = None,
         delta_sequence: Optional[np.ndarray] = None,
         regime_switching: bool = False,
@@ -171,6 +173,7 @@ class GARCHService:
         regimes: Optional[List[float]] = None,
         seed_start: int = 42,
         user_knobs: Optional[Dict] = None,
+        return_metadata: bool = False,
     ) -> List[pd.DataFrame]:
         """Generate synthetic scenarios using GARCH-FX framework"""
 
@@ -205,6 +208,18 @@ class GARCHService:
             delta_sequence, _ = generate_scenario(scenario_type, horizon)
             logger.info(f"Using scenario: {scenario_type}")
 
+        if scenario_type == "flash_crash" and theta_sequence is None:
+            from .scenarios import get_flash_crash_theta_schedule
+
+            theta_sequence = get_flash_crash_theta_schedule(horizon)
+            logger.info("Using flash_crash theta scheduler")
+
+        if scenario_type == "flash_crash" and drift_sequence is None:
+            from .scenarios import get_flash_crash_drift_schedule
+
+            drift_sequence = get_flash_crash_drift_schedule(horizon)
+            logger.info("Using flash_crash drift scheduler")
+
         initial_price = float(self.historical_data["Close"].iloc[-1].item())
 
         # ============================================================
@@ -214,6 +229,7 @@ class GARCHService:
         historical_returns = np.log(close_prices[1:] / close_prices[:-1])
 
         scenarios = []
+        scenario_metadata = []
 
         for scenario_idx in range(num_scenarios):
             np.random.seed(seed_start + scenario_idx)
@@ -222,6 +238,7 @@ class GARCHService:
             volatility_forecast = engine.forecast(
                 horizon=horizon,
                 theta=theta,
+                theta_sequence=theta_sequence,
                 delta_sequence=delta_sequence,
                 regime_switching=regime_switching,
                 regime_states=regime_states,
@@ -238,6 +255,7 @@ class GARCHService:
                 distribution=shock_distribution,
                 user_knobs=user_knobs,  # ← For trend and momentum
                 historical_returns=historical_returns,  # ← For baseline mean
+                drift_sequence=drift_sequence,
             )
 
             cumulative_returns = np.cumsum(returns)
@@ -249,11 +267,38 @@ class GARCHService:
                 nu=self.garch_params.get("nu", 8),
             )
             scenarios.append(ohlcv)
+            if return_metadata:
+                scenario_metadata.append(
+                    {
+                        "volatility_forecast": np.array(
+                            volatility_forecast, dtype=float
+                        ),
+                        "returns": np.array(returns, dtype=float),
+                        "theta_sequence": np.array(
+                            (
+                                theta_sequence
+                                if theta_sequence is not None
+                                else np.full(horizon, theta)
+                            ),
+                            dtype=float,
+                        ),
+                        "drift_sequence": np.array(
+                            (
+                                drift_sequence
+                                if drift_sequence is not None
+                                else np.full(horizon, np.nan)
+                            ),
+                            dtype=float,
+                        ),
+                    }
+                )
 
             if (scenario_idx + 1) % 100 == 0:
                 logger.info(f"Generated {scenario_idx + 1}/{num_scenarios} scenarios")
 
         logger.info(f"Successfully generated {num_scenarios} GARCH-FX scenarios")
+        if return_metadata:
+            return scenarios, scenario_metadata
         return scenarios
 
         # ========== ORIGINAL METHOD (PRESERVED) ==========

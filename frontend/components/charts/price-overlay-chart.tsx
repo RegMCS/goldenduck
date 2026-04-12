@@ -20,11 +20,7 @@ interface PriceOverlayChartProps {
 }
 
 export function PriceOverlayChart({ data, height = 400 }: PriceOverlayChartProps) {
-  const displayData = useMemo(() => {
-    const maxPoints = 300
-    const step = Math.max(1, Math.floor(data.length / maxPoints))
-    return data.filter((_, i) => i % step === 0)
-  }, [data])
+  const displayData = useMemo(() => data.map((d, i) => ({ ...d, idx: i + 1 })), [data])
 
   const correlation = useMemo(() => {
     if (data.length < 2) return 0
@@ -42,12 +38,6 @@ export function PriceOverlayChart({ data, height = 400 }: PriceOverlayChartProps
     }
     return cov / Math.sqrt(hVar * sVar)
   }, [data])
-
-  const formatDate = useCallback((value: string) => {
-    if (!value) return ""
-    const parts = value.split("-")
-    return `${parts[1]}/${parts[2]}`
-  }, [])
 
   const CustomTooltip = useCallback(
     ({
@@ -109,9 +99,7 @@ export function PriceOverlayChart({ data, height = 400 }: PriceOverlayChartProps
       <div className="flex items-start justify-between gap-4">
         <div>
           <h4 className="text-sm font-semibold text-foreground">Price Time Series Overlay</h4>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Historical vs synthetic · normalised to 100 · drag the brush below to zoom
-          </p>
+          <p className="text-xs text-muted-foreground mt-0.5">Historical vs synthetic · normalised to 100</p>
         </div>
         <div className="flex items-center gap-4 text-xs shrink-0">
           <div className="flex items-center gap-1.5">
@@ -132,7 +120,7 @@ export function PriceOverlayChart({ data, height = 400 }: PriceOverlayChartProps
       </div>
 
       <ResponsiveContainer width="100%" height={height}>
-        <AreaChart data={displayData} margin={{ top: 8, right: 12, bottom: 0, left: 10 }}>
+        <AreaChart data={displayData} margin={{ top: 8, right: 12, bottom: 29, left: 10 }}>
           <defs>
             <linearGradient id="histGradOverlay" x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.25} />
@@ -145,12 +133,12 @@ export function PriceOverlayChart({ data, height = 400 }: PriceOverlayChartProps
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" opacity={0.4} />
           <XAxis
-            dataKey="date"
-            tickFormatter={formatDate}
+            dataKey="idx"
             tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
             tickLine={false}
             axisLine={{ stroke: "var(--border)" }}
             interval={Math.max(1, Math.floor(displayData.length / 8))}
+            label={{ value: "Data points", position: "insideBottomRight", offset: 0, dy: 18, fontSize: 9, fill: "var(--muted-foreground)" }}
           />
           <YAxis
             tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
@@ -167,12 +155,11 @@ export function PriceOverlayChart({ data, height = 400 }: PriceOverlayChartProps
             opacity={0.35}
           />
           <Brush
-            dataKey="date"
+            dataKey="idx"
             height={28}
             stroke="var(--border)"
             fill="var(--card)"
             travellerWidth={8}
-            tickFormatter={formatDate}
           />
           <Area
             type="monotone"
@@ -195,6 +182,7 @@ export function PriceOverlayChart({ data, height = 400 }: PriceOverlayChartProps
           />
         </AreaChart>
       </ResponsiveContainer>
+      <p className="-mt-3 text-center text-[10px] text-muted-foreground/60">Drag handles to zoom · scroll to pan</p>
     </div>
   )
 }
