@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react"
+import React from "react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi, beforeEach } from "vitest"
 import { ParameterizationForm, getTweakedKnobLabels } from "@/components/parameterization-form"
@@ -59,6 +60,63 @@ describe("ParameterizationForm", () => {
       setItem: vi.fn(),
     }
     global.localStorage = localStorageMock as any
+  })
+
+  it("loads default CSV only once on mount", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof Request
+            ? input.url
+            : String(input)
+
+      if (url.includes("/api/auth/me")) {
+        return Promise.resolve({
+          ok: false,
+          json: async () => ({}),
+          headers: new Headers(),
+        } as Response)
+      }
+
+      if (url.includes("/api/default-csv")) {
+        return Promise.resolve({
+          ok: false,
+          statusText: "Not Found",
+          json: async () => ({}),
+          headers: new Headers(),
+        } as Response)
+      }
+
+      return Promise.resolve({
+        ok: false,
+        json: async () => ({}),
+        headers: new Headers(),
+      } as Response)
+    })
+
+    vi.mocked(global.fetch).mockImplementation(fetchMock as any)
+
+    render(
+      <React.StrictMode>
+        <AuthProvider>
+          <ParameterizationForm />
+        </AuthProvider>
+      </React.StrictMode>
+    )
+
+    await waitFor(() => {
+      const defaultCsvCalls = fetchMock.mock.calls.filter(([input]) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof Request
+              ? input.url
+              : String(input)
+        return url.includes("/api/default-csv")
+      })
+      expect(defaultCsvCalls).toHaveLength(1)
+    })
   })
 
   it("renders with default parameters", () => {
@@ -166,12 +224,12 @@ describe("ParameterizationForm", () => {
     renderWithAuth(<ParameterizationForm />)
     const generateButton = await screen.findByRole("button", { name: /generate data/i })
 
-    const volatilityInput = screen.getAllByDisplayValue(String(defaultParameters.volatility))[0]
+    const volatilityInput = screen.getByRole("textbox", { name: /volatility/i })
     await user.clear(volatilityInput)
     await user.type(volatilityInput, "1.4")
     await user.tab()
 
-    const trendInput = screen.getAllByDisplayValue(String(defaultParameters.trend))[0]
+    const trendInput = screen.getByRole("textbox", { name: /trend/i })
     await user.clear(trendInput)
     await user.type(trendInput, "0.2")
     await user.tab()

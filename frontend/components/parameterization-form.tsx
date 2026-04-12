@@ -17,8 +17,6 @@ import {
 import { useAuth } from "@/components/auth-provider"
 import Link from "next/link"
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? ""
-const DEFAULT_TICKER = "AAPL"
 const MIN_HORIZON_DAYS = 500
 const MAX_HORIZON_DAYS = 2600
 const MIN_CSV_ROWS = 500
@@ -30,6 +28,7 @@ const TWEAKABLE_KNOBS = [
 ] as const
 type TweakedKnobKey = (typeof TWEAKABLE_KNOBS)[number]["key"]
 type KnobBaseline = Pick<MarketParameters, TweakedKnobKey>
+type PresetMode = "bull" | "flash" | null
 
 type JobStatus = "queued" | "running" | "completed" | "failed"
 
@@ -86,6 +85,7 @@ function ParameterField({ label, description, tooltip, value, onChange, min, max
         <Input
           type="text"
           inputMode="decimal"
+          aria-label={label}
           value={localValue}
           onChange={(e) => setLocalValue(e.target.value)}
           onBlur={commit}
@@ -183,11 +183,67 @@ const TRADEOFF_RULES: TradeoffRule[] = [
   },
 ]
 
+let defaultCsvLoadPromise: Promise<File | null> | null = null
+
+const loadDefaultCsvFile = async (): Promise<File | null> => {
+  try {
+    const response = await fetch("/api/default-csv")
+    if (!response.ok) {
+      return null
+    }
+
+    const contentType = response.headers.get("content-type")
+    let blob: Blob
+
+    if (contentType?.includes("application/json")) {
+      const data = await response.json()
+      if (!data.url) return null
+
+      const csvResponse = await fetch(data.url)
+      if (!csvResponse.ok) return null
+      blob = await csvResponse.blob()
+    } else {
+      blob = await response.blob()
+    }
+
+    const file = new File([blob], "AAPL_real.csv", { type: "text/csv" })
+
+    const validation = await new Promise<{ validHeaders: boolean; rowCount: number }>((resolve) => {
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        const text = e.target?.result as string
+        const lines = text
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter((l) => l.length > 0)
+        const firstLine = (lines[0] ?? "").toLowerCase().trim()
+        const headers = firstLine.split(",").map((h) => h.trim())
+        const hasAllHeaders = REQUIRED_CSV_HEADERS.every((required) =>
+          headers.includes(required)
+        )
+        const rowCount = countCsvRows(text)
+        resolve({ validHeaders: hasAllHeaders, rowCount })
+      }
+      reader.onerror = () => resolve({ validHeaders: false, rowCount: 0 })
+      reader.readAsText(file)
+    })
+
+    if (!validation.validHeaders || validation.rowCount < MIN_CSV_ROWS) {
+      return null
+    }
+
+    return file
+  } catch {
+    return null
+  }
+}
+
 export function ParameterizationForm() {
   const router = useRouter()
   const { user, logout } = useAuth()
   const [parameters, setParameters] = useState<MarketParameters>(defaultParameters)
   const [knobBaseline, setKnobBaseline] = useState<KnobBaseline>(defaultParameters)
+  const [presetMode, setPresetMode] = useState<PresetMode>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [fileError, setFileError] = useState<string | null>(null)
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null)
@@ -198,147 +254,44 @@ export function ParameterizationForm() {
 
   // Auto-load AAPL_real.csv on component mount
   useEffect(() => {
-    const loadDefaultFile = async () => {
-      try {
-        // Call the Next.js proxy endpoint (which proxies to backend)
-        const response = await fetch("/api/default-csv")
-        
-        if (!response.ok) {
-          throw new Error(`Failed to fetch default CSV: ${response.statusText}`)
-        }
-        
-        const contentType = response.headers.get("content-type")
-        
-        let blob: Blob
-        
-        // Check if response is JSON (S3 presigned URL) or direct CSV content
-        if (contentType?.includes("application/json")) {
-          const data = await response.json()
-          if (!data.url) throw new Error("Invalid response: no URL provided")
-          
-          // Fetch the CSV from the presigned URL
-          const csvResponse = await fetch(data.url)
-          if (!csvResponse.ok) throw new Error("Failed to download CSV from S3")
-          blob = await csvResponse.blob()
-        } else {
-          // Direct CSV content (development)
-          blob = await response.blob()
-        }
-        
-        const file = new File([blob], "AAPL_real.csv", { type: "text/csv" })
-        
-        // Validate CSV structure inline
-        const validation = await new Promise<{ validHeaders: boolean; rowCount: number }>((resolve) => {
-          const reader = new FileReader()
-          reader.onload = (e) => {
-            const text = e.target?.result as string
-            const lines = text
-              .split(/\r?\n/)
-              .map((l) => l.trim())
-              .filter((l) => l.length > 0)
-            const firstLine = (lines[0] ?? "").toLowerCase().trim()
-            const headers = firstLine.split(",").map((h) => h.trim())
-            const hasAllHeaders = REQUIRED_CSV_HEADERS.every((required) =>
-              headers.includes(required)
-            )
-            const rowCount = Math.max(lines.length - 1, 0)
-            resolve({ validHeaders: hasAllHeaders, rowCount })
-          }
-          reader.onerror = () => resolve({ validHeaders: false, rowCount: 0 })
-          reader.readAsText(file)
-        })
-        
-        if (validation.validHeaders && validation.rowCount >= MIN_CSV_ROWS) {
-          setParameters((prev) => ({ ...prev, inputFile: file }))
-          setFileError(null)
-        } else {
-          setFileError(`Invalid CSV structure (headers valid: ${validation.validHeaders}, rows: ${validation.rowCount})`)
-        }
-      } catch (error) {
-        // Silently fail if default file is not available - user can still upload manually
-      }
+    let isMounted = true
+    if (!defaultCsvLoadPromise) {
+      defaultCsvLoadPromise = loadDefaultCsvFile()
     }
 
-    loadDefaultFile()
+    defaultCsvLoadPromise.then((file) => {
+      if (!isMounted || !file) return
+      setParameters((prev) => ({
+        ...prev,
+        inputFile: prev.inputFile ?? file,
+      }))
+      setFileError(null)
+    })
+
+    return () => {
+      isMounted = false
+    }
   }, [])
 
   const activeWarnings = TRADEOFF_RULES.filter((r) => r.condition(parameters)).map((r) => r.message)
   const tweakedKnobs = getTweakedKnobLabels(parameters, knobBaseline)
   const knobLimitError =
-    tweakedKnobs.length > 1
+    presetMode === null && tweakedKnobs.length > 1
       ? `You can only change one knob at a time. Reset these to default first: ${tweakedKnobs.join(", ")}.`
       : null
-  // Auto-load AAPL_real.csv on component mount
-  useEffect(() => {
-    const loadDefaultFile = async () => {
-      try {
-        // Call the Next.js proxy endpoint (which proxies to backend)
-        const response = await fetch("/api/default-csv")
-        
-        if (!response.ok) {
-          throw new Error(`Failed to fetch default CSV: ${response.statusText}`)
-        }
-        
-        const contentType = response.headers.get("content-type")
-        
-        let blob: Blob
-        
-        // Check if response is JSON (S3 presigned URL) or direct CSV content
-        if (contentType?.includes("application/json")) {
-          const data = await response.json()
-          if (!data.url) throw new Error("Invalid response: no URL provided")
-          
-          // Fetch the CSV from the presigned URL
-          const csvResponse = await fetch(data.url)
-          if (!csvResponse.ok) throw new Error("Failed to download CSV from S3")
-          blob = await csvResponse.blob()
-        } else {
-          // Direct CSV content (development)
-          blob = await response.blob()
-        }
-        
-        const file = new File([blob], "AAPL_real.csv", { type: "text/csv" })
-        
-        // Validate CSV structure inline
-        const validation = await new Promise<{ validHeaders: boolean; rowCount: number }>((resolve) => {
-          const reader = new FileReader()
-          reader.onload = (e) => {
-            const text = e.target?.result as string
-            const lines = text
-              .split(/\r?\n/)
-              .map((l) => l.trim())
-              .filter((l) => l.length > 0)
-            const firstLine = (lines[0] ?? "").toLowerCase().trim()
-            const headers = firstLine.split(",").map((h) => h.trim())
-            const hasAllHeaders = REQUIRED_CSV_HEADERS.every((required) =>
-              headers.includes(required)
-            )
-            const rowCount = Math.max(lines.length - 1, 0)
-            resolve({ validHeaders: hasAllHeaders, rowCount })
-          }
-          reader.onerror = () => resolve({ validHeaders: false, rowCount: 0 })
-          reader.readAsText(file)
-        })
-        
-        if (validation.validHeaders && validation.rowCount >= MIN_CSV_ROWS) {
-          setParameters((prev) => ({ ...prev, inputFile: file }))
-          setFileError(null)
-        } else {
-          setFileError(`Invalid CSV structure (headers valid: ${validation.validHeaders}, rows: ${validation.rowCount})`)
-        }
-      } catch (error) {
-        // Silently fail if default file is not available - user can still upload manually
-      }
-    }
 
-    loadDefaultFile()
-  }, [])
+  const isTweakableKnobKey = (key: keyof MarketParameters): key is TweakedKnobKey =>
+    TWEAKABLE_KNOBS.some((knob) => knob.key === key)
 
 
   const updateParameter = <K extends keyof MarketParameters>(
     key: K,
     value: MarketParameters[K]
   ) => {
+    if (isTweakableKnobKey(key) && presetMode !== null) {
+      setPresetMode(null)
+      setKnobBaseline(defaultParameters)
+    }
     setGenerateError(null)
     setParameters((prev) => ({ ...prev, [key]: value }))
   }
@@ -351,6 +304,7 @@ export function ParameterizationForm() {
       momentum: 0.85,
     }
     setGenerateError(null)
+    setPresetMode("bull")
     setKnobBaseline(presetKnobs)
     setParameters((prev) => ({
       ...prev,
@@ -366,6 +320,7 @@ export function ParameterizationForm() {
       momentum: 0.5,
     }
     setGenerateError(null)
+    setPresetMode("flash")
     setKnobBaseline(presetKnobs)
     setParameters((prev) => ({
       ...prev,
@@ -529,6 +484,7 @@ export function ParameterizationForm() {
   const handleReset = () => {
     setParameters(defaultParameters)
     setKnobBaseline(defaultParameters)
+    setPresetMode(null)
     setFileError(null)
     setJobStatus(null)
     setDownloadUrl(null)
@@ -709,7 +665,7 @@ export function ParameterizationForm() {
             />
           </CardContent>
         </Card>
-{/* 
+
         {activeWarnings.length > 0 && (
           <div className="rounded-lg border border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 px-4 py-3 space-y-2">
             <div className="flex items-center gap-2">
@@ -736,215 +692,6 @@ export function ParameterizationForm() {
             </div>
           </div>
         )}
-
-        {knobLimitError && (
-          <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3">
-            <div className="flex items-start gap-2 text-sm text-destructive">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>{knobLimitError}</span>
-            </div>
-          </div>
-        )} 
-
-        {/* <Card>
-          <CardHeader>
-            <CardTitle className="text-base font-semibold text-foreground">
-              Model Parameters
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-6 sm:grid-cols-2">
-            <ParameterField
-              label="Volatility"
-              description="Controls the magnitude of price fluctuations"
-              tooltip={[
-                "Scales overall price swings.",
-                "1.0 = historical level",
-                "2.0 = twice as volatile",
-              ]}
-              value={parameters.volatility}
-              onChange={(v) => updateParameter("volatility", v)}
-              min={0.5}
-              max={2.0}
-              step={0.01}
-            />
-            <ParameterField
-              label="Trend"
-              description="Market direction bias (-1 bearish, 0 neutral, +1 bullish)"
-              tooltip={[
-                "Sets directional drift (annual % change).",
-                "0 = 0% (neutral)",
-                "±0.25 = ±10% annual",
-                "±0.5 = ±25% annual",
-                "±1.0 = ±50% annual",
-                "Note: extreme values (> 0.7) slightly increase skewness as a side effect.",
-              ]}
-              value={parameters.trend}
-              onChange={(v) => updateParameter("trend", v)}
-              min={-1}
-              max={1}
-              step={0.01}
-            />
-            <ParameterField
-              label="Fat Tails"
-              description="Probability of extreme price movements"
-              tooltip={[
-                "Controls how often extreme price moves occur.",
-                "0.5 = rare extremes (calmer than history)",
-                "1.0 = historical level",
-                "2.0 = twice as likely to see extreme moves",
-              ]}
-              value={parameters.fatTails}
-              onChange={(v) => updateParameter("fatTails", v)}
-              min={0.5}
-              max={2.0}
-              step={0.01}
-            />
-            <ParameterField
-              label="Momentum"
-              description="Volatility momentum / persistence"
-              label="Momentum"
-              description="Volatility persistence — how strongly trends carry forward"
-              tooltip={[
-                "Controls how much past volatility influences the next period.",
-                "0.0 = no persistence (each day is independent)",
-                "0.5 = moderate persistence (historical level)",
-                "0.7 = strong persistence (trends carry forward noticeably)",
-                "1.0 = maximum persistence (highly trending behaviour)",
-              ]}
-              value={parameters.momentum}
-              onChange={(v) => updateParameter("momentum", v)}
-              min={0.0}
-              max={1.0}
-              step={0.01}
-            />
-            <ParameterField
-              label="Time Horizon"
-              description={`Number of trading days to generate. Use longer horizons to clearly observe non-zero trend effects.`}
-              value={parameters.timeHorizon}
-              onChange={(v) => updateParameter("timeHorizon", v)}
-              min={MIN_HORIZON_DAYS}
-              max={MAX_HORIZON_DAYS}
-              step={1}
-            />
-          </CardContent>
-        </Card> */} 
-
-        {/* {activeWarnings.length > 0 && (
-          <div className="rounded-lg border border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 px-4 py-3 space-y-2">
-            <div className="flex items-center gap-2">
-              <TriangleAlert className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
-              <span className="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide">
-                Parameter tradeoffs detected
-              </span>
-            </div>
-            <ul className="space-y-1.5 pl-6 list-disc">
-              {activeWarnings.map((msg) => (
-                <li key={msg} className="text-xs text-amber-800 dark:text-amber-300">
-                  {msg}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base font-semibold text-foreground">
-              Model Parameters
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-6 sm:grid-cols-2">
-            <ParameterField
-              label="Volatility"
-              description="Controls the magnitude of price fluctuations"
-              tooltip={[
-                "Scales overall price swings.",
-                "1.0 = historical level",
-                "2.0 = twice as volatile",
-              ]}
-              value={parameters.volatility}
-              onChange={(v) => updateParameter("volatility", v)}
-              min={0.5}
-              max={2.0}
-              step={0.01}
-            />
-            <ParameterField
-              label="Trend"
-              description="Market direction bias (-1 bearish, 0 neutral, +1 bullish)"
-              tooltip={[
-                "Sets directional drift (annual % change).",
-                "0 = 0% (neutral)",
-                "±0.25 = ±10% annual",
-                "±0.5 = ±25% annual",
-                "±1.0 = ±50% annual",
-                "Note: extreme values (> 0.7) slightly increase skewness as a side effect.",
-              ]}
-              value={parameters.trend}
-              onChange={(v) => updateParameter("trend", v)}
-              min={-1}
-              max={1}
-              step={0.01}
-            />
-            <ParameterField
-              label="Fat Tails"
-              description="Probability of extreme price movements"
-              tooltip={[
-                "Controls how often extreme moves occur.",
-                "1.0 = moderate tail frequency",
-                "2.0 = crash-like tail frequency",
-              ]}
-              value={parameters.fatTails}
-              onChange={(v) => updateParameter("fatTails", v)}
-              min={0.5}
-              max={2.0}
-              step={0.01}
-            />
-            <ParameterField
-              label="Momentum"
-              description="Volatility momentum / persistence"
-              tooltip={[
-                "Controls return persistence.",
-                "0.5 = neutral",
-                "> 0.7 = trending (today predicts tomorrow)",
-                "< 0.3 = mean-reverting",
-                "Note: high values increase tail thickness as a side effect.",
-              ]}
-              value={parameters.momentum}
-              onChange={(v) => updateParameter("momentum", v)}
-              min={0.0}
-              max={1.0}
-              step={0.01}
-            />
-            <ParameterField
-              label="Time Horizon"
-              description={`Number of trading days to generate. Use longer horizons to clearly observe non-zero trend effects.`}
-              value={parameters.timeHorizon}
-              onChange={(v) => updateParameter("timeHorizon", v)}
-              min={MIN_HORIZON_DAYS}
-              max={MAX_HORIZON_DAYS}
-              step={1}
-            />
-          </CardContent>
-        </Card>
-
-        {/* {activeWarnings.length > 0 && (
-          <div className="rounded-lg border border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 px-4 py-3 space-y-2">
-            <div className="flex items-center gap-2">
-              <TriangleAlert className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
-              <span className="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide">
-                Parameter tradeoffs detected
-              </span>
-            </div>
-            <ul className="space-y-1.5 pl-6 list-disc">
-              {activeWarnings.map((msg) => (
-                <li key={msg} className="text-xs text-amber-800 dark:text-amber-300">
-                  {msg}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )} */}
-
       </div>
 
       <div className="lg:block">
