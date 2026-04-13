@@ -96,12 +96,13 @@ describe("VisualizationResults", () => {
     expect(screen.getByTestId("stats-panel")).toBeInTheDocument()
   })
 
-  it("displays fidelity gauge with score", () => {
+  it("displays the top-level metrics summary", () => {
     render(<VisualizationResults data={mockData} />)
     
-    expect(screen.getByText("Fidelity")).toBeInTheDocument()
-    expect(screen.getByText("score")).toBeInTheDocument()
-    expect(screen.getByText("vs. desired")).toBeInTheDocument()
+    expect(screen.getByText("Ann. Return")).toBeInTheDocument()
+    expect(screen.getByText("Ann. Volatility")).toBeInTheDocument()
+    expect(screen.getByText("Sharpe Ratio")).toBeInTheDocument()
+    expect(screen.getByText("Max Drawdown")).toBeInTheDocument()
   })
 
   it("shows dual metric cards with historical and synthetic values", () => {

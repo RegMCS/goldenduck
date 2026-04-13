@@ -70,6 +70,11 @@ export interface SeriesStats {
   std: number
   skewness: number
   kurtosis: number
+  var95?: number
+  hurstMomentum?: number
+  klDivergence?: number
+  // Backward compatibility for older jobs
+  acfLag1?: number
   maxDrawdown: number
   sharpe: number
   annualizedReturn: number
@@ -86,6 +91,48 @@ export interface GeneratedData {
   drawdowns: DrawdownPoint[]
   stats: DataStatistics
   overallMatch?: number
+  selectedScenarioId?: number
+  selectionObjective?: string
+  selectionTarget?: number
+  selectionValue?: number
+  selectionScore?: number
+  selectionBreakdown?: SelectionBreakdown
+  intentFidelity?: number
+  csvSimilarity?: number
+  desiredVolatility?: number
+  volatilityFan?: VolatilityFanPoint[]
+}
+
+export interface SelectionCriterionBreakdown {
+  key: string
+  label: string
+  weight: number
+  score: number
+  target?: number
+  actual?: number
+}
+
+export interface SelectionBreakdown {
+  total: number
+  criteria: SelectionCriterionBreakdown[]
+}
+
+export interface VolatilityFanPoint {
+  date: string
+  timestamp: number
+  historical: number
+  p10: number
+  p50: number
+  p90: number
+}
+
+export interface JobParameters {
+  volatility: number
+  trend: number
+  fatTails: number
+  momentum: number
+  timeHorizon: number
+  fileName: string | null
 }
 
 export const REQUIRED_CSV_HEADERS = ["open", "high", "low", "close", "volume"]

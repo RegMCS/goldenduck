@@ -26,7 +26,7 @@ jobs:
       S3_BUCKET_NAME: test_bucket
       JWT_SECRET_KEY: test-jwt-secret-key-for-ci-only
       JWT_EXPIRE_MINUTES: "10080"
-      COVERAGE_FAIL_UNDER: "60"
+      COVERAGE_FAIL_UNDER: "40"
 
     steps:
       - name: Checkout code

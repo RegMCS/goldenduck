@@ -1,8 +1,9 @@
 "use client"
 
 import Link from "next/link"
+import Image from "next/image"
 import { usePathname, useRouter } from "next/navigation"
-import { Activity, Sun, Moon, History, LogOut, User, BrainCircuit, Sliders, Shield } from "lucide-react"
+import { Activity, Settings, Sun, Moon, History, LogOut, User, BrainCircuit, Sliders, Shield } from "lucide-react"
 import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/components/auth-provider"
@@ -26,12 +27,11 @@ export function Header() {
       <div className="flex h-16 items-center justify-between px-6">
         <div className="flex items-center gap-3">
           <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary shadow-lg shadow-primary/20">
-              <Activity className="h-5 w-5 text-primary-foreground" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl overflow-hidden shadow-lg shadow-primary/20">
+              <Image src="/logo.png" alt="Golden Duck" width={40} height={40} className="object-cover" />
             </div>
             <div>
-              <h1 className="text-lg font-bold text-foreground tracking-tight">SynthMarket</h1>
-              <p className="text-xs text-muted-foreground">Synthetic Data Generator</p>
+              <h1 className="text-lg font-bold text-foreground tracking-tight">Synthetic Market Data Generator</h1>
             </div>
           </Link>
           {/* Nav links */}
