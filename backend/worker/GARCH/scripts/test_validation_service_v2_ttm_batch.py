@@ -15,15 +15,30 @@ from worker.GARCH.services.validation_service_v2 import ValidationServiceV2
 # CONFIG: Set paths and knobs here
 # ============================================
 ORIGINAL_OHLCV_PATH = Path("backend/AAPL.csv")
-SYNTHETIC_OHLCV_PATH = Path("backend/gc_garch_validation/baseline.csv")
+SCENARIO_ID = 1  # Used only if synthetic CSV has scenario_id/path_id
 
-# Knobs used to generate the synthetic data
-USER_KNOBS = {
-    "volatility": 1,  # 0.5 - 2.0
-    "fat_tails": 1,   # 0.5 - 2.0
-    "momentum": 0.5,    # 0.0 - 1.0
-    "trend": 0.0,       # -1.0 - 1.0
-}
+RUNS = [
+    {
+        "name": "high_vol",
+        "synthetic_path": Path("backend/gc_garch_validation/high_momentum.csv"),
+        "user_knobs": {
+            "volatility": 1,
+            "fat_tails": 1,
+            "momentum": 1,
+            "trend": 0,
+        },
+    },
+    {
+        "name": "low_vol",
+        "synthetic_path": Path("backend/gc_garch_validation/low_momentum.csv"),
+        "user_knobs": {
+            "volatility": 1,
+            "fat_tails": 1,
+            "momentum": 0,
+            "trend": 0,
+        },
+    },
+]
 
 
 def _load_ohlcv(path: Path) -> pd.DataFrame:
@@ -31,7 +46,9 @@ def _load_ohlcv(path: Path) -> pd.DataFrame:
         raise FileNotFoundError(f"File not found: {path}")
     df = pd.read_csv(path)
     if "scenario_id" in df.columns:
-        df = df[df["scenario_id"] == 1].copy()
+        df = df[df["scenario_id"] == SCENARIO_ID].copy()
+    elif "path_id" in df.columns:
+        df = df[df["path_id"] == SCENARIO_ID].copy()
     return df
 
 
@@ -107,20 +124,55 @@ def _pretty_print(results: dict) -> None:
     print(f"Overall Match: {_fmt_pct(results['overall_match_pct'])}")
 
 
+def _mean(values: list[float]) -> float:
+    finite_vals = [v for v in values if v == v]
+    if not finite_vals:
+        return float("nan")
+    return sum(finite_vals) / len(finite_vals)
+
+
 def main() -> None:
     original_ohlcv = _load_ohlcv(ORIGINAL_OHLCV_PATH)
-    synthetic_ohlcv = _load_ohlcv(SYNTHETIC_OHLCV_PATH)
-
     validator = ValidationServiceV2(decay_k=3.0)
-    results = validator.validate(
-        original_ohlcv=original_ohlcv,
-        synthetic_ohlcv=synthetic_ohlcv,
-        user_knobs=USER_KNOBS,
-    )
 
-    _pretty_print(results)
-    print("\nRaw JSON\n--------")
-    print(json.dumps(results, indent=2))
+    run_scores = []
+    all_results = {}
+
+    for i, run in enumerate(RUNS, start=1):
+        run_name = run["name"]
+        synthetic_path = run["synthetic_path"]
+        user_knobs = run["user_knobs"]
+
+        synthetic_ohlcv = _load_ohlcv(synthetic_path)
+        results = validator.validate(
+            original_ohlcv=original_ohlcv,
+            synthetic_ohlcv=synthetic_ohlcv,
+            user_knobs=user_knobs,
+        )
+
+        run_scores.append(float(results.get("overall_match_pct", float("nan"))))
+        all_results[run_name] = results
+
+        print(f"\nRun {i}: AAPL.csv vs {synthetic_path.name}")
+        _pretty_print(results)
+        print("\nRaw JSON\n--------")
+        print(json.dumps(results, indent=2))
+
+    average_score = _mean(run_scores)
+    _print_section("Average")
+    print(f"Average Overall Match: {_fmt_pct(average_score)}")
+
+    print("\nAverage JSON\n------------")
+    print(
+        json.dumps(
+            {
+                "runs": [r["name"] for r in RUNS],
+                "overall_match_pct_per_run": run_scores,
+                "average_overall_match_pct": average_score,
+            },
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

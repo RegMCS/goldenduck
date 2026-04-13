@@ -37,6 +37,10 @@ class ValidationServiceV2:
         fat_tail_abs_floor: float = 0.50,
         momentum_abs_floor: float = 0.10,
         trend_abs_floor: float = 0.01,
+        # Momentum target scaling:
+        # target_hurst = hurst_orig + (momentum_knob - 0.5) * momentum_hurst_scale
+        # Example: scale=0.4 => knob extremes move target by +/-0.2 around baseline.
+        momentum_hurst_scale: float = 0.40,
     ) -> None:
         self.decay_rel_weight = float(decay_rel_weight)
         self.decay_k = float(decay_k)
@@ -44,6 +48,7 @@ class ValidationServiceV2:
         self.fat_tail_abs_floor = float(fat_tail_abs_floor)
         self.momentum_abs_floor = float(momentum_abs_floor)
         self.trend_abs_floor = float(trend_abs_floor)
+        self.momentum_hurst_scale = float(momentum_hurst_scale)
 
     def validate(
         self,
@@ -107,12 +112,18 @@ class ValidationServiceV2:
         # so random-walk-like behavior is centered around H ~= 0.5.
         hurst_orig = self._hurst_exponent(orig_log_returns)
         hurst_synth = self._hurst_exponent(synth_log_returns)
-        # Keep knob semantics centered at 0.5:
-        # knob=0.5 -> target = original
-        # knob<0.5 -> move target toward 0.5 (more anti-persistent/random)
-        # knob>0.5 -> amplify distance from 0.5 (more persistent)
-        momentum_scale = momentum_knob / 0.5
-        hurst_target = 0.5 + (hurst_orig - 0.5) * momentum_scale
+        # Momentum target scaling anchored to original Hurst:
+        # - knob = 0.5 keeps baseline (original Hurst)
+        # - knob > 0.5 pushes target upward proportionally
+        # - knob < 0.5 pushes target downward proportionally
+        # Use clip [0,1] because Hurst is bounded.
+        if not np.isfinite(hurst_orig):
+            hurst_target = float("nan")
+        else:
+            base = float(hurst_orig)
+            centered = float(momentum_knob) - 0.5
+            hurst_target = base + centered * self.momentum_hurst_scale
+
         hurst_target = float(np.clip(hurst_target, 0.0, 1.0))
         momentum_match = self._match_hybrid(
             hurst_target,
