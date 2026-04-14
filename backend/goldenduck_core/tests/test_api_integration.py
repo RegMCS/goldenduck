@@ -140,6 +140,47 @@ def test_status_completed_and_download_redirect_flow():
     assert download_response.headers["location"] == "https://example.com/file.csv"
 
 
+def test_download_selected_path_returns_ohlcv_csv():
+    user_id = str(TEST_USER_ID)
+    response = client.post(f"/api/generate/user/{user_id}", json=_generate_payload())
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+
+    job_store.set_status(job_id, "completed")
+    job_store.set_output_file(job_id, "s3://my-bucket/garch/test-job.csv")
+    job_store.set_chart_data(job_id, {"selectedScenarioId": 2})
+
+    csv_payload = (
+        "Open,High,Low,Close,Volume,scenario_id\n"
+        "100,101,99,100.5,1000,1\n"
+        "101,103,100,102.5,1100,2\n"
+        "102,104,101,103.0,1150,2\n"
+    )
+
+    with patch("goldenduck_core.routes.jobs.boto3.client") as mock_boto:
+        mock_s3 = MagicMock()
+        mock_boto.return_value = mock_s3
+        mock_body = MagicMock()
+        mock_body.read.return_value = csv_payload.encode("utf-8")
+        mock_s3.get_object.return_value = {"Body": mock_body}
+
+        selected_download_response = client.get(
+            f"/api/download/user/{user_id}/{job_id}/selected-path"
+        )
+
+    assert selected_download_response.status_code == 200
+    assert selected_download_response.headers["content-type"].startswith("text/csv")
+    assert "selected_path_ohlcv.csv" in selected_download_response.headers.get(
+        "content-disposition", ""
+    )
+
+    rows = [line.strip() for line in selected_download_response.text.strip().splitlines()]
+    assert rows[0] == "Open,High,Low,Close,Volume"
+    assert len(rows) == 3
+    assert rows[1].startswith("101,103,100,102.5,1100")
+    assert rows[2].startswith("102,104,101,103.0,1150")
+
+
 def test_status_returns_403_for_wrong_user():
     owner_user_id = str(TEST_USER_ID)
     other_user_id = str(uuid.uuid4())

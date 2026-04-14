@@ -156,15 +156,21 @@ interface TradeoffRule {
 }
 
 const TRADEOFF_RULES: TradeoffRule[] = [
-  {
-    condition: (p) => p.timeHorizon < MIN_HORIZON_DAYS,
-    message:
-      `A time horizon below ${MIN_HORIZON_DAYS} days reduces the amount of data available for the model to learn from. We'll do our best, but results may be less statistically reliable — a longer horizon will produce more accurate synthetic data.`,
-  },
+  // {
+  //   condition: (p) => p.timeHorizon < MIN_HORIZON_DAYS,
+  //   message:
+  //     `A time horizon below ${MIN_HORIZON_DAYS} days reduces the amount of data available for the model to learn from. We'll do our best, but results may be less statistically reliable — a longer horizon will produce more accurate synthetic data.`,
+  // },
+  // to check
   {
     condition: (p) => p.momentum > 0.7,
     message:
-      "Setting Momentum > 0.7 will also increase tail thickness (kurtosis +1.5 to +2.0) as a natural side effect of return persistence.",
+      "Setting Momentum > 0.7 will increase volatility as a natural side effect of return persistence, though fat tails may simultaneously decrease as extreme random spikes are smoothed out by the persistent trend.",
+  },
+  {
+    condition: (p) => p.momentum < 0.2,
+    message:
+      "Setting Momentum < 0.3 will increase volatility as a natural side effect of frequent return reversals, while also reducing fat tails as the erratic but bounded fluctuations replace the sustained extreme moves that drive excess kurtosis.",
   },
   {
     condition: (p) => p.fatTails > 1.5 && p.momentum > 0.7,
@@ -174,13 +180,13 @@ const TRADEOFF_RULES: TradeoffRule[] = [
   {
     condition: (p) => p.trend > 0.7 || p.trend < -0.7,
     message:
-      "Setting Trend > 0.7 or < −0.7 will also slightly increase skewness as a natural side effect of strong directional drift.",
+      "Setting Trend > 0.7 or < −0.7 will naturally dampen volatility by imposing more structure on the output distribution.",
   },
-  {
-    condition: (p) => Math.abs(p.trend) > 0,
-    message:
-      `Non-zero Trend is easier to observe over longer horizons. Recommended: at least 1000 days (preferably 2000+ days).`,
-  },
+  // {
+  //   condition: (p) => Math.abs(p.trend) > 0,
+  //   message:
+  //     `Non-zero Trend is easier to observe over longer horizons. Recommended: at least 1000 days (preferably 2000+ days).`,
+  // },
 ]
 
 let defaultCsvLoadPromise: Promise<File | null> | null = null
@@ -299,7 +305,7 @@ export function ParameterizationForm() {
   const applyBullRunPreset = () => {
     const presetKnobs: KnobBaseline = {
       volatility: 0.5,
-      trend: 1.0,
+      trend: 0.7,
       fatTails: 0.6,
       momentum: 0.85,
     }
@@ -560,6 +566,24 @@ export function ParameterizationForm() {
             </div>
           </CardContent>
         </Card>
+
+        {activeWarnings.length > 0 && (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 px-4 py-3 space-y-2">
+            <div className="flex items-center gap-2">
+              <TriangleAlert className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+              <span className="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide">
+                Parameter tradeoffs detected
+              </span>
+            </div>
+            <ul className="space-y-1.5 pl-6 list-disc">
+              {activeWarnings.map((msg) => (
+                <li key={msg} className="text-xs text-amber-800 dark:text-amber-300">
+                  {msg}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         
         <Card>
           <CardHeader>
@@ -665,24 +689,6 @@ export function ParameterizationForm() {
             />
           </CardContent>
         </Card>
-
-        {activeWarnings.length > 0 && (
-          <div className="rounded-lg border border-amber-500/40 bg-amber-50/60 dark:bg-amber-950/20 px-4 py-3 space-y-2">
-            <div className="flex items-center gap-2">
-              <TriangleAlert className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
-              <span className="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide">
-                Parameter tradeoffs detected
-              </span>
-            </div>
-            <ul className="space-y-1.5 pl-6 list-disc">
-              {activeWarnings.map((msg) => (
-                <li key={msg} className="text-xs text-amber-800 dark:text-amber-300">
-                  {msg}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
 
         {knobLimitError && (
           <div className="rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3">

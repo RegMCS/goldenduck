@@ -603,12 +603,12 @@ def _target_mean_from_desired_trend(desired_trend: float) -> float:
     return float(annual_drift / 252.0)
 
 
-def _score_bull_run_path(
+def _score_bull_run_path_with_breakdown(
     scenario: pd.DataFrame,
     target_mean: float,
     target_vol: float,
     max_dd_threshold: float = 0.20,
-) -> float:
+) -> tuple[float, list[dict]]:
     """
     Composite score for bull-run preset path selection.
     Hard disqualifiers:
@@ -618,19 +618,19 @@ def _score_bull_run_path(
     close = scenario["Close"].values.astype(float)
     close = np.clip(close, 1e-12, None)
     if len(close) < 2:
-        return float("-inf")
+        return float("-inf"), []
 
     r = np.log(close[1:] / close[:-1])
 
     net_return = (close[-1] - close[0]) / close[0]
     if net_return < 0:
-        return float("-inf")
+        return float("-inf"), []
 
     peak = np.maximum.accumulate(close)
     drawdown = (close - peak) / peak
     max_dd = abs(float(np.min(drawdown)))
     if max_dd > max_dd_threshold:
-        return float("-inf")
+        return float("-inf"), []
 
     mean_r = float(np.mean(r)) if len(r) > 0 else 0.0
     std_r = float(np.std(r, ddof=1)) if len(r) > 1 else 0.0
@@ -644,7 +644,35 @@ def _score_bull_run_path(
     vol_score = float(np.clip(vol_score, 0.0, 1.0))
     dd_score = float(np.clip(dd_score, 0.0, 1.0))
 
-    return float(0.5 * trend_score + 0.3 * dd_score + 0.2 * vol_score)
+    criteria = [
+        {
+            "key": "trend_alignment",
+            "label": "Trend Alignment",
+            "weight": 0.50,
+            "score": trend_score,
+            "target": float(target_mean),
+            "actual": float(mean_r),
+        },
+        {
+            "key": "drawdown_control",
+            "label": "Drawdown Control",
+            "weight": 0.30,
+            "score": dd_score,
+            "target": float(max_dd_threshold),
+            "actual": float(max_dd),
+        },
+        {
+            "key": "volatility_alignment",
+            "label": "Volatility Alignment",
+            "weight": 0.20,
+            "score": vol_score,
+            "target": float(target_vol),
+            "actual": float(std_r),
+        },
+    ]
+
+    total = float(sum(item["weight"] * item["score"] for item in criteria))
+    return total, criteria
 
 
 def _is_valid_flash_crash(
@@ -806,10 +834,19 @@ def _score_flash_crash_path_with_breakdown(
         np.clip(1.0 - abs(recovery_ratio - recovery_target) / recovery_target, 0.0, 1.0)
     )
 
-    crash_returns = r[trigger_start : min(recovery_end, len(r))]
+    # crash_returns = r[trigger_start : min(recovery_end, len(r))]
+    crash_returns = r[trigger_start:trigger_end]
     if len(crash_returns) >= 3:
         skew_val = float(stats.skew(crash_returns, bias=False))
-        skewness_score = 0.0 if skew_val >= 0 else float(min(1.0, abs(skew_val) / 1.5))
+        # skewness_score = 0.0 if skew_val >= 0 else float(min(1.0, abs(skew_val) / 1.5))
+        skew_normaliser = 1.0   
+
+        if skew_val >= 0:
+            skewness_score = 0.0
+        elif abs(skew_val) <= 2.0:
+            skewness_score = min(1.0, abs(skew_val) / skew_normaliser)
+        else:
+            skewness_score = float(np.clip(1.0 - 0.2 * (abs(skew_val) - 2.0), 0.0, 1.0))
     else:
         skew_val = 0.0
         skewness_score = 0.0
@@ -921,8 +958,9 @@ def _select_best_display_scenario(
 
         best_idx = 0
         best_score = float("-inf")
+        best_breakdown: list[dict] = []
         for i, scenario in enumerate(scenarios):
-            score = _score_bull_run_path(
+            score, breakdown = _score_bull_run_path_with_breakdown(
                 scenario=scenario,
                 target_mean=target_mean,
                 target_vol=target_vol,
@@ -931,6 +969,7 @@ def _select_best_display_scenario(
             if score > best_score:
                 best_score = score
                 best_idx = i
+                best_breakdown = breakdown
 
         if not np.isfinite(best_score):
             # No path passed hard filters; keep objective tag but return finite score.
@@ -950,7 +989,7 @@ def _select_best_display_scenario(
             float(best_score),
             {
                 "total": float(best_score),
-                "criteria": [],
+                "criteria": best_breakdown,
             },
         )
 
