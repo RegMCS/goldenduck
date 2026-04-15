@@ -675,6 +675,74 @@ def _score_bull_run_path_with_breakdown(
     return total, criteria
 
 
+def _score_bull_run_path_fallback_breakdown(
+    scenario: pd.DataFrame,
+    target_mean: float,
+    target_vol: float,
+    max_dd_threshold: float = 0.20,
+) -> tuple[float, list[dict]]:
+    """
+    Return a fallback bull-run breakdown even when hard disqualifiers fail.
+
+    This keeps the frontend breakdown visible so the user can see why the path
+    was not a valid bull-run candidate instead of getting an empty section.
+    """
+    close = scenario["Close"].values.astype(float)
+    close = np.clip(close, 1e-12, None)
+    if len(close) < 2:
+        return float("-inf"), []
+
+    r = np.log(close[1:] / close[:-1])
+
+    net_return = (close[-1] - close[0]) / close[0]
+    peak = np.maximum.accumulate(close)
+    drawdown = (close - peak) / peak
+    max_dd = abs(float(np.min(drawdown)))
+    mean_r = float(np.mean(r)) if len(r) > 0 else 0.0
+    std_r = float(np.std(r, ddof=1)) if len(r) > 1 else 0.0
+
+    trend_score = 1.0 - abs(mean_r - target_mean) / (abs(target_mean) + 1e-6)
+    vol_score = 1.0 - abs(std_r - target_vol) / (abs(target_vol) + 1e-6)
+    dd_score = 1.0 - (max_dd / max_dd_threshold)
+
+    trend_score = float(np.clip(trend_score, 0.0, 1.0))
+    vol_score = float(np.clip(vol_score, 0.0, 1.0))
+    dd_score = float(np.clip(dd_score, 0.0, 1.0))
+
+    criteria = [
+        {
+            "key": "trend_alignment",
+            "label": "Trend Alignment",
+            "weight": 0.50,
+            "score": trend_score,
+            "target": float(target_mean),
+            "actual": float(mean_r),
+            "status": "hard_fail" if net_return < 0 else "ok",
+        },
+        {
+            "key": "drawdown_control",
+            "label": "Drawdown Control",
+            "weight": 0.30,
+            "score": dd_score,
+            "target": float(max_dd_threshold),
+            "actual": float(max_dd),
+            "status": "hard_fail" if max_dd > max_dd_threshold else "ok",
+        },
+        {
+            "key": "volatility_alignment",
+            "label": "Volatility Alignment",
+            "weight": 0.20,
+            "score": vol_score,
+            "target": float(target_vol),
+            "actual": float(std_r),
+            "status": "ok",
+        },
+    ]
+
+    total = float(sum(item["weight"] * item["score"] for item in criteria))
+    return total, criteria
+
+
 def _is_valid_flash_crash(
     prices: np.ndarray, crash_start: int, crash_days: int = 5
 ) -> bool:
@@ -972,14 +1040,34 @@ def _select_best_display_scenario(
                 best_breakdown = breakdown
 
         if not np.isfinite(best_score):
-            # No path passed hard filters; keep objective tag but return finite score.
+            # No path passed hard filters; keep the bull-run objective tag but
+            # provide a fallback breakdown for the best available candidate so
+            # the frontend can explain why it failed.
+            fallback_idx = 0
+            fallback_score = float("-inf")
+            fallback_breakdown: list[dict] = []
+            for i, scenario in enumerate(scenarios):
+                score, breakdown = _score_bull_run_path_fallback_breakdown(
+                    scenario=scenario,
+                    target_mean=target_mean,
+                    target_vol=target_vol,
+                    max_dd_threshold=0.20,
+                )
+                if score > fallback_score:
+                    fallback_score = score
+                    fallback_idx = i
+                    fallback_breakdown = breakdown
+
             return (
-                0,
+                fallback_idx,
                 "bull_run_composite",
                 1.0,
-                0.0,
-                0.0,
-                {"total": 0.0, "criteria": []},
+                float(max(fallback_score, 0.0)),
+                float(max(fallback_score, 0.0)),
+                {
+                    "total": float(max(fallback_score, 0.0)),
+                    "criteria": fallback_breakdown,
+                },
             )
         return (
             best_idx,

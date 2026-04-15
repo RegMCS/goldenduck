@@ -169,7 +169,6 @@ export function StatsPanel({ stats }: StatsPanelProps) {
         </div>
         <DivergingRow label="Daily Mean Return [Trend]" historical={h.mean} synthetic={s.mean} fmt={(v) => v.toFixed(4)} />
         <DivergingRow label="Daily Std Dev [Volatility]" historical={h.std} synthetic={s.std} fmt={(v) => v.toFixed(4)} positiveOnly />
-        <DivergingRow label="Skewness" historical={h.skewness} synthetic={s.skewness} fmt={(v) => `${v >= 0 ? "+" : ""}${v.toFixed(4)}`} />
         <DivergingRow label="Excess Kurtosis [Fat Tails]" historical={h.kurtosis} synthetic={s.kurtosis} fmt={(v) => `${v >= 0 ? "+" : ""}${v.toFixed(4)}`} />
         <DivergingRow
           label="Hurst Momentum [Momentum]"
@@ -178,6 +177,7 @@ export function StatsPanel({ stats }: StatsPanelProps) {
           fmt={(v) => v.toFixed(4)}
           positiveOnly
         />
+        <DivergingRow label="Skewness" historical={h.skewness} synthetic={s.skewness} fmt={(v) => `${v >= 0 ? "+" : ""}${v.toFixed(4)}`} />
         <DivergingRow
           label="Daily VaR (95%)"
           historical={hVar95}

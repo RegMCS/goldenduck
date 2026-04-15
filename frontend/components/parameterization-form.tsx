@@ -651,10 +651,10 @@ export function ParameterizationForm() {
               label="Fat Tails"
               description="Probability of extreme price movements"
               tooltip={[
-                "Controls how often extreme price moves occur.",
-                "0.5 = 7.5% decrease in kurtosis",
-                "1.0 = historical level",
-                "2.0 = 15% increase in kurtosis",
+                "Controls tail heaviness (excess kurtosis).",
+                "0.5 = lower kurtosis, fewer extremes",
+                "1.0 = historical kurtosis baseline",
+                "2.0 = higher kurtosis, more extreme moves",
               ]}
               value={parameters.fatTails}
               onChange={(v) => updateParameter("fatTails", v)}
