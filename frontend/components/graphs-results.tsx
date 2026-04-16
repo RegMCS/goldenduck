@@ -282,12 +282,17 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
       ? `${(data.selectionTarget * Math.sqrt(252) * 100).toFixed(2)}%`
       : null
   const presetCompositeScore =
-    (data.selectionObjective === "bull_run_composite" ||
-      data.selectionObjective === "flash_crash_evaluation" ||
+    (data.selectionObjective === "flash_crash_evaluation" ||
       data.selectionObjective === "flash_crash_composite") &&
     typeof data.selectionValue === "number" &&
     Number.isFinite(data.selectionValue)
       ? data.selectionValue.toFixed(3)
+      : null
+  const bullRunCompositeMatch =
+    data.selectionObjective === "bull_run_composite" &&
+    typeof data.selectionValue === "number" &&
+    Number.isFinite(data.selectionValue)
+      ? (1 - data.selectionValue).toFixed(3)
       : null
   const baselineCompositeDistance =
     data.selectionObjective === "baseline_composite_match" &&
@@ -300,8 +305,12 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
       ? data.selectionScore.toFixed(3)
       : baselineCompositeDistance
   const selectionBreakdown = data.selectionBreakdown?.criteria ?? []
+  const isFlashCrashObjective =
+    data.selectionObjective === "flash_crash_evaluation" ||
+    data.selectionObjective === "flash_crash_composite"
   const isWeightedObjective =
     data.selectionObjective === "baseline_composite_match" ||
+    data.selectionObjective === "bull_run_composite" ||
     data.selectionObjective === "volatility_std" ||
     data.selectionObjective === "trend_mean" ||
     data.selectionObjective === "momentum_hurst" ||
@@ -315,6 +324,10 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
     selectionBreakdownTotalValue !== null
       ? (isWeightedObjective ? 1 - selectionBreakdownTotalValue : selectionBreakdownTotalValue).toFixed(3)
       : null
+  const selectionBreakdownGridClass =
+    selectionBreakdown.length === 4
+      ? "grid gap-3 md:grid-cols-2 xl:grid-cols-2"
+      : "grid gap-3 md:grid-cols-2 xl:grid-cols-3"
   const showVolatilityTab = data.desiredVolatility !== 1.0
   const showFatTailsDistributionTab =
     data.selectionObjective === "fat_tails_kurtosis" ||
@@ -324,6 +337,30 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
     : showVolatilityTab || showFatTailsDistributionTab
       ? "max-w-2xl grid-cols-4"
       : "max-w-md grid-cols-3"
+
+  const getFlashCrashRangeContext = (item: { key: string; label: string; actual?: number }) => {
+    if (!isFlashCrashObjective || typeof item.actual !== "number" || !Number.isFinite(item.actual)) {
+      return null
+    }
+
+    if (item.key === "recovery") {
+      const min = 0.5
+      const max = 0.6
+      return {
+        rangeLabel: `target range ${min.toFixed(2)} - ${max.toFixed(2)}`,
+      }
+    }
+
+    if (item.key === "skewness") {
+      const min = -2.0
+      const max = -0.5
+      return {
+        rangeLabel: `valid range ${max.toFixed(2)} to ${min.toFixed(2)}`,
+      }
+    }
+
+    return null
+  }
 
   return (
     <div className="space-y-3">
@@ -340,8 +377,9 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
               ...(fatKurtosisValue !== null ? [`Excess kurtosis: ${fatKurtosisValue}${fatKurtosisTarget !== null ? ` (target ${fatKurtosisTarget})` : ""}`] : []),
               ...(volatilityRatioValue !== null ? [`Roughness ratio: ${volatilityRatioValue}${volatilityRatioTarget !== null ? ` (target ${volatilityRatioTarget})` : ""}`] : []),
               ...(volatilityStdValue !== null ? [`Annualised vol: ${volatilityStdValue}${volatilityStdTarget !== null ? ` (target ${volatilityStdTarget})` : ""}`] : []),
+              ...(bullRunCompositeMatch !== null ? [`Composite match: ${bullRunCompositeMatch}`] : []),
               ...(presetCompositeScore !== null ? [`Composite score: ${presetCompositeScore}`] : []),
-              ...(isWeightedObjective && weightedSelectionScore !== null ? [`Weighted score: ${weightedSelectionScore} — lower means a closer match to your inputs`] : []),
+                ...(isWeightedObjective && weightedSelectionScore !== null && data.selectionObjective !== "bull_run_composite" ? [`Weighted score: ${weightedSelectionScore} — lower means a closer match to your inputs`] : []),
             ]} />
           </div>
           <p className="text-sm font-mono font-bold tabular-nums text-foreground">{selectedPathLabel}</p>
@@ -407,10 +445,11 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
               </div>
             )}
           </div>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <div className={selectionBreakdownGridClass}>
             {selectionBreakdown.map((item) => {
               const displayScore = isWeightedObjective ? 1 - item.score : item.score
               const width = Math.max(0, Math.min(1, displayScore)) * 100
+              const flashCrashRange = getFlashCrashRangeContext(item)
               return (
                 <div key={item.key} className="rounded-lg border border-border/70 bg-background p-4 space-y-2">
                   <div className="flex items-start justify-between gap-3">
@@ -428,7 +467,12 @@ export function VisualizationResults({ data }: VisualizationResultsProps) {
                       style={{ width: `${width}%` }}
                     />
                   </div>
-                  {(typeof item.actual === "number" || typeof item.target === "number") && (
+                  {flashCrashRange ? (
+                    <p className="text-[11px] text-muted-foreground font-mono leading-5">
+                      {typeof item.actual === "number" ? `actual ${item.actual.toFixed(3)}` : ""}
+                      {` · ${flashCrashRange.rangeLabel}`}
+                    </p>
+                  ) : (typeof item.actual === "number" || typeof item.target === "number") && (
                     <p className="text-[11px] text-muted-foreground font-mono leading-5">
                       {typeof item.actual === "number" ? `actual ${item.actual.toFixed(3)}` : ""}
                       {typeof item.actual === "number" && typeof item.target === "number" ? " · " : ""}

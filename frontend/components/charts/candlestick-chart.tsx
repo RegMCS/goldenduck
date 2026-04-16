@@ -3,7 +3,6 @@
 import { useMemo, useCallback, useState } from "react"
 import {
   ComposedChart,
-  Bar,
   Line,
   XAxis,
   YAxis,
@@ -11,8 +10,8 @@ import {
   Tooltip,
   ResponsiveContainer,
   ReferenceLine,
-  Cell,
   Brush,
+  Customized,
 } from "recharts"
 import { MousePointer2 } from "lucide-react"
 import { type OHLCVDataPoint } from "@/lib/types"
@@ -38,15 +37,26 @@ interface CandleData {
   ma: number
 }
 
+interface CustomizedChartScale {
+  scale?: (value: number) => number
+}
+
+interface CustomizedChartProps {
+  xAxisMap?: Record<string, CustomizedChartScale>
+  yAxisMap?: Record<string, CustomizedChartScale>
+}
+
 export function CandlestickChart({
   data,
   title,
   height = 400,
 }: CandlestickChartProps) {
+  const maColor = "#5912a1"
   const defaultPeriod = Math.max(2, Math.round(data.length * 0.05))
   const [showAvg, setShowAvg] = useState(true)
   const [showMA, setShowMA] = useState(true)
   const maPeriod = defaultPeriod
+  const chartHeight = Math.max(Math.round(height * 0.88), 1)
 
   const displayData = useMemo(() => {
     return data.map((d, idx, arr) => {
@@ -136,43 +146,47 @@ export function CandlestickChart({
     []
   )
 
-  const CandleShape = useCallback(
-    (props: { x?: number; y?: number; width?: number; height?: number; payload?: CandleData }) => {
-      const { x = 0, width = 0, payload } = props
-      if (!payload) return null
+  const CandleOverlay = useCallback((props: CustomizedChartProps) => {
+    const xAxis = Object.values(props.xAxisMap ?? {})[0]
+    const yAxis = Object.values(props.yAxisMap ?? {})[0]
+    const scaleX = xAxis?.scale
+    const scaleY = yAxis?.scale
 
-      const { isBullish, open, close, high, low } = payload
-      const fill = isBullish ? "#22c55e" : "#ef4444"
-      const stroke = isBullish ? "#16a34a" : "#dc2626"
+    if (!scaleX || !scaleY) return null
 
-      const priceHeight = height * 0.6
-      const range = maxPrice - minPrice
-      const scale = (v: number) => priceHeight - ((v - minPrice) / range) * priceHeight
-
-      const bodyTop = scale(Math.max(open, close))
-      const bodyBottom = scale(Math.min(open, close))
-      const wickTopY = scale(high)
-      const wickBottomY = scale(low)
-      const bodyH = Math.max(bodyBottom - bodyTop, 1)
-
-      const centerX = x + width / 2
-      const bodyWidth = Math.max(width * 0.7, 2)
+    const candles = displayData.map((entry, index) => {
+      const xCenter = scaleX(entry.idx)
+      const nextX = scaleX(entry.idx + 1)
+      const prevX = scaleX(entry.idx - 1)
+      const spacing = Number.isFinite(nextX - xCenter)
+        ? Math.abs(nextX - xCenter)
+        : Number.isFinite(xCenter - prevX)
+          ? Math.abs(xCenter - prevX)
+          : 6
+      const bodyWidth = Math.max(spacing * 0.55, 2)
+      const fill = entry.isBullish ? "#22c55e" : "#ef4444"
+      const stroke = entry.isBullish ? "#16a34a" : "#dc2626"
+      const bodyTop = scaleY(Math.max(entry.open, entry.close))
+      const bodyBottom = scaleY(Math.min(entry.open, entry.close))
+      const wickTopY = scaleY(entry.high)
+      const wickBottomY = scaleY(entry.low)
+      const bodyHeight = Math.max(bodyBottom - bodyTop, 1)
 
       return (
-        <g>
+        <g key={`candle-${index}`}>
           <line
-            x1={centerX}
+            x1={xCenter}
             y1={wickTopY}
-            x2={centerX}
+            x2={xCenter}
             y2={wickBottomY}
             stroke={stroke}
             strokeWidth={1}
           />
           <rect
-            x={centerX - bodyWidth / 2}
+            x={xCenter - bodyWidth / 2}
             y={bodyTop}
             width={bodyWidth}
-            height={bodyH}
+            height={bodyHeight}
             fill={fill}
             stroke={stroke}
             strokeWidth={0.5}
@@ -180,16 +194,17 @@ export function CandlestickChart({
           />
         </g>
       )
-    },
-    [height, minPrice, maxPrice]
-  )
+    })
+
+    return <g>{candles}</g>
+  }, [displayData])
 
   const firstClose = displayData[0]?.close ?? 0
   const lastClose = displayData[displayData.length - 1]?.close ?? 0
   const totalChange = (((lastClose - firstClose) / firstClose) * 100).toFixed(2)
   const isPositiveTotal = lastClose >= firstClose
 
-  const priceHeight = Math.round(height * 0.88)
+  const priceHeight = chartHeight
 
   return (
     <div className="space-y-4">
@@ -253,13 +268,13 @@ export function CandlestickChart({
               onClick={() => setShowMA((v) => !v)}
               className={`flex items-center gap-2 rounded border px-3 py-1 text-xs font-medium transition-colors ${
                 showMA
-                  ? "border-amber-500/50 bg-amber-50/60 text-amber-700 dark:bg-amber-950/20 dark:text-amber-400"
+                  ? "border-violet-500/60 bg-violet-50/70 text-violet-700 dark:bg-violet-950/20 dark:text-violet-300"
                   : "border-border bg-transparent text-muted-foreground opacity-50"
               }`}
             >
               <span
                 className="inline-block w-5 border-t-2"
-                style={{ borderColor: showMA ? "#f59e0b" : "var(--border)" }}
+                style={{ borderColor: showMA ? maColor : "var(--border)" }}
               />
               Moving Average
             </button>
@@ -343,7 +358,7 @@ export function CandlestickChart({
             <Line
               type="monotone"
               dataKey="ma"
-              stroke="#f59e0b"
+              stroke={maColor}
               strokeWidth={1.5}
               dot={false}
               isAnimationActive={false}
@@ -355,7 +370,7 @@ export function CandlestickChart({
                     x={(props.x ?? 0) + 20}
                     y={props.y ?? 0}
                     textAnchor="end"
-                    fill="#f59e0b"
+                    fill={maColor}
                     fontSize={10}
                     fontWeight={600}
                     dominantBaseline="middle"
@@ -366,16 +381,7 @@ export function CandlestickChart({
               }}
             />
           )}
-          <Bar
-            dataKey="bodyHeight"
-            stackId="candle"
-            shape={<CandleShape />}
-            isAnimationActive={false}
-          >
-            {displayData.map((entry) => (
-              <Cell key={`cell-${entry.idx}`} fill="transparent" />
-            ))}
-          </Bar>
+          <Customized component={CandleOverlay} />
         </ComposedChart>
       </ResponsiveContainer>
       <p className="text-center text-[10px] text-muted-foreground/60 -mt-1">

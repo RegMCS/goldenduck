@@ -19,7 +19,6 @@ import {
 } from "lucide-react"
 import { Header } from "@/components/header"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import {
     Select,
     SelectContent,
@@ -27,7 +26,13 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select"
-import { type JobHistoryItem, type JobHistoryResponse, type JobStatus } from "@/lib/types"
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { type JobHistoryResponse, type JobStatus } from "@/lib/types"
 import { useAuth } from "@/components/auth-provider"
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -395,16 +400,39 @@ export default function ReportsPage() {
                                                             <BarChart3 className="h-3.5 w-3.5" />
                                                             View
                                                         </Link>
-                                                        <a
-                                                            id={`download-btn-${job.id}`}
-                                                            href={`/api/download/user/${userId}/${job.id}`}
-                                                            target="_blank"
-                                                            rel="noreferrer"
-                                                            className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted transition-colors"
-                                                        >
-                                                            <Download className="h-3.5 w-3.5" />
-                                                            Download
-                                                        </a>
+                                                        <DropdownMenu>
+                                                            <DropdownMenuTrigger asChild>
+                                                                <button
+                                                                    type="button"
+                                                                    className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted transition-colors"
+                                                                >
+                                                                    <Download className="h-3.5 w-3.5" />
+                                                                    Download
+                                                                </button>
+                                                            </DropdownMenuTrigger>
+                                                            <DropdownMenuContent align="end" className="w-44">
+                                                                <DropdownMenuItem asChild>
+                                                                    <a
+                                                                        id={`download-selected-btn-${job.id}`}
+                                                                        href={`/api/download/user/${userId}/${job.id}/selected-path`}
+                                                                        target="_blank"
+                                                                        rel="noreferrer"
+                                                                    >
+                                                                        Download Selected
+                                                                    </a>
+                                                                </DropdownMenuItem>
+                                                                <DropdownMenuItem asChild>
+                                                                    <a
+                                                                        id={`download-btn-${job.id}`}
+                                                                        href={`/api/download/user/${userId}/${job.id}`}
+                                                                        target="_blank"
+                                                                        rel="noreferrer"
+                                                                    >
+                                                                        Download All
+                                                                    </a>
+                                                                </DropdownMenuItem>
+                                                            </DropdownMenuContent>
+                                                        </DropdownMenu>
                                                     </div>
                                                 ) : (
                                                     <span className="text-muted-foreground text-xs">—</span>

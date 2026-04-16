@@ -3,13 +3,15 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from pathlib import Path
 from typing import Optional
+from io import StringIO
 
 from goldenduck_core.db.session import get_db
 from goldenduck_core.models.user import User
 from goldenduck_core.models.ai_model_job import AIModelJob
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 import boto3
 import os
+import pandas as pd
 
 from goldenduck_core.services.job_service import create_job
 from goldenduck_core.models.enums import JobStatus
@@ -135,6 +137,88 @@ async def download_results(
         # logger.error/print would be better but keeping it simple
         raise HTTPException(
             status_code=500, detail=f"Failed to generate download URL: {str(e)}"
+        )
+
+
+@router.get("/download/user/{user_id}/{job_id}/selected-path")
+async def download_selected_path_results(
+    user_id: str, job_id: str, current_user: User = Depends(get_current_user)
+):
+    if user_id != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    job = job_store.get_job(job_id)
+    if not job or job["user_id"] != user_id:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    output_file = job_store.get_output_file(job_id)
+    if not output_file:
+        raise HTTPException(status_code=404, detail="File not ready")
+
+    chart_data = job_store.get_chart_data(job_id)
+    selected_scenario_id = chart_data.get("selectedScenarioId")
+    if selected_scenario_id is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Selected scenario not available for this job",
+        )
+
+    if not output_file.startswith("s3://"):
+        raise HTTPException(
+            status_code=500, detail="Invalid S3 URL format stored in DB"
+        )
+
+    parts = output_file.replace("s3://", "").split("/", 1)
+    if len(parts) != 2:
+        raise HTTPException(
+            status_code=500, detail="Invalid S3 URL format stored in DB"
+        )
+    bucket_name, key = parts
+
+    s3_client = boto3.client("s3")
+    try:
+        obj = s3_client.get_object(Bucket=bucket_name, Key=key)
+        csv_bytes = obj["Body"].read()
+        all_df = pd.read_csv(StringIO(csv_bytes.decode("utf-8")))
+
+        if "scenario_id" not in all_df.columns:
+            raise HTTPException(
+                status_code=500,
+                detail="Downloaded results do not contain scenario_id",
+            )
+
+        selected_df = all_df[all_df["scenario_id"] == int(selected_scenario_id)].copy()
+        if selected_df.empty:
+            raise HTTPException(
+                status_code=404,
+                detail="Selected scenario data not found in output file",
+            )
+
+        required_cols = ["Open", "High", "Low", "Close", "Volume"]
+        missing = [col for col in required_cols if col not in selected_df.columns]
+        if missing:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Selected scenario file missing required OHLCV columns: {missing}",
+            )
+
+        selected_ohlcv = selected_df[required_cols]
+        output_buffer = StringIO()
+        selected_ohlcv.to_csv(output_buffer, index=False)
+
+        return Response(
+            content=output_buffer.getvalue(),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f'attachment; filename="{job_id}_selected_path_ohlcv.csv"'
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to prepare selected path download: {str(e)}",
         )
 
 
