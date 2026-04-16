@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { InfoTooltip } from "@/components/info-tooltip"
 import { TimingEstimate } from "@/components/timing-estimate"
+import { ToggleParameter } from "@/components/toggle-parameter"
 import {
   type MarketParameters,
   defaultParameters,
@@ -255,6 +256,7 @@ export function ParameterizationForm() {
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null)
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null)
   const [generateError, setGenerateError] = useState<string | null>(null)
+  const [useSkewShocks, setUseSkewShocks] = useState(true)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -434,6 +436,8 @@ export function ParameterizationForm() {
           desired_trend: parameters.trend,
           desired_fat_tails: parameters.fatTails,
           desired_momentum: parameters.momentum,
+          use_skew_shocks: useSkewShocks,
+          force_skewt_distribution: useSkewShocks,
         }),
       })
 
@@ -495,6 +499,7 @@ export function ParameterizationForm() {
     setJobStatus(null)
     setDownloadUrl(null)
     setGenerateError(null)
+    setUseSkewShocks(true)
     if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
     if (fileInputRef.current) {
       fileInputRef.current.value = ""
@@ -686,6 +691,13 @@ export function ParameterizationForm() {
               min={MIN_HORIZON_DAYS}
               max={MAX_HORIZON_DAYS}
               step={1}
+            />
+            <ToggleParameter
+              label="Skew Shocks"
+              description="Temporarily enable asymmetric return shocks for A/B testing."
+              checked={useSkewShocks}
+              onChange={setUseSkewShocks}
+              className="sm:col-span-2"
             />
           </CardContent>
         </Card>

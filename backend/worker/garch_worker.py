@@ -907,7 +907,7 @@ def _score_flash_crash_path_with_breakdown(
     if len(crash_returns) >= 3:
         skew_val = float(stats.skew(crash_returns, bias=False))
         # skewness_score = 0.0 if skew_val >= 0 else float(min(1.0, abs(skew_val) / 1.5))
-        skew_normaliser = 1.0   
+        skew_normaliser = 1.0
 
         if skew_val >= 0:
             skewness_score = 0.0

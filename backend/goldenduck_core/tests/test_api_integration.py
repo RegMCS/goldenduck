@@ -174,7 +174,9 @@ def test_download_selected_path_returns_ohlcv_csv():
         "content-disposition", ""
     )
 
-    rows = [line.strip() for line in selected_download_response.text.strip().splitlines()]
+    rows = [
+        line.strip() for line in selected_download_response.text.strip().splitlines()
+    ]
     assert rows[0] == "Open,High,Low,Close,Volume"
     assert len(rows) == 3
     assert rows[1].startswith("101,103,100,102.5,1100")
