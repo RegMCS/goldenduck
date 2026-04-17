@@ -7,7 +7,7 @@ from worker.DDPM.scripts.model import ConditionalDenoiser
 from worker.DDPM.utils import get_noise_schedule, q_sample, tail_weighted_loss
 
 CFG_DROP_PROB = 0.10
-EPOCHS        = 300
+EPOCHS        = 150
 PATIENCE      = 20
 BATCH_SIZE    = 32
 LR            = 1e-4
@@ -117,8 +117,8 @@ def train(artefact_dir: str = "artefacts",
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--artefact_dir", default="artefacts")
-    ap.add_argument("--out_dir",      default="checkpoints")
+    ap.add_argument("--artefact_dir", default="worker/DDPM/artefacts")
+    ap.add_argument("--out_dir",      default="worker/DDPM/checkpoints")
     ap.add_argument("--epochs",       type=int, default=EPOCHS)
     ap.add_argument("--device",       default="auto")
     args = ap.parse_args()

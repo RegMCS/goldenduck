@@ -8,6 +8,7 @@ from worker.DDPM.utils import (get_noise_schedule, q_sample, tail_weighted_loss,
                                 load_ohlcv, build_conditioning_matrix,
                                 normalise_windows)
 
+
 FT_EPOCHS   = 80
 FT_PATIENCE = 12
 FT_LR       = 5e-5
@@ -16,10 +17,11 @@ CONTEXT_LEN = 252
 PRED_LEN    = 1260
 
 
+
 def finetune(ohlcv_path: str,
              checkpoint: str,
-             artefact_dir: str = "artefacts",
-             out_dir: str      = "checkpoints",
+             artefact_dir: str = "worker/DDPM/artefacts",
+             out_dir: str      = "worker/DDPM/checkpoints",
              epochs: int       = FT_EPOCHS,
              device_str: str   = "auto"):
 
@@ -39,7 +41,7 @@ def finetune(ohlcv_path: str,
         raise RuntimeError("Not enough data for fine-tuning windows. "
                            "Provide at least 5 years of daily OHLCV data.")
 
-    pred_wins      = pred_wins.squeeze(1)[:, np.newaxis, :]
+    pred_wins         = pred_wins.squeeze(1)[:, np.newaxis, :]
     pred_wins_norm, _ = normalise_windows(pred_wins)
 
     C_raw, C_norm, _ = build_conditioning_matrix(pred_wins)
@@ -49,13 +51,14 @@ def finetune(ohlcv_path: str,
     loader = DataLoader(TensorDataset(X, C),
                         batch_size=FT_BATCH, shuffle=True)
 
-    ckpt     = torch.load(checkpoint, map_location=device)
-    seq_len  = ckpt.get("seq_len",  PRED_LEN)
-    n_assets = ckpt.get("n_assets", 1)
+    # Always use n_assets=1 for single-asset fine-tuning
+    ckpt    = torch.load(checkpoint, map_location=device)
+    seq_len = ckpt.get("seq_len", PRED_LEN)
+    n_assets = 1  # single asset fine-tune
 
     model = ConditionalDenoiser(seq_len=seq_len, in_ch=n_assets, cond_dim=4).to(device)
-    model.load_state_dict(ckpt["model_state_dict"])
-    print(f"Loaded checkpoint: {checkpoint}")
+    # initialise with random weights — stage1 weights are incompatible (7 channels → 1)
+    print(f"Initialised fresh single-asset model (seq_len={seq_len})")
 
     T = 200
     betas, alphas, alpha_bar = get_noise_schedule(T=T, device=str(device))
@@ -109,12 +112,13 @@ def finetune(ohlcv_path: str,
     print(f"Fine-tuned checkpoint saved: {out_path}")
 
 
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--ohlcv_path",   required=True)
     ap.add_argument("--checkpoint",   required=True)
-    ap.add_argument("--artefact_dir", default="artefacts")
-    ap.add_argument("--out_dir",      default="checkpoints")
+    ap.add_argument("--artefact_dir", default="worker/DDPM/artefacts")
+    ap.add_argument("--out_dir",      default="worker/DDPM/checkpoints")
     ap.add_argument("--epochs",       type=int, default=FT_EPOCHS)
     ap.add_argument("--device",       default="auto")
     args = ap.parse_args()

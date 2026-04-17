@@ -4,6 +4,7 @@ import pandas as pd
 import yfinance as yf
 from worker.DDPM.utils import build_conditioning_matrix, normalise_windows
 
+
 TICKERS = ["SPY", "QQQ", "GLD", "USO", "DX-Y.NYB", "EURUSD=X", "BTC-USD"]
 START   = "2019-01-01"
 END     = "2024-12-31"
@@ -70,20 +71,31 @@ def main(out_dir: str = "artefacts"):
     print("Normalising windows ...")
     windows_norm, window_scales_saved = normalise_windows(windows)
 
+    # ── Tiered oversampling ───────────────────────────────────────────────────
     rv_per_window  = C_raw[:, 0]
-    vol_threshold  = np.percentile(rv_per_window, 75)
-    sample_weights = np.where(rv_per_window > vol_threshold, 5.0, 1.0)
-    sample_weights = sample_weights / sample_weights.sum()
+    calm_thresh    = np.percentile(rv_per_window, 50)
+    highvol_thresh = np.percentile(rv_per_window, 80)
 
-    np.save(f"{out_dir}/windows.npy",       windows)
-    np.save(f"{out_dir}/windows_norm.npy",  windows_norm)
-    np.save(f"{out_dir}/window_scales.npy", window_scales_saved)
-    np.save(f"{out_dir}/C_raw.npy",         C_raw)
-    np.save(f"{out_dir}/C_norm.npy",        C_norm)
-    np.save(f"{out_dir}/sample_weights.npy",sample_weights)
-    np.save(f"{out_dir}/cond_norm_min.npy", cond_norm_params["min"])
-    np.save(f"{out_dir}/cond_norm_max.npy", cond_norm_params["max"])
+    sample_weights = np.where(
+        rv_per_window > highvol_thresh, 8.0,
+        np.where(rv_per_window > calm_thresh, 4.0, 1.0)
+    )
+    sample_weights = sample_weights / sample_weights.sum()
+    # ─────────────────────────────────────────────────────────────────────────
+
+    np.save(f"{out_dir}/windows.npy",        windows)
+    np.save(f"{out_dir}/windows_norm.npy",   windows_norm)
+    np.save(f"{out_dir}/window_scales.npy",  window_scales_saved)
+    np.save(f"{out_dir}/C_raw.npy",          C_raw)
+    np.save(f"{out_dir}/C_norm.npy",         C_norm)
+    np.save(f"{out_dir}/sample_weights.npy", sample_weights)
+    np.save(f"{out_dir}/cond_norm_min.npy",  cond_norm_params["min"])
+    np.save(f"{out_dir}/cond_norm_max.npy",  cond_norm_params["max"])
     returns.to_csv(f"{out_dir}/returns.csv")
+
+    # Save daily returns for evaluation plots
+    daily_returns = np.expm1(returns)
+    daily_returns.to_csv(f"{out_dir}/daily_returns.csv")
 
     print(f"Artefacts saved to ./{out_dir}/")
     print(f"  windows        : {windows.shape}")
@@ -94,6 +106,6 @@ def main(out_dir: str = "artefacts"):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--out_dir", default="artefacts")
+    ap.add_argument("--out_dir", default="worker/DDPM/artefacts")
     args = ap.parse_args()
     main(args.out_dir)
