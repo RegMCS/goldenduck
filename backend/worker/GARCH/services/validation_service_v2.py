@@ -154,7 +154,9 @@ class ValidationServiceV2:
         # =========================
         # Overall
         # =========================
-        overall_match = (vol_match + fat_tail_match + momentum_match + trend_match) / 4.0
+        overall_match = (
+            vol_match + fat_tail_match + momentum_match + trend_match
+        ) / 4.0
 
         return {
             "volatility": {

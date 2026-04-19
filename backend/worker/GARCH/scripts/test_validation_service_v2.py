@@ -20,9 +20,9 @@ SYNTHETIC_OHLCV_PATH = Path("backend/gc_garch_validation/baseline.csv")
 # Knobs used to generate the synthetic data
 USER_KNOBS = {
     "volatility": 1,  # 0.5 - 2.0
-    "fat_tails": 1,   # 0.5 - 2.0
-    "momentum": 0.5,    # 0.0 - 1.0
-    "trend": 0.0,       # -1.0 - 1.0
+    "fat_tails": 1,  # 0.5 - 2.0
+    "momentum": 0.5,  # 0.0 - 1.0
+    "trend": 0.0,  # -1.0 - 1.0
 }
 
 
