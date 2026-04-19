@@ -7,6 +7,7 @@ export interface AuthUser {
   username: string
   first_name?: string | null
   last_name?: string | null
+  is_admin?: boolean
 }
 
 interface AuthContextValue {
@@ -44,6 +45,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           username: data.username,
           first_name: data.first_name ?? null,
           last_name: data.last_name ?? null,
+          is_admin: data.is_admin ?? false,
         })
       } else {
         setUser(null)

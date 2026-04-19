@@ -1,11 +1,14 @@
 "use client"
 
 import Link from "next/link"
+import Image from "next/image"
 import { usePathname, useRouter } from "next/navigation"
-import { Activity, Sun, Moon, History, LogOut, User } from "lucide-react"
+import { Activity, Settings, Sun, Moon, History, LogOut, User, BrainCircuit, Sliders, Shield } from "lucide-react"
 import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/components/auth-provider"
+
+
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,12 +27,11 @@ export function Header() {
       <div className="flex h-16 items-center justify-between px-6">
         <div className="flex items-center gap-3">
           <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary shadow-lg shadow-primary/20">
-              <Activity className="h-5 w-5 text-primary-foreground" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl overflow-hidden shadow-lg shadow-primary/20">
+              <Image src="/logo.png" alt="Golden Duck" width={40} height={40} className="object-cover" />
             </div>
             <div>
-              <h1 className="text-lg font-bold text-foreground tracking-tight">SynthMarket</h1>
-              <p className="text-xs text-muted-foreground">Synthetic Data Generator</p>
+              <h1 className="text-lg font-bold text-foreground tracking-tight">Synthetic Market Data Generator</h1>
             </div>
           </Link>
           {/* Nav links */}
@@ -43,7 +45,10 @@ export function Header() {
                 }`}
               asChild
             >
-              <Link href="/">Configure</Link>
+              <Link href="/">
+                <Sliders className="h-4 w-4" />
+                Configure
+              </Link>
             </Button>
             <Button
               variant="ghost"
@@ -60,7 +65,41 @@ export function Header() {
                 Reports
               </Link>
             </Button>
+            {user?.is_admin && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className={`gap-1.5 ${pathname === "/models"
+                  ? "text-foreground font-semibold bg-muted"
+                  : "text-muted-foreground hover:text-foreground"
+                  }`}
+                asChild
+                id="nav-models-link"
+              >
+                <Link href="/models">
+                  <BrainCircuit className="h-4 w-4" />
+                  Models
+                </Link>
+              </Button>
+            )}
+            {user?.is_admin && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className={`gap-1.5 ${pathname === "/admin/users"
+                  ? "text-foreground font-semibold bg-muted"
+                  : "text-muted-foreground hover:text-foreground"
+                  }`}
+                asChild
+              >
+                <Link href="/admin/users">
+                  <Shield className="h-4 w-4" />
+                  Users
+                </Link>
+              </Button>
+            )}
           </nav>
+
         </div>
         <div className="flex items-center gap-1">
           {!loading && (
@@ -74,9 +113,9 @@ export function Header() {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem asChild>
+                    {/* <DropdownMenuItem asChild>
                       <Link href="/profile">Profile</Link>
-                    </DropdownMenuItem>
+                    </DropdownMenuItem> */}
                     <DropdownMenuItem onClick={async () => { await logout(); router.push("/login") }}>
                       <LogOut className="h-4 w-4" />
                       Log out

@@ -19,7 +19,6 @@ import {
 } from "lucide-react"
 import { Header } from "@/components/header"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import {
     Select,
     SelectContent,
@@ -27,7 +26,13 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select"
-import { type JobHistoryItem, type JobHistoryResponse, type JobStatus } from "@/lib/types"
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { type JobHistoryResponse, type JobStatus } from "@/lib/types"
 import { useAuth } from "@/components/auth-provider"
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -195,13 +200,13 @@ export default function ReportsPage() {
                 {user && (
                 <>
                 {/* ── Page Header ── */}
-                <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                     <div>
-                        <div className="flex items-center gap-2 mb-1">
+                        <div className="mb-1 flex items-center gap-2">
                             <Button
                                 variant="ghost"
                                 size="sm"
-                                className="gap-1.5 text-muted-foreground hover:text-foreground -ml-2 h-8"
+                                className="h-8 gap-1.5 -ml-2 text-muted-foreground hover:text-foreground"
                                 asChild
                             >
                                 <Link href="/">
@@ -210,12 +215,19 @@ export default function ReportsPage() {
                                 </Link>
                             </Button>
                         </div>
-                        <h2 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
-                            Generated Reports
-                        </h2>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                            All previously submitted AI model jobs and their results.
-                        </p>
+                        <div className="flex items-center gap-3">
+                            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-primary/10 shadow-sm">
+                                <BarChart3 className="h-5 w-5 text-primary" />
+                            </div>
+                            <div>
+                                <h2 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
+                                    Generated Reports
+                                </h2>
+                                <p className="mt-0.5 text-sm text-muted-foreground">
+                                    All previously submitted AI model jobs and their results.
+                                </p>
+                            </div>
+                        </div>
                     </div>
 
                     <div className="flex items-center gap-2 flex-shrink-0">
@@ -388,16 +400,39 @@ export default function ReportsPage() {
                                                             <BarChart3 className="h-3.5 w-3.5" />
                                                             View
                                                         </Link>
-                                                        <a
-                                                            id={`download-btn-${job.id}`}
-                                                            href={`/api/download/user/${userId}/${job.id}`}
-                                                            target="_blank"
-                                                            rel="noreferrer"
-                                                            className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted transition-colors"
-                                                        >
-                                                            <Download className="h-3.5 w-3.5" />
-                                                            Download
-                                                        </a>
+                                                        <DropdownMenu>
+                                                            <DropdownMenuTrigger asChild>
+                                                                <button
+                                                                    type="button"
+                                                                    className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted transition-colors"
+                                                                >
+                                                                    <Download className="h-3.5 w-3.5" />
+                                                                    Download
+                                                                </button>
+                                                            </DropdownMenuTrigger>
+                                                            <DropdownMenuContent align="end" className="w-44">
+                                                                <DropdownMenuItem asChild>
+                                                                    <a
+                                                                        id={`download-selected-btn-${job.id}`}
+                                                                        href={`/api/download/user/${userId}/${job.id}/selected-path`}
+                                                                        target="_blank"
+                                                                        rel="noreferrer"
+                                                                    >
+                                                                        Download Selected
+                                                                    </a>
+                                                                </DropdownMenuItem>
+                                                                <DropdownMenuItem asChild>
+                                                                    <a
+                                                                        id={`download-btn-${job.id}`}
+                                                                        href={`/api/download/user/${userId}/${job.id}`}
+                                                                        target="_blank"
+                                                                        rel="noreferrer"
+                                                                    >
+                                                                        Download All
+                                                                    </a>
+                                                                </DropdownMenuItem>
+                                                            </DropdownMenuContent>
+                                                        </DropdownMenu>
                                                     </div>
                                                 ) : (
                                                     <span className="text-muted-foreground text-xs">—</span>

@@ -51,6 +51,7 @@ class GARCHFXEngine:
         self,
         horizon: int,
         theta: float = 0.005,
+        theta_sequence: Optional[np.ndarray] = None,
         delta_sequence: Optional[np.ndarray] = None,
         regime_switching: bool = False,
         regime_states: Optional[np.ndarray] = None,
@@ -65,7 +66,9 @@ class GARCHFXEngine:
         horizon : int
             Forecast horizon
         theta : float
-            Stochasticity parameter (scale of Gamma distribution)
+            Base stochasticity parameter (scale of Gamma distribution)
+        theta_sequence : np.ndarray, optional
+                Phase-aware absolute theta values for stress scenarios
         delta_sequence : np.ndarray, optional
             Predetermined delta multipliers (for stress scenarios)
         regime_switching : bool
@@ -86,10 +89,19 @@ class GARCHFXEngine:
         previous_variance = self.initial_volatility**2
 
         for i in range(horizon - 1):
-            # Step 1: Calculate Gamma shape parameter
-            shape = (previous_variance / theta) + 1
+            # Step 1: Determine theta for this step (absolute value or from base)
+            if theta_sequence is not None:
+                theta_step = float(
+                    theta_sequence[i] if i < len(theta_sequence) else theta_sequence[-1]
+                )
+            else:
+                theta_step = float(theta)
+            theta_step = max(theta_step, 1e-8)
 
-            # Step 2: Determine delta for this step
+            # Step 2: Calculate Gamma shape parameter
+            shape = (previous_variance / theta_step) + 1
+
+            # Step 3: Determine delta for this step
             if delta_sequence is not None:
                 delta = (
                     delta_sequence[i] if i < len(delta_sequence) else delta_sequence[-1]
@@ -97,15 +109,17 @@ class GARCHFXEngine:
             elif regime_switching:
                 delta = self._regime_switcher(delta, regime_states, regimes)
 
-            # Step 3: Sample stochastic variance from Gamma distribution
-            stochastic_variance = np.random.gamma(shape=shape, scale=theta, size=1)[0]
+            # Step 4: Sample stochastic variance from Gamma distribution
+            stochastic_variance = np.random.gamma(
+                shape=shape, scale=theta_step, size=1
+            )[0]
 
-            # Step 4: GARCH-FX equation
+            # Step 5: GARCH-FX equation
             forecasted_variance = (self.omega * delta) + (
                 self.persistence * stochastic_variance
             )
 
-            # Step 5: Update for next iteration
+            # Step 6: Update for next iteration
             previous_variance = forecasted_variance
             forecasts.append(np.sqrt(previous_variance))
 
@@ -181,6 +195,7 @@ class GARCHFXEngine:
         distribution: str,
         user_knobs: Optional[Dict] = None,
         historical_returns: Optional[np.ndarray] = None,
+        drift_sequence: Optional[np.ndarray] = None,
     ) -> np.ndarray:
         """
         Generate returns from volatility path with proper trend and momentum control
@@ -203,20 +218,59 @@ class GARCHFXEngine:
 
         if user_knobs is not None:
             # Absolute trend target (not relative to historical drift)
-            # desired_trend=-1 -> -15% annual, 0 -> 0%, +1 -> +15% annual.
-            mu = user_knobs.get("desired_trend", 0.0) * 0.15 / 252
+            # Piecewise annual drift mapping (symmetric for bearish):
+            #  +0.25 -> +10%/yr, +0.50 -> +25%/yr, +1.00 -> +50%/yr.
+            desired_trend = float(user_knobs.get("desired_trend", 0.0))
+            trend_mag = float(np.clip(abs(desired_trend), 0.0, 1.0))
+
+            if trend_mag <= 0.25:
+                annual_drift_mag = 0.40 * trend_mag
+            elif trend_mag <= 0.50:
+                annual_drift_mag = 0.10 + 0.60 * (trend_mag - 0.25)
+            else:
+                annual_drift_mag = 0.25 + 0.50 * (trend_mag - 0.50)
+
+            annual_drift = np.sign(desired_trend) * annual_drift_mag
+            base_mu = annual_drift / 252
         else:
             # Fallback: assume zero drift
-            mu = 0.0
+            base_mu = 0.0
+
+        if drift_sequence is not None:
+            drift_arr = np.asarray(drift_sequence, dtype=float)
+            if len(drift_arr) == 0:
+                mu_sequence = np.full(horizon, float(base_mu), dtype=float)
+            elif len(drift_arr) >= horizon:
+                mu_sequence = drift_arr[:horizon]
+            else:
+                mu_sequence = np.concatenate(
+                    [
+                        drift_arr,
+                        np.full(
+                            horizon - len(drift_arr), float(drift_arr[-1]), dtype=float
+                        ),
+                    ]
+                )
+        else:
+            mu_sequence = np.full(horizon, float(base_mu), dtype=float)
 
         # ============================================================
         # 2. Compute AR(1) coefficient (MOMENTUM)
         # ============================================================
 
         if user_knobs is not None:
-            momentum = user_knobs.get("desired_momentum", 0.5)
-            # Map [0, 1] → [-0.1, 0.3]
-            phi = -0.1 + 0.4 * momentum
+            target_hurst = user_knobs.get("target_hurst")
+            if target_hurst is None:
+                # Legacy fallback if target_hurst was not precomputed upstream.
+                momentum = float(user_knobs.get("desired_momentum", 0.5))
+                target_hurst = float(np.clip(momentum, 0.0, 1.0))
+            else:
+                target_hurst = float(np.clip(float(target_hurst), 0.0, 1.0))
+
+            # Derive AR(1) coefficient from target H:
+            # Approximation around fractional-memory behavior: H ≈ 0.5 + phi/2
+            # => phi ≈ 2H - 1 (clipped for stability)
+            phi = float(np.clip(2.0 * target_hurst - 1.0, -0.95, 0.95))
         else:
             phi = 0.0  # No autocorrelation by default
 
@@ -236,21 +290,24 @@ class GARCHFXEngine:
 
         # First return (no previous return to reference)
         shock_0 = self._generate_shock(distribution, use_skew_shocks=use_skew_shocks)
-        returns[0] = mu + volatility_forecast[0] * shock_0
+        returns[0] = mu_sequence[0] + volatility_forecast[0] * shock_0
 
         # Subsequent returns with AR(1) component
         for t in range(1, horizon):
             # Generate shock (symmetric distribution for unbiased skewness)
             shock = self._generate_shock(distribution, use_skew_shocks=use_skew_shocks)
 
+            mu_t = float(mu_sequence[t])
+            mu_prev = float(mu_sequence[t - 1])
+
             # AR(1) term (creates momentum/autocorrelation)
-            ar_component = phi * (returns[t - 1] - mu)
+            ar_component = phi * (returns[t - 1] - mu_prev)
 
             # Volatility term (GARCH dynamics)
             volatility_component = volatility_forecast[t] * shock
 
             # Combined return: drift + momentum + volatility
-            returns[t] = mu + ar_component + volatility_component
+            returns[t] = mu_t + ar_component + volatility_component
 
         return returns
 

@@ -1,0 +1,19 @@
+ddtrace
+fastapi
+uvicorn
+sqlalchemy
+psycopg2-binary
+black==24.10.0
+pytest
+pytest-cov
+httpx
+arch>=5.3.0              # GARCH model
+numpy>=1.24.0
+pandas>=2.0.0
+scipy>=1.10.0
+yfinance>=0.2.0          # For fetching historical data
+python-multipart          # For file uploads
+redis
+boto3
+bcrypt>=4.0.0
+PyJWT
